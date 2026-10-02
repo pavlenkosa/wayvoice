@@ -62,6 +62,7 @@ jobs:
         run: |
           desktop-file-validate data/io.github.stepan.WayVoice.desktop
           xmllint --noout data/io.github.stepan.WayVoice.metainfo.xml
+          xmllint --noout packaging/io.github.stepan.WayVoice.manage-deps.policy
 
       - name: Build Debian package
         run: ./scripts/build-deb.sh

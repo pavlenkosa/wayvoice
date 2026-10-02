@@ -6,6 +6,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from .deps import describe_missing
+
 
 class AudioRecorder:
     """PipeWire recorder with no Python audio dependencies."""
@@ -22,7 +24,7 @@ class AudioRecorder:
         if self.recording:
             return
         if not shutil.which("pw-record"):
-            raise RuntimeError("pw-record не найден. Установите пакет pipewire-bin.")
+            raise RuntimeError(describe_missing("pipewire"))
 
         fd, name = tempfile.mkstemp(prefix="wayvoice-", suffix=".wav")
         os.close(fd)

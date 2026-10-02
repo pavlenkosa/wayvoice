@@ -9,6 +9,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .deps import describe_missing
+from .i18n import tr
+
 
 class InjectionError(RuntimeError):
     pass
@@ -51,7 +54,7 @@ def _run(cmd, *, env=None, timeout: float = 2.0) -> subprocess.CompletedProcess:
     )
 
 
-def copy_to_clipboard(text: str) -> None:
+def copy_to_clipboard(text: str, language: str | None = None) -> None:
     """Own the Wayland clipboard without blocking on wl-copy's background server.
 
     wl-copy normally forks after acquiring the selection. Waiting on it with a
@@ -59,12 +62,15 @@ def copy_to_clipboard(text: str) -> None:
     open. Running it explicitly in foreground and keeping the process alive in
     the daemon avoids that race and keeps the clipboard available for repeated
     pastes until the next dictation/clipboard owner replaces it.
+
+    ``language`` selects the interface language of the error messages; it comes
+    from the user configuration so that the notification matches the UI.
     """
     global _clipboard_proc
 
     binary = shutil.which("wl-copy")
     if not binary:
-        raise InjectionError("wl-copy не найден. Установите пакет wl-clipboard.")
+        raise InjectionError(describe_missing("wl-clipboard"))
 
     with _clipboard_lock:
         old = _clipboard_proc
@@ -96,7 +102,7 @@ def copy_to_clipboard(text: str) -> None:
                 proc.kill()  # type: ignore[name-defined]
             except Exception:
                 pass
-            raise InjectionError(f"Не удалось открыть буфер Wayland: {exc}") from exc
+            raise InjectionError(tr("injector.clipboard_error", language, error=exc)) from exc
 
         # Give wl-copy a moment to connect and claim the selection. If it has
         # already exited, surface its real error; otherwise it is serving data.
@@ -109,7 +115,7 @@ def copy_to_clipboard(text: str) -> None:
                     detail = proc.stderr.read().strip()
             except Exception:
                 pass
-            raise InjectionError(detail or "Не удалось записать текст в буфер Wayland.")
+            raise InjectionError(detail or tr("injector.clipboard_write", language))
 
         _clipboard_proc = proc
 
@@ -128,9 +134,10 @@ def _ydotool_env() -> dict[str, str]:
     return env
 
 
-def paste_with_ydotool(mode: str) -> tuple[bool, str]:
+def paste_with_ydotool(mode: str, language: str | None = None) -> tuple[bool, str]:
     if not shutil.which("ydotool"):
-        return False, "Автовставка недоступна: ydotool не установлен. Текст оставлен в буфере обмена."
+        detail = describe_missing("ydotool", language)
+        return False, tr("injector.ydotool_missing", language, detail=detail)
 
     env = _ydotool_env()
     if mode == "terminal":
@@ -142,20 +149,21 @@ def paste_with_ydotool(mode: str) -> tuple[bool, str]:
     try:
         cp = _run(["ydotool", "key", *seq], env=env, timeout=1.2)
     except subprocess.TimeoutExpired:
-        return False, "ydotool не ответил. Текст оставлен в буфере обмена."
+        return False, tr("injector.ydotool_timeout", language)
     if cp.returncode != 0:
         detail = cp.stderr.strip().splitlines()
-        short = detail[-1] if detail else "ydotool завершился с ошибкой"
-        return False, f"Автовставка не сработала: {short}. Текст оставлен в буфере обмена."
+        short = detail[-1] if detail else tr("injector.ydotool_failed_generic", language)
+        return False, tr("injector.ydotool_failed", language, reason=short)
     return True, ""
 
 
 def inject(text: str, cfg: dict[str, Any]) -> InjectionResult:
     if not text:
         return InjectionResult(pasted=False)
-    copy_to_clipboard(text)
+    language = cfg.get("ui_language")
+    copy_to_clipboard(text, language)
     mode = str(cfg.get("paste_mode", "standard"))
     if mode == "copy":
         return InjectionResult(pasted=False)
-    pasted, warning = paste_with_ydotool(mode)
+    pasted, warning = paste_with_ydotool(mode, language)
     return InjectionResult(pasted=pasted, warning=warning)

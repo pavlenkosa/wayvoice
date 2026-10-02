@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+
+  <vendor>WayVoice Project</vendor>
+  <vendor_url>https://github.com/stepan-pavlenko/wayvoice</vendor_url>
+  <icon_name>io.github.stepan.WayVoice</icon_name>
+
+  <!--
+    WayVoice can offer to install its own missing system helpers.  That install
+    runs as a package manager binary with root privileges, launched through
+    pkexec, so polkit has to know about it: every manager binary gets its own
+    action, all of them requiring the administrator password.
+
+    Action ids are built on io.github.stepan.WayVoice.manage-deps, one per
+    client binary, because polkit matches org.freedesktop.policykit.exec.path
+    against a single path per action.  Install
+    /usr/share/polkit-1/actions/io.github.stepan.WayVoice.manage-deps.policy
+    for this to take effect; on a non-Debian system copy it to the equivalent
+    directory of the local polkit installation.
+  -->
+
+  <action id="io.github.stepan.WayVoice.manage-deps.apt-get">
+    <description>Install WayVoice system dependencies with apt-get</description>
+    <description xml:lang="ru">Установить системные зависимости WayVoice через apt-get</description>
+    <message>Authentication is required to install the missing system packages WayVoice needs (PipeWire tools, wl-clipboard, libnotify, ydotool).</message>
+    <message xml:lang="ru">Требуется аутентификация администратора, чтобы установить недостающие системные пакеты WayVoice (утилиты PipeWire, wl-clipboard, libnotify, ydotool).</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/bin/apt-get</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+
+  <action id="io.github.stepan.WayVoice.manage-deps.dnf">
+    <description>Install WayVoice system dependencies with dnf</description>
+    <description xml:lang="ru">Установить системные зависимости WayVoice через dnf</description>
+    <message>Authentication is required to install the missing system packages WayVoice needs (PipeWire tools, wl-clipboard, libnotify, ydotool).</message>
+    <message xml:lang="ru">Требуется аутентификация администратора, чтобы установить недостающие системные пакеты WayVoice (утилиты PipeWire, wl-clipboard, libnotify, ydotool).</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/bin/dnf</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+
+  <action id="io.github.stepan.WayVoice.manage-deps.pacman">
+    <description>Install WayVoice system dependencies with pacman</description>
+    <description xml:lang="ru">Установить системные зависимости WayVoice через pacman</description>
+    <message>Authentication is required to install the missing system packages WayVoice needs (PipeWire tools, wl-clipboard, libnotify, ydotool).</message>
+    <message xml:lang="ru">Требуется аутентификация администратора, чтобы установить недостающие системные пакеты WayVoice (утилиты PipeWire, wl-clipboard, libnotify, ydotool).</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/bin/pacman</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+
+  <action id="io.github.stepan.WayVoice.manage-deps.zypper">
+    <description>Install WayVoice system dependencies with zypper</description>
+    <description xml:lang="ru">Установить системные зависимости WayVoice через zypper</description>
+    <message>Authentication is required to install the missing system packages WayVoice needs (PipeWire tools, wl-clipboard, libnotify, ydotool).</message>
+    <message xml:lang="ru">Требуется аутентификация администратора, чтобы установить недостающие системные пакеты WayVoice (утилиты PipeWire, wl-clipboard, libnotify, ydotool).</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/bin/zypper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+
+  <action id="io.github.stepan.WayVoice.manage-deps.apk">
+    <description>Install WayVoice system dependencies with apk</description>
+    <description xml:lang="ru">Установить системные зависимости WayVoice через apk</description>
+    <message>Authentication is required to install the missing system packages WayVoice needs (PipeWire tools, wl-clipboard, libnotify).</message>
+    <message xml:lang="ru">Требуется аутентификация администратора, чтобы установить недостающие системные пакеты WayVoice (утилиты PipeWire, wl-clipboard, libnotify).</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/sbin/apk</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+
+  <action id="io.github.stepan.WayVoice.manage-deps.xbps-install">
+    <description>Install WayVoice system dependencies with xbps-install</description>
+    <description xml:lang="ru">Установить системные зависимости WayVoice через xbps-install</description>
+    <message>Authentication is required to install the missing system packages WayVoice needs (PipeWire tools, wl-clipboard, libnotify).</message>
+    <message xml:lang="ru">Требуется аутентификация администратора, чтобы установить недостающие системные пакеты WayVoice (утилиты PipeWire, wl-clipboard, libnotify).</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/bin/xbps-install</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+
+</policyconfig>

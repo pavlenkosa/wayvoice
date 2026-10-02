@@ -5,6 +5,8 @@ import os
 import platform
 import subprocess
 import sys
+import threading
+import time
 
 import gi
 gi.require_version("Gtk", "4.0")
@@ -12,6 +14,8 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango
 
 from . import __version__
+from . import deps as deps_mod
+from . import pkgsys
 from .cli import request
 from .config import load_config, save_config
 from .engine import ENGINE_LABELS, engine_status, request_faster_setup
@@ -84,6 +88,11 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         self._shortcut_binding = str(self.cfg.get("shortcut", "F8"))
         self._restart_requested = False
         self._ui_busy = False
+        # Rows of the "Dependencies" group, keyed by dependency id. Each entry
+        # is (row, button, spinner) and is refreshed from deps.status_all().
+        self._dep_rows = {}
+        self._dep_installing = set()
+        self._dep_last_refresh = 0.0
         self._install_css()
         self._install_actions()
 
@@ -150,7 +159,14 @@ class WayVoiceWindow(Adw.ApplicationWindow):
             label.add_css_class(css)
         return label
 
-    def _background_start(self):
+    def _apply_desktop_integration(self) -> None:
+        """Run the per-user setup: apply the shortcut and enable the ydotoold
+        unit when ydotool is present.
+
+        It also runs after a dependency has been installed from the settings,
+        because that integration is otherwise applied exactly once, at package
+        installation time.
+        """
         commands = [["systemctl", "--user", "start", "wayvoice.service"]]
         setup_user = setup_user_script()
         if setup_user is None:
@@ -167,6 +183,9 @@ class WayVoiceWindow(Adw.ApplicationWindow):
                 # Desktop integration is optional: never let it break the UI,
                 # but keep the reason visible for bug reports.
                 print(f"WayVoice: failed to start {' '.join(cmd)}: {exc}", file=sys.stderr)
+
+    def _background_start(self):
+        self._apply_desktop_integration()
         return GLib.SOURCE_REMOVE
 
     def _build_home(self):
@@ -355,6 +374,8 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         self.notifications.set_active(bool(self.cfg.get("notify", True)))
         control_group.add(self.notifications)
 
+        self._build_dependencies_group(page)
+
         safety_group = Adw.PreferencesGroup(title=self.t("settings.safety"))
         page.add(safety_group)
         self.timeout = Adw.ComboRow(title=self.t("settings.timeout"), subtitle=self.t("settings.timeout_sub"))
@@ -398,6 +419,147 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         self._update_engine_visibility()
         self._sync_model_ui()
         return scroller
+
+    # ------------------------------------------------------------------
+    # Dependencies group
+    # ------------------------------------------------------------------
+    def _build_dependencies_group(self, page):
+        group = Adw.PreferencesGroup(
+            title=self.t("settings.dependencies"),
+            description=self.t("settings.deps_sub"),
+        )
+        page.add(group)
+        for dep in deps_mod.dependencies():
+            row = Adw.ActionRow(title=dep.label)
+            button = Gtk.Button(label=self.t("settings.install"), valign=Gtk.Align.CENTER)
+            button.connect("clicked", self._install_dependency, dep.id)
+            row.add_suffix(button)
+            spinner = Gtk.Spinner(valign=Gtk.Align.CENTER)
+            spinner.set_visible(False)
+            row.add_suffix(spinner)
+            group.add(row)
+            self._dep_rows[dep.id] = (row, button, spinner)
+        self._refresh_dependency_rows()
+
+    def _refresh_dependency_rows(self, force: bool = False):
+        """Recompute every dependency row from the current PATH state.
+
+        ``_poll_status`` ticks every 650 ms, so the probe is throttled: a full
+        pass costs a handful of PATH lookups and must not repaint the rows on
+        every tick. While an install is running the throttle is bypassed so the
+        spinner state stays correct.
+        """
+        if not force and not self._dep_installing:
+            now = time.monotonic()
+            if now - self._dep_last_refresh < 5.0:
+                return
+            self._dep_last_refresh = now
+        manager = pkgsys.detect_manager()
+        can_install = bool(manager and (not pkgsys.requires_privilege() or pkgsys.pkexec_path()))
+        for row_data in deps_mod.status_all():
+            dep_id = str(row_data["id"])
+            entry = self._dep_rows.get(dep_id)
+            if entry is None:
+                continue
+            row, button, spinner = entry
+            missing = tuple(row_data.get("missing") or ())
+            if not missing:
+                row.set_subtitle(self.t("settings.deps_ok"))
+                button.set_visible(False)
+                spinner.stop()
+                spinner.set_visible(False)
+                continue
+            purpose = self.t(str(row_data.get("purpose_key") or ""))
+            subtitle = self.t("settings.deps_missing", binaries=", ".join(missing), purpose=purpose)
+            if dep_id in self._dep_installing:
+                spinner.start()
+                spinner.set_visible(True)
+                button.set_sensitive(False)
+                subtitle = self.t("settings.installing")
+            else:
+                spinner.stop()
+                spinner.set_visible(False)
+                button.set_sensitive(True)
+                packages = pkgsys.resolve_packages(dep_id, manager)
+                if manager is None:
+                    # No package manager at all: nothing we could run.
+                    button.set_visible(False)
+                    subtitle = self.t("settings.deps_no_manager", programs=dep_id)
+                elif not can_install:
+                    # Manager found but no way to become root (no pkexec).
+                    button.set_visible(False)
+                    subtitle = self.t("settings.deps_manual")
+                elif packages is None:
+                    # The package name for this manager is not known with
+                    # certainty; never invent one.
+                    button.set_visible(False)
+                    subtitle = self.t("settings.deps_no_name")
+                else:
+                    button.set_visible(True)
+            row.set_subtitle(self._clip_subtitle(subtitle))
+
+    @staticmethod
+    def _clip_subtitle(text: str, limit: int = 120) -> str:
+        """Keep a subtitle short so a verbose error cannot break the layout."""
+        flat = " ".join(str(text).split())
+        return flat if len(flat) <= limit else flat[: limit - 1] + "…"
+
+    def _install_dependency(self, _button, dep_id: str):
+        """Explicit user action: install one dependency via the system manager."""
+        if dep_id in self._dep_installing:
+            return
+        dep = deps_mod.get(dep_id)
+        if dep is None:
+            return
+        manager = pkgsys.detect_manager()
+        if manager is None:
+            self._toast(self.t("settings.deps_no_manager", programs=dep_id))
+            return
+        packages = pkgsys.resolve_packages(dep, manager)
+        if packages is None:
+            self._toast(self.t("settings.deps_no_name"))
+            return
+        if pkgsys.requires_privilege() and pkgsys.pkexec_path() is None:
+            self._toast(self.t("settings.deps_manual"))
+            return
+
+        self._dep_installing.add(dep_id)
+        self._refresh_dependency_rows(force=True)
+        # The package manager blocks and pkexec shows an authorization dialog,
+        # so the work runs off the UI thread and the result comes back through
+        # GLib.idle_add, exactly like the daemon's transcription worker.
+        threading.Thread(
+            target=self._install_dependency_worker,
+            args=(dep_id, packages),
+            daemon=True,
+        ).start()
+
+    def _install_dependency_worker(self, dep_id: str, packages: list[str]):
+        try:
+            ok, message = pkgsys.install_packages(packages)
+        except Exception as exc:  # never let a worker kill the process
+            ok, message = False, str(exc)
+        GLib.idle_add(self._install_dependency_done, dep_id, ok, message)
+
+    def _install_dependency_done(self, dep_id: str, ok: bool, message: str):
+        self._dep_installing.discard(dep_id)
+        self._refresh_dependency_rows(force=True)
+        if ok:
+            # Installing a package is not enough on its own: the desktop
+            # integration (global shortcut, ydotoold unit) is applied by
+            # setup-user, which postinst only runs once. Re-run it so a
+            # dependency installed later really starts working.
+            self._apply_desktop_integration()
+            self.toast.add_toast(Adw.Toast(title=self.t("toast.deps_installed")))
+            return GLib.SOURCE_REMOVE
+        row = self._dep_rows.get(dep_id)
+        if row is not None:
+            row[0].set_subtitle(self._clip_subtitle(message))
+        self.toast.add_toast(Adw.Toast(title=self.t("toast.deps_failed"), timeout=6))
+        return GLib.SOURCE_REMOVE
+
+    def _toast(self, text: str, timeout: int = 4):
+        self.toast.add_toast(Adw.Toast(title=self._clip_subtitle(text, 160), timeout=timeout))
 
     @staticmethod
     def _nearest_index(values, value):
@@ -607,6 +769,13 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         if state in {"recording", "busy"}:
             self.mic_button.add_css_class(state)
 
+    def _missing_required(self):
+        """Blocking dependencies that are currently unusable."""
+        return [
+            dep for dep in deps_mod.dependencies()
+            if dep.required and not deps_mod.status_of(dep)["ok"]
+        ]
+
     def _poll_status(self):
         reply = request("status", timeout=0.12)
         self._update_cards()
@@ -674,11 +843,21 @@ class WayVoiceWindow(Adw.ApplicationWindow):
             self.mic_icon.set_from_icon_name("emblem-system-symbolic")
 
         self._set_state_style(state)
+        # Missing blocking dependencies are reported as a warning, below a real
+        # error and above a plain daemon warning, so the priority order stays
+        # error > missing dependency > warning > engine state.
+        missing_deps = self._missing_required()
+        dep_warning = self.t("health.deps_missing", names=", ".join(d.label for d in missing_deps)) if missing_deps else ""
         if error:
             self.health_summary.set_text(self.t("health.error"))
             self.health_detail.set_text(error)
             self.health_detail.remove_css_class("warning-text")
             self.health_detail.add_css_class("error-text")
+        elif dep_warning:
+            self.health_summary.set_text(self.t("health.warning"))
+            self.health_detail.set_text(dep_warning)
+            self.health_detail.remove_css_class("error-text")
+            self.health_detail.add_css_class("warning-text")
         elif warning:
             self.health_summary.set_text(self.t("health.warning"))
             self.health_detail.set_text(warning)
@@ -689,6 +868,9 @@ class WayVoiceWindow(Adw.ApplicationWindow):
             self.health_detail.set_text("" if est == "ready" else str(engine.get("message") or ""))
             self.health_detail.remove_css_class("error-text")
             self.health_detail.remove_css_class("warning-text")
+
+        if self._dep_rows:
+            self._refresh_dependency_rows()
 
         if text:
             self.last_text.remove_css_class("muted")
@@ -729,6 +911,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         status = request("status", timeout=0.35)
         cfg = load_config()
         engine = status.get("engine") if isinstance(status, dict) else {}
+        manager = pkgsys.detect_manager() or "not detected"
         lines = [
             f"WayVoice {__version__}",
             f"OS: {platform.platform()}",
@@ -747,6 +930,16 @@ class WayVoiceWindow(Adw.ApplicationWindow):
             lines.append(f"Last error: {status.get('last_error')}")
         if isinstance(status, dict) and status.get("last_warning"):
             lines.append(f"Last warning: {status.get('last_warning')}")
+        # The whole block is deliberately plain English: it is pasted into bug
+        # reports, where the existing OS/Python/Engine lines set the format.
+        lines.append(f"Package manager: {manager}")
+        lines.append("Dependencies:")
+        for row in deps_mod.status_all():
+            missing = tuple(row.get("missing") or ())
+            detail = ", ".join(missing) if missing else str(row.get("binary_path") or "")
+            label = f"{row.get('label')}{' (required)' if row.get('required') else ''}"
+            status = "missing" if missing else "found"
+            lines.append(f"  {label}: {status} ({detail or '-'})")
         return "\n".join(lines)
 
     def _copy_diagnostics(self, *_args):
