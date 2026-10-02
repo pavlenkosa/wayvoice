@@ -4,5 +4,8 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-Environment=PYTHONPATH=/usr/lib/wayvoice/app/src
-ExecStart=/usr/bin/python3 -m wayvoice.engine_setup
+# wayvoice-engine-setup is the same portable wrapper as the other helpers: it
+# locates the Python sources relative to itself and picks the interpreter, so
+# neither PYTHONPATH nor a hardcoded interpreter path is needed here.
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/bin/sh -c 'exec wayvoice-engine-setup'

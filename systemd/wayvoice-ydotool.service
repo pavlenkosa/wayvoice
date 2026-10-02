@@ -2,11 +2,15 @@
 Description=WayVoice ydotool virtual keyboard
 After=graphical-session.target
 PartOf=graphical-session.target
-ConditionPathExists=/usr/bin/ydotoold
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/ydotoold --socket-path=%t/wayvoice-ydotool.sock --socket-perm=0600
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+# Skip (do not fail) when ydotoold is not installed: ydotool may be added
+# later, and auto-paste degrades to the clipboard. A PATH lookup keeps this
+# independent of the installation prefix, unlike ConditionPathExists.
+ExecCondition=/bin/sh -c 'command -v ydotoold >/dev/null'
+ExecStart=/bin/sh -c 'exec ydotoold --socket-path=%t/wayvoice-ydotool.sock --socket-perm=0600'
 Restart=on-failure
 RestartSec=2
 

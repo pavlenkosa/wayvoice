@@ -5,7 +5,11 @@ PartOf=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/wayvoice-daemon
+# A unit does not inherit the user's login PATH, so spell it out: this is what
+# makes a bare "wayvoice-daemon" resolve regardless of the installation prefix
+# (/usr, /usr/local, /opt, ...).
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/bin/sh -c 'exec wayvoice-daemon'
 Restart=on-failure
 RestartSec=2
 

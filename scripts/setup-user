@@ -1,7 +1,27 @@
 #!/bin/sh
 set -eu
+# Resolve the WayVoice CLI next to this script first, then via PATH, so the
+# script works from a source checkout and from any installation prefix.
+self="$0"
+while [ -L "$self" ]; do
+    link="$(readlink "$self")"
+    case "$link" in
+        /*) self="$link" ;;
+        *) self="$(dirname "$self")/$link" ;;
+    esac
+done
+bindir="$(cd "$(dirname "$self")" && pwd)"
+
+if [ -x "$bindir/wayvoice" ]; then
+    wayvoice_cmd="$bindir/wayvoice"
+elif [ -n "${WAYVOICE_BINDIR:-}" ] && [ -x "$WAYVOICE_BINDIR/wayvoice" ]; then
+    wayvoice_cmd="$WAYVOICE_BINDIR/wayvoice"
+else
+    wayvoice_cmd="wayvoice"
+fi
+
 # Apply the shortcut stored in the user's WayVoice config (F8 by default).
-/usr/bin/wayvoice apply-shortcut >/dev/null 2>&1 || true
+"$wayvoice_cmd" apply-shortcut >/dev/null 2>&1 || true
 
 # ydotool may be installed later from backports.
 if command -v ydotoold >/dev/null 2>&1; then

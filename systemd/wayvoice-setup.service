@@ -4,7 +4,11 @@ After=graphical-session.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/lib/wayvoice/setup-user
+# setup-user is installed next to the other entry points (see
+# scripts/build-deb.sh), so it is reachable through PATH and this unit stays
+# independent of the installation prefix.
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/bin/sh -c 'exec setup-user'
 
 [Install]
 WantedBy=default.target

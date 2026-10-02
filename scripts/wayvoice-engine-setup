@@ -1,9 +1,9 @@
 #!/bin/sh
-# Entry point for the WayVoice background daemon.
+# Entry point that prepares the Faster-Whisper engine (venv + pip install).
 #
-# The directory holding the Python sources is derived from the location of
-# this script, so the same file works from a source checkout (<repo>/scripts)
-# and from the Debian package (<prefix>/bin -> <prefix>/lib/wayvoice/app/src).
+# Started by wayvoice-engine-setup.service; resolves the Python sources the
+# same way as the other wrappers, so it works both from a source checkout and
+# from the Debian package.
 set -eu
 
 self="$0"
@@ -25,11 +25,11 @@ for candidate in "$bindir/../lib/wayvoice/app/src" "$bindir/../app/src"; do
 done
 
 if [ -z "${wayvoice_src:-}" ]; then
-    echo "wayvoice-daemon: cannot find the wayvoice Python package near $bindir" >&2
-    echo "wayvoice-daemon: expected <prefix>/lib/wayvoice/app/src or <repo>/app/src" >&2
+    echo "wayvoice-engine-setup: cannot find the wayvoice Python package near $bindir" >&2
+    echo "wayvoice-engine-setup: expected <prefix>/lib/wayvoice/app/src or <repo>/app/src" >&2
     exit 1
 fi
 
 PYTHONPATH="$wayvoice_src${PYTHONPATH:+:$PYTHONPATH}"
 export PYTHONPATH
-exec "${WAYVOICE_PYTHON:-python3}" -m wayvoice.daemon "$@"
+exec "${WAYVOICE_PYTHON:-python3}" -m wayvoice.engine_setup "$@"

@@ -12,6 +12,7 @@ from threading import Event
 from typing import Any
 
 from .models import forced_language
+from .paths import script_path
 from .postprocess import normalize
 
 ENGINE_LABELS = {
@@ -202,7 +203,7 @@ def _transcribe_faster(audio: Path, cfg: dict[str, Any], cancel_event: Event | N
     runtime_python = faster_runtime() / "bin/python"
     if not runtime_python.exists():
         raise RuntimeError("Faster-Whisper is not ready")
-    runner = "/usr/lib/wayvoice/app/src/wayvoice/fw_runner.py"
+    runner = str(script_path("fw_runner.py"))
     args = [
         str(runtime_python), runner,
         "--audio", str(audio),

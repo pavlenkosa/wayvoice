@@ -1,4 +1,35 @@
 #!/bin/sh
+# Entry point for the WayVoice command line interface.
+#
+# The directory holding the Python sources is derived from the location of
+# this script, so the same file works from a source checkout (<repo>/scripts)
+# and from the Debian package (<prefix>/bin -> <prefix>/lib/wayvoice/app/src).
 set -eu
-export PYTHONPATH="/usr/lib/wayvoice/app/src${PYTHONPATH:+:$PYTHONPATH}"
-exec /usr/bin/python3 -m wayvoice.cli "$@"
+
+self="$0"
+# Resolve symlinks so that a symlinked wrapper still finds its own layout.
+while [ -L "$self" ]; do
+    link="$(readlink "$self")"
+    case "$link" in
+        /*) self="$link" ;;
+        *) self="$(dirname "$self")/$link" ;;
+    esac
+done
+bindir="$(cd "$(dirname "$self")" && pwd)"
+
+for candidate in "$bindir/../lib/wayvoice/app/src" "$bindir/../app/src"; do
+    if [ -d "$candidate/wayvoice" ]; then
+        wayvoice_src="$(cd "$candidate" && pwd)"
+        break
+    fi
+done
+
+if [ -z "${wayvoice_src:-}" ]; then
+    echo "wayvoice: cannot find the wayvoice Python package near $bindir" >&2
+    echo "wayvoice: expected <prefix>/lib/wayvoice/app/src or <repo>/app/src" >&2
+    exit 1
+fi
+
+PYTHONPATH="$wayvoice_src${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH
+exec "${WAYVOICE_PYTHON:-python3}" -m wayvoice.cli "$@"

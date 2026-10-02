@@ -121,6 +121,9 @@ def _ydotool_env() -> dict[str, str]:
     if custom.exists():
         env["YDOTOOL_SOCKET"] = str(custom)
     elif "YDOTOOL_SOCKET" not in env and Path("/tmp/.ydotool_socket").exists():
+        # ydotool 0.1.8 hardcodes its default socket path instead of honouring
+        # XDG_RUNTIME_DIR, so this literal is an intentional fallback for that
+        # version and not a hardcoded installation prefix.
         env["YDOTOOL_SOCKET"] = "/tmp/.ydotool_socket"
     return env
 

@@ -1,0 +1,122 @@
+"""Installation-layout helpers.
+
+The project is shipped in two shapes:
+
+* a Debian package, where the Python sources live in
+  ``<prefix>/lib/wayvoice/app/src/wayvoice`` and the helpers in ``<prefix>/bin``;
+* a plain source checkout, where the sources live in
+  ``<repo>/app/src/wayvoice`` and the helpers in ``<repo>/scripts``.
+
+Everything here is derived from the location of this very module, so both
+shapes (and prefixes other than ``/usr``, e.g. ``/usr/local`` or ``/opt``)
+work without any hardcoded absolute path.  Only the standard library is used
+and no ``sys.path`` manipulation happens here.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import sys
+from pathlib import Path
+
+
+def app_dir() -> Path:
+    """Return the root of the ``app`` directory that holds the sources.
+
+    ``<root>/app`` in a source checkout, ``<prefix>/lib/wayvoice/app`` in the
+    Debian package.
+    """
+    return Path(__file__).resolve().parents[2]
+
+
+def app_src_dir() -> Path:
+    """Return the import root for the ``wayvoice`` package (``.../src``)."""
+    return app_dir() / "src"
+
+
+def package_dir() -> Path:
+    """Return the directory containing the ``wayvoice`` package modules."""
+    return app_src_dir() / "wayvoice"
+
+
+def script_path(name: str) -> Path:
+    """Return the absolute path of a helper script shipped inside the package.
+
+    Used for bundled scripts such as ``fw_runner.py``, which is executed by
+    the runtime interpreter of the engine rather than by the system Python.
+    """
+    return package_dir() / name
+
+
+def setup_user_script() -> Path | None:
+    """Return the ``setup-user`` helper script, or ``None`` when not found.
+
+    Probed locations, in order:
+
+    1. next to the ``app`` directory -- layouts that keep the helper with the
+       sources, e.g. ``<prefix>/lib/wayvoice/setup-user``;
+    2. ``<repo>/scripts/setup-user`` -- source checkout;
+    3. ``PATH`` -- the packaged location, where the helper is installed into
+       ``<prefix>/bin`` next to the other WayVoice entry points.
+    """
+    root = app_dir().parent
+    for candidate in (root / "setup-user", root / "scripts" / "setup-user"):
+        if candidate.is_file():
+            return candidate
+    found = shutil.which("setup-user")
+    return Path(found) if found else None
+
+
+def _is_executable_file(path: Path) -> bool:
+    """Return ``True`` when ``path`` is an existing regular executable file."""
+    return path.is_file() and os.access(path, os.X_OK)
+
+
+def command_path(name: str) -> str:
+    """Resolve a WayVoice helper command to an absolute path.
+
+    Used for commands that are launched without a shell and without a
+    controlled ``PATH`` (GSettings keybindings, desktop entries), so a bare
+    name is not good enough there.
+
+    Resolution order:
+
+    1. ``WAYVOICE_BINDIR`` -- directory holding the helper scripts;
+    2. the regular ``PATH`` lookup;
+    3. the directory of the currently running script (``sys.argv[0]``);
+    4. the bare name, as a last resort for callers that do have a ``PATH``.
+    """
+    bindir = os.environ.get("WAYVOICE_BINDIR")
+    if bindir:
+        candidate = Path(bindir) / name
+        if _is_executable_file(candidate):
+            return str(candidate)
+
+    found = shutil.which(name)
+    if found:
+        return found
+
+    try:
+        sibling = Path(sys.argv[0]).resolve().parent / name
+    except (OSError, ValueError):
+        sibling = None
+    if sibling is not None and _is_executable_file(sibling):
+        return str(sibling)
+
+    return name
+
+
+def python_executable() -> str:
+    """Return the interpreter to use for bundled Python code.
+
+    ``WAYVOICE_PYTHON`` wins, then ``python3`` from ``PATH``, and finally the
+    interpreter that is running right now.
+    """
+    override = os.environ.get("WAYVOICE_PYTHON")
+    if override:
+        return override
+    found = shutil.which("python3")
+    if found:
+        return found
+    return sys.executable

@@ -17,6 +17,7 @@ from .config import load_config, save_config
 from .engine import ENGINE_LABELS, engine_status, request_faster_setup
 from .i18n import resolve_language, tr
 from .models import MODEL_PRESETS, PRESET_LABELS, display_name, forced_language, preset_index, preset_subtitle
+from .paths import command_path, setup_user_script
 from .shortcut import apply_shortcut, label_for
 
 ENGINE_IDS = ["faster-whisper", "whisper-cpp"]
@@ -150,11 +151,22 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         return label
 
     def _background_start(self):
-        for cmd in (["systemctl", "--user", "start", "wayvoice.service"], ["/usr/lib/wayvoice/setup-user"]):
+        commands = [["systemctl", "--user", "start", "wayvoice.service"]]
+        setup_user = setup_user_script()
+        if setup_user is None:
+            print(
+                "WayVoice: setup-user script not found; skipping desktop integration.",
+                file=sys.stderr,
+            )
+        else:
+            commands.append([str(setup_user)])
+        for cmd in commands:
             try:
                 subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except Exception:
-                pass
+            except Exception as exc:
+                # Desktop integration is optional: never let it break the UI,
+                # but keep the reason visible for bug reports.
+                print(f"WayVoice: failed to start {' '.join(cmd)}: {exc}", file=sys.stderr)
         return GLib.SOURCE_REMOVE
 
     def _build_home(self):
@@ -546,7 +558,14 @@ class WayVoiceWindow(Adw.ApplicationWindow):
             if st.get("state") in {"missing", "error"}:
                 request_faster_setup()
         if new_ui_setting != self.ui_lang_setting:
-            subprocess.Popen(["/bin/sh", "-lc", "sleep 0.35; exec /usr/bin/wayvoice-settings"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            # Restart the UI so that the new interface language is applied.
+            # The settings binary path is resolved explicitly and passed as
+            # $0, so the restart never depends on a login-shell PATH.
+            restart_cmd = command_path("wayvoice-settings")
+            subprocess.Popen(
+                ["/bin/sh", "-c", 'sleep 0.35; exec "$0"', restart_cmd],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
+            )
             app = self.get_application()
             if app:
                 app.quit()

@@ -51,6 +51,7 @@ jobs:
             scripts/wayvoice \
             scripts/wayvoice-daemon \
             scripts/wayvoice-settings \
+            scripts/wayvoice-engine-setup \
             scripts/setup-user \
             scripts/build-deb.sh \
             packaging/DEBIAN/postinst \

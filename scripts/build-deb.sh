@@ -23,8 +23,11 @@ mkdir -p \
   "$DIST"
 
 cp -a "$ROOT/app/." "$PKG/usr/lib/wayvoice/app/"
-cp "$ROOT/scripts/wayvoice" "$ROOT/scripts/wayvoice-daemon" "$ROOT/scripts/wayvoice-settings" "$PKG/usr/bin/"
-cp "$ROOT/scripts/setup-user" "$PKG/usr/lib/wayvoice/setup-user"
+# All entry points, including setup-user, live in <prefix>/bin and locate the
+# Python sources relative to themselves, so nothing in the package (or in
+# wayvoice-setup.service) depends on the installation prefix.
+cp "$ROOT/scripts/wayvoice" "$ROOT/scripts/wayvoice-daemon" "$ROOT/scripts/wayvoice-settings" "$ROOT/scripts/wayvoice-engine-setup" "$PKG/usr/bin/"
+cp "$ROOT/scripts/setup-user" "$PKG/usr/bin/setup-user"
 cp "$ROOT/systemd/"*.service "$PKG/usr/lib/systemd/user/"
 cp "$ROOT/data/80-wayvoice-uinput.rules" "$PKG/usr/lib/udev/rules.d/80-wayvoice-uinput.rules"
 cp "$ROOT/data/io.github.stepan.WayVoice.desktop" "$PKG/usr/share/applications/"
@@ -53,7 +56,7 @@ EOF
 chmod 0755 "$PKG/DEBIAN"
 chmod g-s "$PKG/DEBIAN"
 chmod 0755 "$PKG/DEBIAN/postinst" "$PKG/DEBIAN/postrm" "$PKG/DEBIAN/prerm"
-chmod 0755 "$PKG/usr/bin/wayvoice" "$PKG/usr/bin/wayvoice-daemon" "$PKG/usr/bin/wayvoice-settings" "$PKG/usr/lib/wayvoice/setup-user"
+chmod 0755 "$PKG/usr/bin/wayvoice" "$PKG/usr/bin/wayvoice-daemon" "$PKG/usr/bin/wayvoice-settings" "$PKG/usr/bin/wayvoice-engine-setup" "$PKG/usr/bin/setup-user"
 find "$PKG/usr/lib/wayvoice/app" -type d -name __pycache__ -prune -exec rm -rf {} +
 (cd "$PKG" && find usr -type f -print0 | sort -z | xargs -0 -r md5sum) > "$PKG/DEBIAN/md5sums"
 
