@@ -8,32 +8,119 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release:
+    name: Build & publish GitHub Release
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout tagged source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Test
+
+      - name: Install validation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            shellcheck desktop-file-utils libxml2-utils
+
+      - name: Verify tag matches project version
+        id: version
+        shell: bash
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PROJECT_VERSION="$(python scripts/check-version.py "$TAG_VERSION")"
+          echo "version=$PROJECT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Release version: $PROJECT_VERSION"
+
+      - name: Python syntax
+        run: python -m compileall -q app/src tests scripts/check-version.py
+
+      - name: Unit tests
         env:
           PYTHONPATH: app/src
         run: python -m unittest discover -s tests -v
-      - name: Build
-        run: ./scripts/build-deb.sh
-      - name: Source archive
+
+      - name: Shellcheck
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          git archive --format=zip --output="dist/wayvoice-${VERSION}-source.zip" HEAD
-          sha256sum "dist/wayvoice-${VERSION}-source.zip" >> "dist/SHA256SUMS"
-          sha256sum dist/*.deb >> "dist/SHA256SUMS"
+          shellcheck \
+            scripts/wayvoice \
+            scripts/wayvoice-daemon \
+            scripts/wayvoice-settings \
+            scripts/setup-user \
+            scripts/build-deb.sh \
+            packaging/DEBIAN/postinst \
+            packaging/DEBIAN/postrm \
+            packaging/DEBIAN/prerm
+
+      - name: Validate desktop metadata
+        run: |
+          desktop-file-validate data/io.github.stepan.WayVoice.desktop
+          xmllint --noout data/io.github.stepan.WayVoice.metainfo.xml
+
+      - name: Build Debian package
+        run: ./scripts/build-deb.sh
+
+      - name: Verify package version
+        shell: bash
+        run: |
+          DEB="$(find dist -maxdepth 1 -name '*.deb' -print -quit)"
+          test -n "$DEB"
+          PACKAGE_VERSION="$(dpkg-deb -f "$DEB" Version)"
+          test "$PACKAGE_VERSION" = "${{ steps.version.outputs.version }}"
+          dpkg-deb --info "$DEB"
+          dpkg-deb --contents "$DEB" > /dev/null
+
+      - name: Create source archive and checksums
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          git archive \
+            --format=zip \
+            --prefix="wayvoice-${VERSION}/" \
+            --output="dist/wayvoice-${VERSION}-source.zip" \
+            HEAD
+
+          (
+            cd dist
+            sha256sum \
+              *.deb \
+              wayvoice-${VERSION}-source.zip \
+              > SHA256SUMS
+          )
+
+      - name: Upload release build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wayvoice-${{ steps.version.outputs.version }}-release
+          path: |
+            dist/*.deb
+            dist/*.deb.sha256
+            dist/*-source.zip
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          name: WayVoice ${{ steps.version.outputs.version }}
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
             dist/*.deb
-            dist/*.sha256
+            dist/*.deb.sha256
             dist/*-source.zip
             dist/SHA256SUMS
+          fail_on_unmatched_files: true

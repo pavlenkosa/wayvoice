@@ -118,9 +118,29 @@ tests/                unit tests
 
 ## Release flow
 
-1. Update `CHANGELOG.md` and the version in `app/src/wayvoice/__init__.py`.
-2. Push a tag such as `v0.5.0`.
-3. GitHub Actions runs tests, builds the `.deb`, creates SHA-256 sums and attaches artifacts to the GitHub Release.
+Every push to `main` and every pull request runs CI, executes the test suite, validates the desktop/AppStream metadata, builds a Debian package, and publishes the resulting `.deb` as a GitHub Actions artifact.
+
+Official releases are tag-driven:
+
+1. Update the project version in `app/src/wayvoice/__init__.py`, `app/pyproject.toml`, and the newest AppStream release entry.
+2. Update `CHANGELOG.md`.
+3. Verify locally with `make version-check && make test && make deb`.
+4. Commit and push the changes.
+5. Create and push a matching tag, for example:
+
+```bash
+git tag v0.5.0
+git push origin v0.5.0
+```
+
+The Release workflow refuses to publish when the Git tag and project version differ. A successful tagged build creates a GitHub Release and attaches:
+
+- `wayvoice_<version>_all.deb`
+- the per-package SHA-256 file
+- `wayvoice-<version>-source.zip`
+- `SHA256SUMS`
+
+GitHub-generated release notes are grouped by feature, fix, UI/UX, localization, maintenance, and other changes.
 
 ## Contributing
 
