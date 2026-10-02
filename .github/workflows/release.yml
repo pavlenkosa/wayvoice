@@ -4,12 +4,18 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish, e.g. 0.5.0'
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.ref }}-${{ inputs.version || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -19,7 +25,7 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - name: Checkout tagged source
+      - name: Checkout source
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -35,14 +41,24 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             shellcheck desktop-file-utils libxml2-utils
 
-      - name: Verify tag matches project version
+      - name: Resolve and verify release version
         id: version
         shell: bash
+        env:
+          MANUAL_VERSION: ${{ inputs.version }}
         run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
-          PROJECT_VERSION="$(python scripts/check-version.py "$TAG_VERSION")"
-          echo "version=$PROJECT_VERSION" >> "$GITHUB_OUTPUT"
-          echo "Release version: $PROJECT_VERSION"
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            VERSION="${MANUAL_VERSION#v}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+
+          test -n "$VERSION"
+          PROJECT_VERSION="$(python scripts/check-version.py "$VERSION")"
+          test "$PROJECT_VERSION" = "$VERSION"
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Python syntax
         run: python -m compileall -q app/src tests scripts/check-version.py
@@ -72,7 +88,7 @@ jobs:
       - name: Build Debian package
         run: ./scripts/build-deb.sh
 
-      - name: Verify package version
+      - name: Verify Debian package
         shell: bash
         run: |
           DEB="$(find dist -maxdepth 1 -name '*.deb' -print -quit)"
@@ -94,13 +110,24 @@ jobs:
 
           (
             cd dist
-            sha256sum \
-              *.deb \
-              wayvoice-${VERSION}-source.zip \
-              > SHA256SUMS
+            sha256sum *.deb wayvoice-${VERSION}-source.zip > SHA256SUMS
           )
 
-      - name: Upload release build artifact
+      - name: Create tag for manual release
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            test "$(git rev-list -n 1 "$TAG")" = "$GITHUB_SHA"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" -m "WayVoice ${{ steps.version.outputs.version }}"
+            git push origin "$TAG"
+          fi
+
+      - name: Upload release artifact
         uses: actions/upload-artifact@v4
         with:
           name: wayvoice-${{ steps.version.outputs.version }}-release
@@ -115,9 +142,10 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.version.outputs.tag }}
           name: WayVoice ${{ steps.version.outputs.version }}
           generate_release_notes: true
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(steps.version.outputs.version, '-') }}
           files: |
             dist/*.deb
             dist/*.deb.sha256
