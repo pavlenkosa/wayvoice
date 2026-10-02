@@ -1,0 +1,14 @@
+[Unit]
+Description=WayVoice ydotool virtual keyboard
+After=graphical-session.target
+PartOf=graphical-session.target
+ConditionPathExists=/usr/bin/ydotoold
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ydotoold --socket-path=%t/wayvoice-ydotool.sock --socket-perm=0600
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,8 @@
+[Unit]
+Description=Prepare WayVoice Faster-Whisper engine
+After=network-online.target
+
+[Service]
+Type=oneshot
+Environment=PYTHONPATH=/usr/lib/wayvoice/app/src
+ExecStart=/usr/bin/python3 -m wayvoice.engine_setup

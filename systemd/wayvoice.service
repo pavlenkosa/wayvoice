@@ -1,0 +1,13 @@
+[Unit]
+Description=WayVoice speech-to-text daemon
+After=graphical-session.target pipewire.service
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/wayvoice-daemon
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

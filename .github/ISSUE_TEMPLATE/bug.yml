@@ -1,0 +1,29 @@
+name: Bug report
+description: Report a reproducible WayVoice problem
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: WayVoice diagnostics
+      description: Use Settings → Diagnostics → Copy details. Remove anything you do not want to share.
+      render: text
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: journalctl --user -u wayvoice -n 100
+      render: text

@@ -1,0 +1,10 @@
+[Unit]
+Description=WayVoice per-user desktop integration
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/wayvoice/setup-user
+
+[Install]
+WantedBy=default.target
