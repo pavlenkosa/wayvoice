@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="128"
+   height="128"
+   viewBox="0 0 128 128"
+   version="1.1"
+   id="svg13"
+   sodipodi:docname="wayvoice-logo.svg"
+   inkscape:version="1.4.4 (dcaf3e7d9e, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview13"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     showgrid="false"
+     inkscape:zoom="3.7421875"
+     inkscape:cx="81.636743"
+     inkscape:cy="76.693111"
+     inkscape:window-width="2048"
+     inkscape:window-height="1211"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg13" />
+  <defs
+     id="defs5">
+    <linearGradient
+       id="bg"
+       x1="8"
+       y1="5"
+       x2="8"
+       y2="117"
+       gradientUnits="userSpaceOnUse">
+      <stop
+         offset="0"
+         stop-color="#62A0EA"
+         id="stop1" />
+      <stop
+         offset="1"
+         stop-color="#3584E4"
+         id="stop2" />
+    </linearGradient>
+    <linearGradient
+       id="bubble"
+       x1="17.119567"
+       y1="26.636188"
+       x2="17.119567"
+       y2="107.72887"
+       gradientTransform="scale(1.1098412,0.90102983)"
+       gradientUnits="userSpaceOnUse">
+      <stop
+         offset="0"
+         stop-color="#FFFFFF"
+         id="stop3" />
+      <stop
+         offset="1"
+         stop-color="#F4F7FB"
+         id="stop4" />
+    </linearGradient>
+    <filter
+       id="shadow"
+       x="-0.066666667"
+       y="-0.076857129"
+       width="1.1333333"
+       height="1.1921428">
+      <feGaussianBlur
+         in="SourceAlpha"
+         stdDeviation="2.5"
+         id="feGaussianBlur4" />
+      <feOffset
+         dy="3"
+         id="feOffset4" />
+      <feColorMatrix
+         type="matrix"
+         values="0 0 0 0 0                 0 0 0 0 0                 0 0 0 0 0                 0 0 0 .22 0"
+         id="feColorMatrix4" />
+      <feMerge
+         id="feMerge5">
+        <feMergeNode
+           id="feMergeNode4" />
+        <feMergeNode
+           in="SourceGraphic"
+           id="feMergeNode5" />
+      </feMerge>
+    </filter>
+  </defs>
+  <!-- GNOME / Adwaita-like app tile -->
+  <!-- voice-typing bubble -->
+  <!-- waveform -->
+  <g
+     id="g13"
+     transform="translate(0,3.206681)">
+    <rect
+       x="8"
+       y="5"
+       width="112"
+       height="112"
+       rx="28"
+       fill="url(#bg)"
+       id="rect6"
+       style="fill:url(#bg)" />
+    <g
+       filter="url(#shadow)"
+       id="g7"
+       transform="translate(0,4)">
+      <path
+         d="m 31,27 c -6.6,0 -12,5.4 -12,12 v 37 c 0,6.6 5.4,12 12,12 h 15 l 12,11 c 2.7,2.4 7,0.5 7,-3.2 V 88 h 32 c 6.6,0 12,-5.4 12,-12 V 39 c 0,-6.6 -5.4,-12 -12,-12 z"
+         fill="#1a5fb4"
+         opacity="0.2"
+         transform="translate(0,2)"
+         id="path6" />
+      <path
+         d="m 31,24 c -6.6,0 -12,5.4 -12,12 v 37 c 0,6.6 5.4,12 12,12 h 15 l 12,11 c 2.7,2.4 7,0.5 7,-3.2 V 85 h 32 c 6.6,0 12,-5.4 12,-12 V 36 c 0,-6.6 -5.4,-12 -12,-12 z"
+         fill="url(#bubble)"
+         id="path7"
+         style="fill:url(#bubble)" />
+    </g>
+    <g
+       fill="#3584e4"
+       id="g12"
+       transform="translate(0,4)">
+      <rect
+         x="31"
+         y="50"
+         width="8"
+         height="12"
+         rx="4"
+         id="rect7" />
+      <rect
+         x="43"
+         y="43"
+         width="8"
+         height="26"
+         rx="4"
+         id="rect8" />
+      <rect
+         x="55"
+         y="35"
+         width="8"
+         height="42"
+         rx="4"
+         id="rect9" />
+      <rect
+         x="67"
+         y="40"
+         width="8"
+         height="32"
+         rx="4"
+         id="rect10" />
+      <rect
+         x="79"
+         y="46"
+         width="8"
+         height="20"
+         rx="4"
+         id="rect11" />
+      <rect
+         x="91"
+         y="52"
+         width="8"
+         height="8"
+         rx="4"
+         id="rect12" />
+      <rect
+         x="78"
+         y="74"
+         width="19"
+         height="4"
+         rx="2"
+         fill="#1c71d8"
+         opacity="0.85"
+         id="rect13" />
+    </g>
+  </g>
+  <!-- tiny cursor: voice becomes text -->
+</svg>
