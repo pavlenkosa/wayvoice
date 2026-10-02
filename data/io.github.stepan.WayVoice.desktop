@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=WayVoice
+GenericName=Voice Dictation
+GenericName[ru]=Голосовой ввод
+Comment=Local speech-to-text dictation for Wayland
+Comment[ru]=Локальный голосовой ввод для Wayland
+Exec=/usr/bin/wayvoice-settings
+Icon=io.github.stepan.WayVoice
+Terminal=false
+Categories=Utility;AudioVideo;GTK;
+Keywords=voice;speech;dictation;whisper;microphone;голос;диктовка;распознавание;
+StartupNotify=true
+DBusActivatable=false

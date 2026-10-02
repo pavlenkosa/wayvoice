@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+# Apply the shortcut stored in the user's WayVoice config (F8 by default).
+/usr/bin/wayvoice apply-shortcut >/dev/null 2>&1 || true
+
+# ydotool may be installed later from backports.
+if command -v ydotoold >/dev/null 2>&1; then
+    systemctl --user enable --now wayvoice-ydotool.service >/dev/null 2>&1 || true
+fi
+exit 0

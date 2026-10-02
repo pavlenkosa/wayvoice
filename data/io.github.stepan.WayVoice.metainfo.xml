@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.stepan.WayVoice</id>
+  <name>WayVoice</name>
+  <summary>Local voice dictation for GNOME and Wayland</summary>
+  <summary xml:lang="ru">Локальный голосовой ввод для GNOME и Wayland</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <description>
+    <p>WayVoice records microphone audio through PipeWire, transcribes it locally and inserts the result into the focused application.</p>
+    <p xml:lang="ru">WayVoice записывает микрофон через PipeWire, локально распознаёт речь и вставляет результат в активное приложение.</p>
+  </description>
+  <launchable type="desktop-id">io.github.stepan.WayVoice.desktop</launchable>
+  <provides><binary>wayvoice-settings</binary></provides>
+  <supports><control>pointing</control><control>keyboard</control></supports>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.5.1" date="2026-10-02">
+      <description><p>License metadata aligned to GPL-3.0-only across the About dialog, packaging metadata and AppStream data.</p></description>
+    </release>
+    <release version="0.5.0" date="2026-10-02">
+      <description><p>Localization, safer transcription, GNOME-style icon, diagnostics and GitHub project infrastructure.</p></description>
+    </release>
+  </releases>
+</component>

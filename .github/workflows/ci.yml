@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-build:
+    name: Test & build Debian package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install validation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            shellcheck desktop-file-utils libxml2-utils
+
+      - name: Check version consistency
+        run: python scripts/check-version.py
+
+      - name: Python syntax
+        run: python -m compileall -q app/src tests scripts/check-version.py
+
+      - name: Unit tests
+        env:
+          PYTHONPATH: app/src
+        run: python -m unittest discover -s tests -v
+
+      - name: Shellcheck
+        run: |
+          shellcheck \
+            scripts/wayvoice \
+            scripts/wayvoice-daemon \
+            scripts/wayvoice-settings \
+            scripts/setup-user \
+            scripts/build-deb.sh \
+            packaging/DEBIAN/postinst \
+            packaging/DEBIAN/postrm \
+            packaging/DEBIAN/prerm
+
+      - name: Validate desktop metadata
+        run: |
+          desktop-file-validate data/io.github.stepan.WayVoice.desktop
+          xmllint --noout data/io.github.stepan.WayVoice.metainfo.xml
+
+      - name: Build Debian package
+        run: ./scripts/build-deb.sh
+
+      - name: Inspect Debian package
+        run: |
+          dpkg-deb --info dist/*.deb
+          dpkg-deb --contents dist/*.deb > /dev/null
+          PACKAGE_VERSION="$(dpkg-deb -f dist/*.deb Version)"
+          PROJECT_VERSION="$(python scripts/check-version.py)"
+          test "$PACKAGE_VERSION" = "$PROJECT_VERSION"
+
+      - name: Upload Debian package
+        uses: actions/upload-artifact@v4
+        with:
+          name: wayvoice-deb-${{ github.sha }}
+          path: |
+            dist/*.deb
+            dist/*.deb.sha256
+          if-no-files-found: error
+          retention-days: 14
