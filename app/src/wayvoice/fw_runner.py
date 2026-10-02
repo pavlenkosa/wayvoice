@@ -1,58 +1,89 @@
 from __future__ import annotations
 
 import argparse
+import sys
+from pathlib import Path
+
+
+def _ensure_import_path() -> None:
+    """Make the ``wayvoice`` package importable from this script.
+
+    The runner is executed by the engine runtime interpreter, which knows
+    nothing about the application sources.  This module lives inside the
+    package directory, so the import root is its parent -- the same layout for
+    a source checkout and for the installed package.
+    """
+    root = Path(__file__).resolve().parent.parent
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+
+
+_ensure_import_path()
+
+from wayvoice import fw_worker  # noqa: E402  (needs the path bootstrap above)
+
+
+def _run_once(args: argparse.Namespace) -> int:
+    """Load the model, transcribe one file and print the text.
+
+    This is the original one-shot mode.  It stays the fallback used whenever
+    the warm worker is unavailable or disabled.
+    """
+    config = fw_worker.WorkerConfig(
+        model=args.model,
+        device=args.device,
+        beam_size=args.beam_size,
+        vad=args.vad,
+    )
+    cache = fw_worker.ModelCache()
+    reply = fw_worker.handle_request(
+        {
+            "cmd": "transcribe",
+            "audio": args.audio,
+            "language": args.language,
+            "request_id": "one-shot",
+        },
+        cache,
+        config,
+    )
+    if not reply.get("ok"):
+        print(str(reply.get("error") or "Faster-Whisper failed"), file=sys.stderr)
+        return 1
+    print(str(reply.get("text") or ""))
+    return 0
+
+
+def _serve(args: argparse.Namespace) -> int:
+    """Run the warm worker that keeps the model in memory."""
+    socket_path = Path(args.socket) if args.socket else fw_worker.default_socket_path()
+    config = fw_worker.WorkerConfig(
+        model=args.model,
+        device=args.device,
+        beam_size=args.beam_size,
+        vad=args.vad,
+    )
+    fw_worker.run_server(socket_path, config, idle_timeout=float(args.idle_timeout))
+    return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--audio", required=True)
+    parser.add_argument("--audio", help="WAV file to transcribe (one-shot mode)")
     parser.add_argument("--model", default="small")
     parser.add_argument("--language", default="ru")
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
     parser.add_argument("--beam-size", type=int, default=5)
     parser.add_argument("--vad", action="store_true")
+    parser.add_argument("--serve", action="store_true", help="run as a warm worker instead of once")
+    parser.add_argument("--socket", default="", help="unix socket of the warm worker")
+    parser.add_argument("--idle-timeout", type=float, default=fw_worker.DEFAULT_IDLE_TIMEOUT)
     args = parser.parse_args()
 
-    import ctranslate2
-    from faster_whisper import WhisperModel
-
-    device = args.device
-    if device == "auto":
-        try:
-            device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
-        except Exception:
-            device = "cpu"
-    compute_type = "float16" if device == "cuda" else "int8"
-
-    model = WhisperModel(args.model, device=device, compute_type=compute_type)
-    language = None if args.language in {"", "auto"} else args.language
-    kwargs = {
-        "language": language,
-        "beam_size": max(1, args.beam_size),
-        "vad_filter": args.vad,
-        "condition_on_previous_text": False,
-    }
-    if args.vad:
-        kwargs["vad_parameters"] = {
-            "min_silence_duration_ms": 500,
-            "speech_pad_ms": 180,
-        }
-    segments, _ = model.transcribe(args.audio, **kwargs)
-
-    # Conservative no-speech guard. It intentionally requires both a high
-    # no-speech probability and a poor log probability so quiet real speech is
-    # not discarded just because it is difficult to decode.
-    accepted: list[str] = []
-    for segment in segments:
-        no_speech = float(getattr(segment, "no_speech_prob", 0.0) or 0.0)
-        avg_logprob = float(getattr(segment, "avg_logprob", 0.0) or 0.0)
-        if no_speech > 0.72 and avg_logprob < -1.0:
-            continue
-        text = str(getattr(segment, "text", "") or "").strip()
-        if text:
-            accepted.append(text)
-    print(" ".join(accepted).strip())
-    return 0
+    if args.serve:
+        return _serve(args)
+    if not args.audio:
+        parser.error("--audio is required unless --serve is used")
+    return _run_once(args)
 
 
 if __name__ == "__main__":

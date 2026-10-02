@@ -28,6 +28,10 @@ DEFAULTS: dict[str, Any] = {
     "ui_language": "auto",
     "transcription_timeout_sec": 90,
     "max_recording_sec": 120,
+    # Warm worker: keeps the model in memory between dictations.  Turning it
+    # off restores the one-shot runner for every dictation.
+    "engine_worker": True,
+    "engine_worker_idle_sec": 900,
 }
 
 

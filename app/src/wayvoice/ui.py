@@ -331,6 +331,9 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         self.vad = Adw.SwitchRow(title=self.t("settings.vad"))
         self.vad.set_active(bool(self.cfg.get("vad_filter", True)))
         engine_group.add(self.vad)
+        self.worker = Adw.SwitchRow(title=self.t("settings.worker"), subtitle=self.t("settings.worker_sub"))
+        self.worker.set_active(bool(self.cfg.get("engine_worker", True)))
+        engine_group.add(self.worker)
 
         self.cpp_binary = Adw.EntryRow(title=self.t("settings.cpp_binary"))
         self.cpp_binary.set_text(str(self.cfg.get("whisper_cpp_binary", "")))
@@ -614,7 +617,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         engine = self._selected_engine() if hasattr(self, "engine") else self.cfg.get("engine", "faster-whisper")
         fw = engine == "faster-whisper"
         cpp = engine == "whisper-cpp"
-        for row in (self.model, self.device, self.vad):
+        for row in (self.model, self.device, self.vad, self.worker):
             row.set_visible(fw)
         if hasattr(self, "custom_model"):
             self.custom_model.set_visible(fw and str(self._selected_model_preset()["id"]) == "__custom__")
@@ -699,6 +702,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
             "language": language,
             "device": DEVICES[self.device.get_selected()],
             "vad_filter": self.vad.get_active(),
+            "engine_worker": self.worker.get_active(),
             "auto_punctuation": self.auto_punct.get_active(),
             "spoken_punctuation": self.spoken.get_active(),
             "append_space": self.append_space.get_active(),
