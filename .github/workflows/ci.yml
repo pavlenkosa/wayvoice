@@ -74,7 +74,7 @@ jobs:
           test "$PACKAGE_VERSION" = "$PROJECT_VERSION"
 
       - name: Upload Debian package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: wayvoice-deb-${{ github.sha }}
           path: |
