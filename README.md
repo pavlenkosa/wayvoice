@@ -21,10 +21,15 @@
 
 WayVoice is a background voice-input utility for Linux. Start recording with a global hotkey, speak naturally, and WayVoice transcribes the audio locally and inserts the result into the focused application.
 
-- Local speech recognition with **Faster-Whisper** or **whisper.cpp**
+- Local speech recognition with **Faster-Whisper**, **whisper.cpp** or an external command
 - Works with **GNOME + Wayland**
+- Any of the **100 languages Whisper supports**, detected automatically or pinned
 - Automatic punctuation and spoken punctuation commands
 - Multilingual and language-specific models
+- The model stays warm between dictations, so only the first one pays for loading it
+- Model files on disk: size, free space and deletion
+- Missing dependencies are detected and can be installed from the settings
+- Runs from **Debian/Ubuntu packages** and as a **Flatpak**, with or without systemd
 - Configurable global hotkey
 - Recognition timeout and cancellation
 - GTK4 + libadwaita interface
@@ -63,6 +68,8 @@ WayVoice transcribes the recording and inserts the text into the active applicat
 
 The default option. Supports multilingual Whisper models, English-only models and compatible CTranslate2 community models.
 
+The model is kept in memory between dictations, so the second recording starts without loading it again. Turn the warm worker off in the settings to free that memory between recordings.
+
 ### whisper.cpp
 
 Use a local `whisper-cli` binary together with a GGML/GGUF model.
@@ -74,6 +81,24 @@ Hand the recording to any command that prints the recognized text to stdout. The
 ```
 vosk-transcriber -i {audio}
 ```
+
+## Languages
+
+The recognition language defaults to automatic detection, which is what the engines do best: a pinned language does not fail loudly, it silently applies the wrong grammar to foreign speech.
+
+Every language Whisper knows is in the settings, under the name speakers of that language use for it. Spoken punctuation commands ("comma", "question mark", "точка", "запятая") are recognised in the language being spoken.
+
+## Models on disk
+
+Model weights live in the Hugging Face cache, which is shared with other programs. The settings show what the selected model occupies, what WayVoice's models occupy in total, and how much space the whole cache takes — plus how much is free on disk. A downloaded model can be deleted from the same row.
+
+Deleting a model never removes files another model is using: the weights are shared between models, and only what nothing points at any more is freed. A model provided as a local path is yours and is never deleted.
+
+## Missing dependencies
+
+WayVoice needs `pw-record`, `wl-copy` and `notify-send` at runtime, and `ydotool` for automatic pasting. The settings list what is missing and can install it through the system package manager — nothing is installed unless you ask.
+
+Without `ydotool`, dictation still works: the recognized text goes to the Wayland clipboard and you paste it yourself.
 
 ## Useful commands
 
