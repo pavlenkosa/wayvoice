@@ -13,10 +13,12 @@ from . import __version__
 from .audio import AudioRecorder
 from .config import load_config
 from .engine import (
+    DEFAULT_ENGINE,
     TranscriptionCancelled,
     TranscriptionTimeout,
+    engine_from_config,
     engine_status,
-    request_faster_setup,
+    request_engine_setup,
     transcribe,
 )
 from .injector import InjectionError, inject
@@ -40,10 +42,20 @@ class WayVoiceDaemon:
         self._record_started = 0.0
         self._busy_started = 0.0
         cfg = load_config()
-        if cfg.get("engine", "faster-whisper") == "faster-whisper":
-            st = engine_status(cfg)
-            if st.get("state") in {"missing", "error"}:
-                request_faster_setup()
+        engine = engine_from_config(cfg)
+        if engine is not None and engine.needs_setup:
+            self._prepare_engine(engine, engine_status(cfg))
+
+    @staticmethod
+    def _prepare_engine(engine, status: dict) -> None:
+        """Start the selected engine's setup, if it can be prepared at all.
+
+        An engine that needs no preparation (whisper.cpp, an external command)
+        is skipped: there is nothing to install, and asking for it anyway would
+        prepare a runtime nothing will ever use.
+        """
+        if status.get("state") in {"missing", "error"}:
+            request_engine_setup(engine)
 
     def status(self) -> dict:
         cfg = load_config()
@@ -89,8 +101,9 @@ class WayVoiceDaemon:
             cfg = load_config()
             est = engine_status(cfg)
             if est.get("state") != "ready":
-                if cfg.get("engine") == "faster-whisper" and est.get("state") in {"missing", "error"}:
-                    request_faster_setup()
+                engine = engine_from_config(cfg)
+                if engine is not None and engine.needs_setup:
+                    self._prepare_engine(engine, est)
                 return {"ok": False, "error": est.get("message", "Recognition engine is not ready.")}
             try:
                 self.last_error = ""
@@ -209,8 +222,18 @@ class WayVoiceDaemon:
             self.last_warning = ""
             return {"ok": True}
         if command == "engine-setup":
-            request_faster_setup()
-            return {"ok": True}
+            cfg = load_config()
+            engine = engine_from_config(cfg)
+            if engine is None:
+                # A broken config, not an engine without setup: saying the
+                # latter would hide the actual problem.
+                engine_id = str(cfg.get("engine", DEFAULT_ENGINE))
+                return {"ok": False, "error": f"Unknown recognition engine: {engine_id}"}
+            if request_engine_setup(engine):
+                return {"ok": True}
+            # Nothing was started, so say why instead of replying "ok" to a
+            # request that did not happen.
+            return {"ok": False, "error": f"{engine.label} needs no preparation."}
         if command == "ping":
             return {"ok": True, "pong": True}
         if command == "quit":

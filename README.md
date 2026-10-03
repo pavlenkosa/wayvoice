@@ -67,6 +67,14 @@ The default option. Supports multilingual Whisper models, English-only models an
 
 Use a local `whisper-cli` binary together with a GGML/GGUF model.
 
+### External command
+
+Hand the recording to any command that prints the recognized text to stdout. The template runs through `/bin/sh`, and `{audio}` is replaced with the path of the recording:
+
+```
+vosk-transcriber -i {audio}
+```
+
 ## Useful commands
 
 ```bash

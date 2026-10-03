@@ -20,14 +20,20 @@ from . import pkgsys
 from . import service
 from .cli import request
 from .config import load_config, save_config
-from .engine import ENGINE_LABELS, engine_status, request_faster_setup
+from .engine import (
+    DEFAULT_ENGINE,
+    engine_from_config,
+    engine_ids,
+    engine_label,
+    engine_status,
+    get_engine,
+    request_engine_setup,
+)
 from .i18n import resolve_language, tr
 from .models import MODEL_PRESETS, PRESET_LABELS, display_name, forced_language, preset_index, preset_subtitle
 from .paths import command_path, setup_user_script
 from .shortcut import apply_shortcut, label_for
 
-ENGINE_IDS = ["faster-whisper", "whisper-cpp"]
-ENGINE_NAMES = ["Faster-Whisper", "whisper.cpp"]
 DEVICES = ["auto", "cpu", "cuda"]
 DEVICE_NAMES = ["Auto", "CPU", "NVIDIA CUDA"]
 PASTE_MODES = ["standard", "terminal", "copy"]
@@ -83,6 +89,16 @@ def language_choices(ui_lang: str) -> tuple[list[str], list[str]]:
     labels = [tr("language.auto", ui_lang)]
     labels += [languages.display_name(code, ui_lang) for code in languages.CODES]
     return codes, labels
+
+
+def engine_choices() -> tuple[list[str], list[str]]:
+    """Engine selector contents: ids with their labels.
+
+    Both lists come from the engine registry in registration order, so the
+    dropdown cannot drift away from what the daemon actually accepts.
+    """
+    ids = engine_ids()
+    return ids, [engine_label(engine_id) for engine_id in ids]
 
 
 def _enable_dropdown_search(dropdown) -> bool:
@@ -362,7 +378,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
 
         grid = Gtk.Grid(column_spacing=12, row_spacing=12)
         grid.set_column_homogeneous(True)
-        self.engine_card = self._metric_card(grid, 0, self.t("card.engine"), ENGINE_LABELS.get(self.cfg.get("engine"), "—"), "applications-engineering-symbolic")
+        self.engine_card = self._metric_card(grid, 0, self.t("card.engine"), engine_label(self.cfg.get("engine")) or "—", "applications-engineering-symbolic")
         self.model_card = self._metric_card(grid, 1, self.t("card.model"), display_name(str(self.cfg.get("model", "small"))), "applications-system-symbolic")
         self.paste_card = self._metric_card(grid, 2, self.t("card.paste"), "Ctrl+V", "edit-paste-symbolic")
         outer.append(grid)
@@ -419,9 +435,10 @@ class WayVoiceWindow(Adw.ApplicationWindow):
 
         engine_group = Adw.PreferencesGroup(title=self.t("settings.recognition"))
         page.add(engine_group)
+        engine_choice_ids, engine_choice_labels = engine_choices()
         self.engine = Adw.ComboRow(title=self.t("settings.engine"))
-        self.engine.set_model(Gtk.StringList.new(ENGINE_NAMES))
-        self.engine.set_selected(self._idx(ENGINE_IDS, self.cfg.get("engine", "faster-whisper")))
+        self.engine.set_model(Gtk.StringList.new(engine_choice_labels))
+        self.engine.set_selected(self._idx(engine_choice_ids, self.cfg.get("engine", DEFAULT_ENGINE)))
         self.engine.connect("notify::selected", self._on_engine_selected)
         engine_group.add(self.engine)
 
@@ -468,6 +485,26 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         self.cpp_gpu = Adw.SwitchRow(title=self.t("settings.cpp_gpu"))
         self.cpp_gpu.set_active(bool(self.cfg.get("whisper_cpp_gpu", True)))
         engine_group.add(self.cpp_gpu)
+
+        self.custom_command = Adw.EntryRow(title=self.t("settings.custom_command"))
+        self.custom_command.set_text(str(self.cfg.get("custom_command", "")))
+        self.custom_command.set_tooltip_text(self.t("settings.custom_command_sub"))
+        engine_group.add(self.custom_command)
+
+        # Config key -> row for every engine-specific row.  A row is shown
+        # exactly when the selected engine owns its key, so a new engine brings
+        # its settings along instead of needing an id comparison per row.
+        self._engine_rows = (
+            ("model", self.model),
+            ("custom_model", self.custom_model),
+            ("device", self.device),
+            ("vad_filter", self.vad),
+            ("engine_worker", self.worker),
+            ("whisper_cpp_binary", self.cpp_binary),
+            ("whisper_cpp_model", self.cpp_model),
+            ("whisper_cpp_gpu", self.cpp_gpu),
+            ("custom_command", self.custom_command),
+        )
 
         text_group = Adw.PreferencesGroup(title=self.t("settings.text"))
         page.add(text_group)
@@ -728,9 +765,10 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         preset = self._selected_model_preset()
         self.model.set_subtitle(preset_subtitle(preset, self.ui_lang))
         is_custom = str(preset["id"]) == "__custom__"
-        self.custom_model.set_visible(self._selected_engine() == "faster-whisper" and is_custom)
+        uses_models = self._selected_engine_uses_models()
+        self.custom_model.set_visible(uses_models and is_custom)
         forced = preset.get("language")
-        if self._selected_engine() == "faster-whisper" and forced:
+        if uses_models and forced:
             # The model decides the language; show which one, but do not let it
             # be edited into something the model was not trained for.
             self.language.select_code(str(forced))
@@ -744,20 +782,25 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         self._poll_engine_settings()
 
     def _selected_engine(self):
-        return ENGINE_IDS[self.engine.get_selected()]
+        return engine_ids()[self.engine.get_selected()]
+
+    def _selected_engine_object(self):
+        """The selected engine, or ``None`` while the list is not built yet."""
+        if hasattr(self, "engine"):
+            return get_engine(self._selected_engine())
+        return get_engine(self.cfg.get("engine", DEFAULT_ENGINE))
+
+    def _selected_engine_uses_models(self) -> bool:
+        engine = self._selected_engine_object()
+        return bool(engine and engine.uses_models)
 
     def _update_engine_visibility(self):
-        engine = self._selected_engine() if hasattr(self, "engine") else self.cfg.get("engine", "faster-whisper")
-        fw = engine == "faster-whisper"
-        cpp = engine == "whisper-cpp"
-        for row in (self.model, self.device, self.vad, self.worker):
-            row.set_visible(fw)
-        if hasattr(self, "custom_model"):
-            self.custom_model.set_visible(fw and str(self._selected_model_preset()["id"]) == "__custom__")
-        for row in (self.cpp_binary, self.cpp_model, self.cpp_gpu):
-            row.set_visible(cpp)
+        engine = self._selected_engine_object()
+        owned = set(engine.settings) if engine else set()
+        for key, row in self._engine_rows:
+            row.set_visible(key in owned)
         if hasattr(self, "engine_setup_btn"):
-            self.engine_setup_btn.set_visible(fw)
+            self.engine_setup_btn.set_visible(bool(engine and engine.needs_setup))
 
     def _open_shortcut_capture(self, *_args):
         win = Gtk.Window(title=self.t("shortcut.title"), transient_for=self, modal=True)
@@ -820,7 +863,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
 
     def _save(self, *_args):
         preset = self._selected_model_preset()
-        if self._selected_engine() == "faster-whisper" and str(preset["id"]) == "__custom__" and not self.custom_model.get_text().strip():
+        if self._selected_engine_uses_models() and str(preset["id"]) == "__custom__" and not self.custom_model.get_text().strip():
             self.toast.add_toast(Adw.Toast(title=self.t("toast.custom_model")))
             return
         model_id = self._selected_model_id()
@@ -845,6 +888,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
             "whisper_cpp_binary": self.cpp_binary.get_text().strip(),
             "whisper_cpp_model": self.cpp_model.get_text().strip(),
             "whisper_cpp_gpu": self.cpp_gpu.get_active(),
+            "custom_command": self.custom_command.get_text().strip(),
             "transcription_timeout_sec": TIMEOUT_VALUES[self.timeout.get_selected()],
             "max_recording_sec": RECORD_VALUES[self.max_recording.get_selected()],
             "ui_language": new_ui_setting,
@@ -852,10 +896,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         save_config(cfg)
         self.cfg = cfg
         ok, msg = apply_shortcut(self._shortcut_binding)
-        if cfg.get("engine") == "faster-whisper":
-            st = engine_status(cfg)
-            if st.get("state") in {"missing", "error"}:
-                request_faster_setup()
+        self._prepare_selected_engine(cfg)
         if new_ui_setting != self.ui_lang_setting:
             # Restart the UI so that the new interface language is applied.
             # The settings binary path is resolved explicitly and passed as
@@ -874,11 +915,27 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         self.toast.add_toast(Adw.Toast(title=self.t("settings.saved") if ok else msg))
         self._poll_engine_settings()
 
+    def _prepare_selected_engine(self, cfg):
+        """Prepare the selected engine when it can be prepared, and is not ready.
+
+        Engines that need no preparation (whisper.cpp, an external command) are
+        left alone: there is nothing to prepare, and their settings are the only
+        thing that can make them ready.
+        """
+        engine = engine_from_config(cfg)
+        if engine is None or not engine.needs_setup:
+            return
+        if engine_status(cfg).get("state") in {"missing", "error"}:
+            request_engine_setup(engine)
+
     def _setup_engine(self, *_args):
         cfg = load_config()
-        cfg["engine"] = "faster-whisper"
+        cfg["engine"] = self._selected_engine()
         save_config(cfg)
-        request_faster_setup()
+        if not request_engine_setup(engine_from_config(cfg)):
+            # The button is only visible for engines that need preparation, so
+            # there is nothing to show a spinner for.
+            return
         self.engine_status_row.set_subtitle(self.t("settings.preparing"))
         self.engine_setup_btn.set_visible(False)
         self.engine_spinner.set_visible(True)
@@ -892,9 +949,11 @@ class WayVoiceWindow(Adw.ApplicationWindow):
 
     def _update_cards(self):
         cfg = load_config()
-        engine = str(cfg.get("engine", "faster-whisper"))
-        self.engine_card.set_text(ENGINE_LABELS.get(engine, engine))
-        self.model_card.set_text(display_name(str(cfg.get("model", "small"))) if engine == "faster-whisper" else "whisper.cpp")
+        engine = engine_from_config(cfg)
+        self.engine_card.set_text(engine_label(cfg.get("engine")) or "—")
+        # Only an engine with its own model list has a model to show; the
+        # others keep their own model (or none) among their own settings.
+        self.model_card.set_text(display_name(str(cfg.get("model", "small"))) if engine and engine.uses_models else "—")
         self.paste_card.set_text({"standard": "Ctrl+V", "terminal": "Ctrl+Shift+V", "copy": self.t("paste.clipboard_short")}.get(str(cfg.get("paste_mode")), "—"))
 
     def _set_state_style(self, state):
@@ -1016,14 +1075,25 @@ class WayVoiceWindow(Adw.ApplicationWindow):
             self.transcript_meta.set_text("")
         return GLib.SOURCE_CONTINUE
 
-    def _poll_engine_settings(self):
+    def _pending_engine_config(self) -> dict:
+        """The config as this window currently shows it, for a status probe.
+
+        Every engine-specific row is taken from its widget, so switching to an
+        engine reports that engine's state without saving anything first.
+        """
         cfg = load_config()
         cfg["engine"] = self._selected_engine()
-        cfg["whisper_cpp_binary"] = self.cpp_binary.get_text().strip()
-        cfg["whisper_cpp_model"] = self.cpp_model.get_text().strip()
-        cfg["whisper_cpp_gpu"] = self.cpp_gpu.get_active()
-        st = engine_status(cfg)
+        for key, row in self._engine_rows:
+            if isinstance(row, Adw.EntryRow):
+                cfg[key] = row.get_text().strip()
+            elif isinstance(row, Adw.SwitchRow):
+                cfg[key] = bool(row.get_active())
+        return cfg
+
+    def _poll_engine_settings(self):
+        st = engine_status(self._pending_engine_config())
         state = str(st.get("state") or "")
+        engine = self._selected_engine_object()
         if state == "ready":
             self.engine_status_row.set_subtitle(self.t("status.ready"))
             self.engine_setup_btn.set_visible(False)
@@ -1038,7 +1108,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
             self.engine_status_row.set_subtitle(str(st.get("message") or self.t("health.not_ready")))
             self.engine_spinner.stop()
             self.engine_spinner.set_visible(False)
-            self.engine_setup_btn.set_visible(self._selected_engine() == "faster-whisper")
+            self.engine_setup_btn.set_visible(bool(engine and engine.needs_setup))
             self.engine_setup_btn.set_sensitive(True)
             self.engine_setup_btn.set_label(self.t("settings.repair") if state == "error" else self.t("settings.prepare"))
         return GLib.SOURCE_CONTINUE

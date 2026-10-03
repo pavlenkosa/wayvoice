@@ -9,9 +9,10 @@ import socket
 import subprocess
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from threading import Event, Lock
-from typing import Any
+from typing import Any, Callable
 
 from . import fw_worker
 from . import languages
@@ -20,11 +21,14 @@ from .models import forced_language
 from .paths import app_dir, script_path
 from .postprocess import normalize
 
-ENGINE_LABELS = {
-    "faster-whisper": "Faster-Whisper",
-    "whisper-cpp": "whisper.cpp",
-    "custom": "External command",
-}
+# The engines are registered at the very bottom of this module, in
+# :data:`ENGINES`, because their ``transcribe``/``status`` callables are the
+# functions defined here.  Nothing above the registry branches on an engine id.
+#
+#: Engine used when a config does not name one.  It has to agree with the id
+#: registered below and with the shipped ``config.DEFAULTS``; a test holds the
+#: three together.
+DEFAULT_ENGINE = "faster-whisper"
 
 RUNTIME_STAMP = ".engine-v1-ready"
 
@@ -153,51 +157,67 @@ def _find_whisper_cpp(cfg: dict[str, Any]) -> str | None:
     return None
 
 
+def _status_faster(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Whether the Faster-Whisper runtime is prepared, installing or broken."""
+    runtime = faster_runtime()
+    # Accept previous WayVoice-ready stamps and migrate lazily. This avoids
+    # a needless runtime rebuild after every application update.
+    ready_stamps = list(runtime.glob(".engine-*-ready")) if runtime.exists() else []
+    if (faster_stamp().exists() or ready_stamps) and (runtime / "bin/python").exists():
+        if ready_stamps and not faster_stamp().exists():
+            try:
+                faster_stamp().touch()
+            except Exception:
+                pass
+        return {"state": "ready", "message": "Ready"}
+    status = _read_setup_status()
+    if status.get("state") == "installing":
+        return {"state": "installing", "message": str(status.get("message") or "Preparing…")}
+    if status.get("state") == "error":
+        return {
+            "state": "error",
+            "message": str(status.get("message") or "Faster-Whisper setup failed"),
+            "log": str(status.get("log") or ""),
+        }
+    return {"state": "missing", "message": "Faster-Whisper is not prepared"}
+
+
+def _status_whisper_cpp(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Whether whisper-cli and a model file are both there."""
+    binary = _find_whisper_cpp(cfg)
+    model = Path(str(cfg.get("whisper_cpp_model") or "")).expanduser()
+    if not binary:
+        return {"state": "missing", "message": "whisper-cli was not found"}
+    if not model.is_file():
+        return {"state": "missing", "message": "Select a whisper.cpp GGML/GGUF model"}
+    return {"state": "ready", "message": f"Ready · {Path(binary).name}"}
+
+
+def _status_custom(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Whether an external command is configured."""
+    command = str(cfg.get("custom_command") or "").strip()
+    if not command:
+        return {"state": "missing", "message": "Configure a command that prints text to stdout"}
+    return {"state": "ready", "message": "Ready"}
+
+
 def engine_status(cfg: dict[str, Any]) -> dict[str, Any]:
-    engine = str(cfg.get("engine", "faster-whisper"))
-    label = ENGINE_LABELS.get(engine, engine)
+    """State of the engine a config selects: id, label, state and message.
 
-    if engine == "faster-whisper":
-        runtime = faster_runtime()
-        # Accept previous WayVoice-ready stamps and migrate lazily. This avoids
-        # a needless runtime rebuild after every application update.
-        ready_stamps = list(runtime.glob(".engine-*-ready")) if runtime.exists() else []
-        if (faster_stamp().exists() or ready_stamps) and (runtime / "bin/python").exists():
-            if ready_stamps and not faster_stamp().exists():
-                try:
-                    faster_stamp().touch()
-                except Exception:
-                    pass
-            return {"id": engine, "label": label, "state": "ready", "message": "Ready"}
-        status = _read_setup_status()
-        if status.get("state") == "installing":
-            return {"id": engine, "label": label, "state": "installing", "message": str(status.get("message") or "Preparing…")}
-        if status.get("state") == "error":
-            return {
-                "id": engine,
-                "label": label,
-                "state": "error",
-                "message": str(status.get("message") or "Faster-Whisper setup failed"),
-                "log": str(status.get("log") or ""),
-            }
-        return {"id": engine, "label": label, "state": "missing", "message": "Faster-Whisper is not prepared"}
-
-    if engine == "whisper-cpp":
-        binary = _find_whisper_cpp(cfg)
-        model = Path(str(cfg.get("whisper_cpp_model") or "")).expanduser()
-        if not binary:
-            return {"id": engine, "label": label, "state": "missing", "message": "whisper-cli was not found"}
-        if not model.is_file():
-            return {"id": engine, "label": label, "state": "missing", "message": "Select a whisper.cpp GGML/GGUF model"}
-        return {"id": engine, "label": label, "state": "ready", "message": f"Ready · {Path(binary).name}"}
-
-    if engine == "custom":
-        command = str(cfg.get("custom_command") or "").strip()
-        if not command:
-            return {"id": engine, "label": label, "state": "missing", "message": "Configure a command that prints text to stdout"}
-        return {"id": engine, "label": label, "state": "ready", "message": "Ready"}
-
-    return {"id": engine, "label": label, "state": "error", "message": "Unknown recognition engine"}
+    An id no engine claims is an error, never a silent fallback: a hand-edited
+    config that quietly started using another recognizer would be worse than
+    a visible failure.
+    """
+    engine_id = str(cfg.get("engine", DEFAULT_ENGINE))
+    engine = get_engine(engine_id)
+    if engine is None:
+        return {
+            "id": engine_id,
+            "label": engine_label(engine_id),
+            "state": "error",
+            "message": "Unknown recognition engine",
+        }
+    return {"id": engine.id, "label": engine.label, **engine.status(cfg)}
 
 
 def _terminate_process(proc: subprocess.Popen[str]) -> None:
@@ -705,13 +725,144 @@ def _transcribe_custom(audio: Path, cfg: dict[str, Any], cancel_event: Event | N
 
 
 def transcribe(audio: Path, cfg: dict[str, Any], cancel_event: Event | None = None) -> str:
-    engine = str(cfg.get("engine", "faster-whisper"))
-    if engine == "faster-whisper":
-        raw = _transcribe_faster(audio, cfg, cancel_event)
-    elif engine == "whisper-cpp":
-        raw = _transcribe_whisper_cpp(audio, cfg, cancel_event)
-    elif engine == "custom":
-        raw = _transcribe_custom(audio, cfg, cancel_event)
-    else:
-        raise RuntimeError(f"Unknown engine: {engine}")
-    return _postprocess(raw, cfg)
+    """Recognize ``audio`` with the configured engine and postprocess the text.
+
+    The engine itself returns the raw transcript; punctuation and the trailing
+    space are shared by all of them and stay here.
+    """
+    engine_id = str(cfg.get("engine", DEFAULT_ENGINE))
+    engine = get_engine(engine_id)
+    if engine is None:
+        raise RuntimeError(f"Unknown engine: {engine_id}")
+    return _postprocess(engine.transcribe(audio, cfg, cancel_event), cfg)
+
+
+# --------------------------------------------------------------------------
+# Engine registry
+#
+# This is the single place that knows which engines exist.  Everything else --
+# the daemon, the CLI, the settings window -- asks the registry instead of
+# comparing engine ids, so adding an engine is one entry here plus its
+# ``_transcribe_*``/``_status_*`` functions above, and nothing is left behind
+# that still believes there are only two or three engines.
+# --------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Engine:
+    """One recognition engine: how to run it and what its settings look like.
+
+    ``transcribe`` returns the raw text and ``status`` a ``state``/``message``
+    pair; the identity of the engine (``id``/``label``) is added by
+    :func:`engine_status`, which keeps every engine's report uniform.
+
+    ``settings`` lists the config keys that belong to this engine and to no
+    other -- the settings window shows a row exactly when its key is in there.
+    Keys every engine shares (language, timeouts) are in none of them.
+
+    ``setup`` is the optional hook that prepares the engine's runtime in the
+    background.  It is what ``needs_setup`` advertises to the UI, and the two
+    must agree: a button that prepares nothing must not be shown.
+    """
+
+    id: str
+    label: str
+    transcribe: Callable[[Path, dict[str, Any], Event | None], str]
+    status: Callable[[dict[str, Any]], dict[str, Any]]
+    uses_models: bool
+    needs_setup: bool
+    settings: tuple[str, ...]
+    setup: Callable[[], None] | None = None
+
+
+#: Registered engines by id.  Insertion order is the order of the UI list.
+ENGINES: dict[str, Engine] = {}
+
+
+def _register(engine: Engine) -> None:
+    """Add one engine; the registration order is the order of the UI list."""
+    ENGINES[engine.id] = engine
+
+
+_register(Engine(
+    id=DEFAULT_ENGINE,
+    label="Faster-Whisper",
+    transcribe=_transcribe_faster,
+    status=_status_faster,
+    uses_models=True,
+    needs_setup=True,
+    # ``custom_model`` is the "custom" entry of the model list, and the worker
+    # settings only exist for this engine.  ``compute_type_*`` are still read
+    # by nothing (the quantization is derived from the device), but they name a
+    # faster-whisper setting, so they belong here rather than to nobody.
+    settings=(
+        "model",
+        "custom_model",
+        "compute_type_cpu",
+        "compute_type_cuda",
+        "device",
+        "beam_size",
+        "vad_filter",
+        "engine_worker",
+        "engine_worker_idle_sec",
+    ),
+    setup=request_faster_setup,
+))
+
+_register(Engine(
+    id="whisper-cpp",
+    label="whisper.cpp",
+    transcribe=_transcribe_whisper_cpp,
+    status=_status_whisper_cpp,
+    uses_models=False,
+    needs_setup=False,
+    settings=("whisper_cpp_binary", "whisper_cpp_model", "whisper_cpp_gpu"),
+))
+
+_register(Engine(
+    id="custom",
+    label="External command",
+    transcribe=_transcribe_custom,
+    status=_status_custom,
+    uses_models=False,
+    needs_setup=False,
+    settings=("custom_command",),
+))
+
+
+def engine_ids() -> list[str]:
+    """Engine ids in registration order -- the order of the settings list."""
+    return list(ENGINES)
+
+
+def get_engine(engine_id: str | None) -> Engine | None:
+    """Return a registered engine, or ``None`` when nothing claims the id."""
+    return ENGINES.get(str(engine_id or ""))
+
+
+def engine_label(engine_id: str | None) -> str:
+    """Name of an engine as the user knows it; its own id when unknown."""
+    engine = get_engine(engine_id)
+    return engine.label if engine else str(engine_id or "")
+
+
+def engine_from_config(cfg: dict[str, Any]) -> Engine | None:
+    """Engine a config selects, or ``None`` when its id is unknown.
+
+    ``None`` is handed back instead of a default engine on purpose: a config
+    that names a nonexistent engine is broken, and only the caller knows how
+    much to say about it.
+    """
+    return get_engine(cfg.get("engine", DEFAULT_ENGINE))
+
+
+def request_engine_setup(engine: Engine | None) -> bool:
+    """Ask for the runtime of ``engine`` to be prepared in the background.
+
+    Returns ``False`` when that engine needs no preparation at all, so a
+    caller can tell the user instead of doing nothing quietly.
+    """
+    if engine is None or not engine.needs_setup or engine.setup is None:
+        return False
+    engine.setup()
+    return True

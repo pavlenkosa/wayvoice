@@ -7,7 +7,11 @@ import sys
 
 from . import deps
 from .config import load_config
-from .engine import engine_status, request_faster_setup
+from .engine import (
+    engine_from_config,
+    engine_status,
+    request_engine_setup,
+)
 from .i18n import tr
 from .paths import setup_user_script
 from .pkgsys import (
@@ -189,9 +193,20 @@ def main() -> None:
             raise SystemExit(1)
         return
     if command == "engine-setup":
-        request_faster_setup()
-        print("Запуск подготовки Faster-Whisper запрошен.")
-        return
+        cfg = load_config()
+        engine = engine_from_config(cfg)
+        if engine is None:
+            # A broken config, not an engine without setup: saying the latter
+            # would hide the actual problem.
+            print(f"Неизвестный движок распознавания: {cfg.get('engine')}", file=sys.stderr)
+            raise SystemExit(1)
+        if request_engine_setup(engine):
+            print(f"Запуск подготовки {engine.label} запрошен.")
+            return
+        # The registry says this engine has nothing to prepare. Say so instead
+        # of starting a runtime for a recognizer that is not in use.
+        print(f"{engine.label} не требует подготовки.", file=sys.stderr)
+        raise SystemExit(1)
     if command == "engine-status":
         print(json.dumps(engine_status(load_config()), ensure_ascii=False, indent=2))
         return
