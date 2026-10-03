@@ -15,7 +15,7 @@ from typing import Any
 
 from . import fw_worker
 from .models import forced_language
-from .paths import script_path
+from .paths import app_dir, script_path
 from .postprocess import normalize
 
 ENGINE_LABELS = {
@@ -68,6 +68,27 @@ def _state_home() -> Path:
 
 
 def faster_runtime() -> Path:
+    """Return the directory holding the Faster-Whisper runtime.
+
+    Three locations, in order:
+
+    1. ``WAYVOICE_RUNTIME`` -- an explicit override;
+    2. a runtime shipped next to the application, i.e.
+       ``<prefix>/lib/wayvoice/runtime``. Only used when it really holds a
+       Python interpreter, so a leftover empty directory is ignored. This is
+       how the Flatpak build finds the engine that was baked into the image:
+       inside a sandbox ``XDG_DATA_HOME`` is a run-time directory, so the
+       per-user location below cannot hold a prebuilt engine;
+    3. the per-user ``$XDG_DATA_HOME/wayvoice/runtime``, which
+       :mod:`wayvoice.engine_setup` creates on first use. This is what the
+       Debian package uses.
+    """
+    override = os.environ.get("WAYVOICE_RUNTIME")
+    if override:
+        return Path(override).expanduser()
+    bundled = app_dir().parent / "runtime"
+    if (bundled / "bin" / "python").exists():
+        return bundled
     return _data_home() / "wayvoice" / "runtime"
 
 
