@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
 import subprocess
 from dataclasses import dataclass, field
 
@@ -213,20 +214,63 @@ def install_packages(packages: list[str], timeout: float = 300.0) -> tuple[bool,
 
     command = [*elevated, *argv]
     try:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             command,
-            check=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            timeout=timeout,
+            # Its own session, so the timeout below can take down the whole
+            # tree.  Killing only pkexec leaves apt-get running, and apt still
+            # holds /var/lib/dpkg/lock: the next attempt by the user then fails
+            # with "Could not get lock", which says nothing about the timeout
+            # that caused it.
+            start_new_session=True,
         )
-    except subprocess.TimeoutExpired:
-        return False, tr("pkgsys.timeout", seconds=int(timeout))
     except OSError as exc:
         return False, tr("pkgsys.failed", reason=str(exc))
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_tree(proc)
+        try:
+            stdout, stderr = proc.communicate(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            return False, tr("pkgsys.timeout", seconds=_seconds(timeout))
+        detail = _tail(stderr) or _tail(stdout)
+        if not detail:
+            return False, tr("pkgsys.timeout", seconds=_seconds(timeout))
+        return False, tr(
+            "pkgsys.timeout_detail",
+            seconds=_seconds(timeout),
+            detail=detail,
+        )
+    return _result(proc.returncode, packages, stdout, stderr)
 
-    if proc.returncode == 0:
+
+def _seconds(timeout: float) -> int:
+    """Whole seconds for a message; never "0 s" for something that timed out."""
+    return max(1, int(round(float(timeout))))
+
+
+def _kill_tree(proc) -> None:
+    """Terminate a package manager and everything it started."""
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(proc.pid, sig)
+        except OSError:
+            try:
+                proc.kill() if sig == signal.SIGKILL else proc.terminate()
+            except OSError:
+                return
+        try:
+            proc.wait(timeout=3.0)
+            return
+        except subprocess.TimeoutExpired:
+            continue
+
+
+def _result(returncode: int, packages, stdout: str, stderr: str) -> tuple[bool, str]:
+    if returncode == 0:
         return True, tr("pkgsys.installed", packages=", ".join(packages))
-    output = _tail(proc.stderr) or _tail(proc.stdout)
-    return False, tr("pkgsys.failed", reason=output or f"exit code {proc.returncode}")
+    output = _tail(stderr) or _tail(stdout)
+    return False, tr("pkgsys.failed", reason=output or f"exit code {returncode}")

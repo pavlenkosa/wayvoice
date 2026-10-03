@@ -8,6 +8,7 @@ from wayvoice.engine import (
     _language,
     _postprocess,
     _run_cancelable,
+    _worker_settings_match,
     worker_info,
 )
 
@@ -19,7 +20,9 @@ class WorkerInfoTests(unittest.TestCase):
         from unittest import mock
 
         with mock.patch("wayvoice.engine._worker_ping", return_value=None):
-            self.assertEqual(worker_info(), {"running": False, "model": ""})
+            self.assertEqual(
+                worker_info(), {"running": False, "model": "", "version": ""}
+            )
 
     def test_running_worker_reports_the_model_it_holds(self):
         from unittest import mock
@@ -39,6 +42,48 @@ class WorkerInfoTests(unittest.TestCase):
             info = worker_info()
         self.assertTrue(info["running"])
         self.assertEqual(info["model"], "")
+
+
+class WorkerVersionTests(unittest.TestCase):
+    """A worker outliving an update must not answer for the new code.
+
+    The warm worker deliberately survives daemon restarts - that is what makes
+    the second dictation fast.  After an update the daemon is new and the worker
+    is not, so the version has to be part of the match or the previous release
+    keeps decoding speech.
+    """
+
+    def test_a_worker_from_another_version_does_not_match(self):
+        from unittest import mock
+
+        from wayvoice import __version__
+
+        reply = {
+            "ok": True,
+            "version": "0.0.1-old",
+            "config": {"model": "small", "device": "auto", "beam_size": 5, "vad": True},
+        }
+        with mock.patch("wayvoice.engine._worker_ping", return_value=reply):
+            self.assertFalse(_worker_settings_match(reply, {"model": "small"}))
+
+    def test_a_worker_of_this_version_matches(self):
+        from unittest import mock
+
+        from wayvoice import __version__
+
+        reply = {
+            "ok": True,
+            "version": __version__,
+            "config": {"model": "small", "device": "auto", "beam_size": 5, "vad": True},
+        }
+        with mock.patch("wayvoice.engine._worker_ping", return_value=reply):
+            self.assertTrue(_worker_settings_match(reply, {"model": "small"}))
+
+    def test_a_worker_that_reports_no_version_is_still_trusted(self):
+        # An older worker has no version field at all. Refusing it would mean
+        # never using a warm worker again after one restart.
+        reply = {"ok": True, "config": {"model": "small", "device": "auto", "beam_size": 5, "vad": True}}
+        self.assertTrue(_worker_settings_match(reply, {"model": "small"}))
 
 class EngineProcessTests(unittest.TestCase):
     def test_timeout_kills_process(self):

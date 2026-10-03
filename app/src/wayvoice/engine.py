@@ -7,6 +7,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -16,6 +17,7 @@ from typing import Any, Callable
 
 from . import fw_worker
 from . import languages
+from . import __version__
 from . import service
 from .models import forced_language
 from .paths import app_dir, script_path
@@ -220,19 +222,25 @@ def engine_status(cfg: dict[str, Any]) -> dict[str, Any]:
     return {"id": engine.id, "label": engine.label, **engine.status(cfg)}
 
 
-def _terminate_process(proc: subprocess.Popen[str]) -> None:
+def _terminate_process(proc: subprocess.Popen[str]) -> bool:
+    """Stop a child and its group; return whether it is really gone.
+
+    Every failure here is swallowed on purpose - the caller is already on an
+    error path - but the outcome is reported, because a process that survived
+    both signals would leave the caller waiting on its pipes forever.
+    """
     if proc.poll() is not None:
-        return
+        return True
     try:
         os.killpg(proc.pid, signal.SIGTERM)
     except Exception:
         try:
             proc.terminate()
         except Exception:
-            return
+            return proc.poll() is not None
     try:
         proc.wait(timeout=1.5)
-        return
+        return True
     except subprocess.TimeoutExpired:
         pass
     try:
@@ -242,6 +250,59 @@ def _terminate_process(proc: subprocess.Popen[str]) -> None:
             proc.kill()
         except Exception:
             pass
+    try:
+        proc.wait(timeout=1.5)
+    except subprocess.TimeoutExpired:
+        return proc.poll() is not None
+    return True
+
+
+def _start_readers(proc: subprocess.Popen[str]) -> tuple[list[threading.Thread], list[str], list[str]]:
+    """Begin draining the child's pipes at once and return the buffers.
+
+    ``communicate()`` alone is not enough here: the loop in
+    :func:`_run_cancelable` polls the child instead of talking to it, so nothing
+    drains the pipes while it runs.  An engine that writes more than one pipe
+    buffer - ctranslate2 is not quiet about a model it does not like - blocks on
+    the write and never exits, and the user is told the recognition timed out
+    rather than what actually happened.
+    """
+    out: list[str] = []
+    err: list[str] = []
+
+    def read(stream, sink):
+        try:
+            sink.append(stream.read() or "")
+        except Exception:
+            sink.append("")
+
+    threads: list[threading.Thread] = []
+    for stream, sink in ((proc.stdout, out), (proc.stderr, err)):
+        if stream is None:
+            continue
+        thread = threading.Thread(target=read, args=(stream, sink), daemon=True)
+        thread.start()
+        threads.append(thread)
+    return threads, out, err
+
+
+def _finish(
+    proc: subprocess.Popen[str],
+    readers: list[threading.Thread],
+    error: Exception,
+) -> Exception:
+    """Stop a child, let its readers finish, and return the error to raise."""
+    _terminate_process(proc)
+    deadline = time.monotonic() + 5.0
+    for thread in readers:
+        thread.join(timeout=max(0.1, deadline - time.monotonic()))
+    for stream in (proc.stdout, proc.stderr):
+        try:
+            if stream is not None:
+                stream.close()
+        except Exception:
+            pass
+    return error
 
 
 def _run_cancelable(
@@ -259,19 +320,25 @@ def _run_cancelable(
         env=env,
         start_new_session=True,
     )
+    readers, out, err = _start_readers(proc)
     started = time.monotonic()
     while proc.poll() is None:
         if cancel_event is not None and cancel_event.is_set():
-            _terminate_process(proc)
-            proc.communicate()
-            raise TranscriptionCancelled("Transcription cancelled")
+            raise _finish(
+                proc, readers, TranscriptionCancelled("Transcription cancelled")
+            )
         if timeout > 0 and time.monotonic() - started >= timeout:
-            _terminate_process(proc)
-            proc.communicate()
-            raise TranscriptionTimeout(f"Transcription exceeded {int(timeout)} seconds")
+            raise _finish(
+                proc,
+                readers,
+                TranscriptionTimeout(f"Transcription exceeded {int(timeout)} seconds"),
+            )
         time.sleep(0.12)
-    stdout, stderr = proc.communicate()
-    return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)
+    for thread in readers:
+        thread.join(timeout=5.0)
+    return subprocess.CompletedProcess(
+        args, proc.returncode, "".join(out), "".join(err)
+    )
 
 
 # --------------------------------------------------------------------------
@@ -338,7 +405,15 @@ def _worker_settings_match(reply: dict[str, Any], cfg: dict[str, Any]) -> bool:
 
     An unknown worker (no ``config`` in its reply) is left alone: replacing it
     would be worse than trusting it.
+
+    The version is part of the answer. The worker keeps running across daemon
+    restarts - that is what makes it warm - so after an update the daemon would
+    otherwise keep sending requests to a process that is running the previous
+    version of the code, and neither of them would ever mention it.
     """
+    remote_version = str(reply.get("version") or "")
+    if remote_version and remote_version != __version__:
+        return False
     remote = reply.get("config")
     if not isinstance(remote, dict):
         return True
@@ -386,13 +461,16 @@ def _is_worker_process(pid: int) -> bool:
     """Return whether ``pid`` looks like a WayVoice worker process.
 
     The pid file can outlive a crash and pids get recycled, so the command line
-    is verified before anything is signalled.
+    is verified before anything is signalled.  ``--serve`` is required as well:
+    the one-shot runner is the same script, and stopping "the worker" must never
+    kill a transcription that is running on its own.
     """
     try:
         raw = Path(f"/proc/{pid}/cmdline").read_bytes()
     except OSError:
         return False
-    return "fw_runner.py" in raw.decode("utf-8", "replace")
+    argv = raw.decode("utf-8", "replace")
+    return "fw_runner.py" in argv and "--serve" in argv
 
 
 def stop_worker() -> bool:
@@ -437,12 +515,12 @@ def stop_worker() -> bool:
 def worker_info() -> dict[str, Any]:
     """What the warm worker is holding right now.
 
-    ``{"running": bool, "model": str}``.  The settings window asks before it
-    offers to delete a model, and a model held in the worker's memory is one
-    the user is about to need again: deleting it under the worker's feet would
-    leave the recognizer claiming a model that is no longer there.  The model
-    is the raw configured value, so the caller compares it with what the window
-    shows rather than with a repository id.
+    ``{"running": bool, "model": str, "version": str}``.  The settings window
+    asks before it offers to delete a model, and a model held in the worker's
+    memory is one the user is about to need again: deleting it under the
+    worker's feet would leave the recognizer claiming a model that is no longer
+    there.  The model is the raw configured value, so the caller compares it
+    with what the window shows rather than with a repository id.
 
     Never raises and never blocks for long: a worker that does not answer the
     ping within :data:`WORKER_PING_TIMEOUT` counts as "not running", which is
@@ -450,10 +528,14 @@ def worker_info() -> dict[str, Any]:
     """
     reply = _worker_ping()
     if reply is None:
-        return {"running": False, "model": ""}
+        return {"running": False, "model": "", "version": ""}
     remote = reply.get("config")
     model = str(remote.get("model") or "") if isinstance(remote, dict) else ""
-    return {"running": True, "model": model}
+    return {
+        "running": True,
+        "model": model,
+        "version": str(reply.get("version") or ""),
+    }
 
 
 def _start_worker(cfg: dict[str, Any]) -> bool:

@@ -34,7 +34,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
+from . import __version__
+
 SOCKET_NAME = "wayvoice-fw.sock"
+#: Private directory inside the runtime dir that holds the socket.
+SOCKET_DIR = "wayvoice"
 
 # Conservative no-speech guard. It intentionally requires both a high
 # no-speech probability and a poor log probability so quiet real speech is
@@ -59,24 +63,35 @@ _CANCEL_GRACE = 5.0
 def default_socket_path() -> Path:
     """Return the default worker socket path.
 
-    ``XDG_RUNTIME_DIR`` is where it belongs: it is per-user, mode 0700, and
-    removed at logout.  ``/tmp`` is a world-writable directory with predictable
-    names, and a socket there is not just a leak of a file path - whoever wins
-    the race to create it answers the daemon's requests, so another local user
-    could hand back the text that gets typed into the victim's focused window.
-    For that case a private directory is created instead of a shared one, and if
-    even that fails the worker refuses to start rather than listen somewhere
-    unsafe.
+    The socket lives in a directory of our own making, mode 0700, inside
+    ``XDG_RUNTIME_DIR`` (or ``/tmp`` when there is none).  Directly in the
+    runtime directory would be simpler but not safe enough: that directory is
+    not always ours alone, and ``/tmp`` is world-writable with predictable
+    names - whoever wins the race to create the socket answers the daemon's
+    requests, so another local user could hand back the text that gets typed
+    into the victim's focused window.
+
+    The directory is created here rather than trusted, so a group-writable or
+    otherwise unusual ``XDG_RUNTIME_DIR`` costs nothing.  Refusing to listen
+    instead is the last resort: it silently costs every dictation the warm
+    worker, and a user would only notice as "slower than it used to be".
     """
     runtime = os.environ.get("XDG_RUNTIME_DIR", "").strip()
-    if runtime:
-        return Path(runtime) / SOCKET_NAME
-    private = Path(tempfile.gettempdir()) / f"wayvoice-{os.getuid()}"
+    base = Path(runtime) if runtime else Path(tempfile.gettempdir())
+    private = base / SOCKET_DIR
     try:
-        private.mkdir(mode=0o700, exist_ok=True)
+        private.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.chmod(private, 0o700)
     except OSError:
-        pass
+        # Unwritable runtime dir: fall back to a per-user directory in /tmp,
+        # which is private by construction rather than by convention.
+        fallback = Path(tempfile.gettempdir()) / f"wayvoice-{os.getuid()}"
+        try:
+            fallback.mkdir(mode=0o700, exist_ok=True)
+            os.chmod(fallback, 0o700)
+        except OSError:
+            return private / SOCKET_NAME
+        return fallback / SOCKET_NAME
     return private / SOCKET_NAME
 
 
@@ -199,6 +214,12 @@ def ping_reply(cache: ModelCache, config: WorkerConfig) -> dict[str, Any]:
         "ok": True,
         "pong": True,
         "pid": os.getpid(),
+        # The code that answers a request is the code that was running when the
+        # worker started.  A worker outlives the daemon - that is the whole
+        # point of keeping it warm - so after an update the new daemon would
+        # otherwise hand its requests to a process running the previous
+        # version, and nothing would say so.
+        "version": __version__,
         "model": config.model,
         "device": device,
         "compute_type": compute_type_for(device),
@@ -362,8 +383,9 @@ def _bind(path: Path) -> socket.socket | None:
     The parent directory has to be private to this user.  A socket in a
     world-writable directory is reachable - and answerable - by anyone on the
     machine, and what this worker returns is text that gets typed into the
-    user's window, so a worker that cannot get a private directory refuses to
-    start instead of listening somewhere shared.
+    user's window.  Group-writable is tolerated on purpose: the socket itself
+    is 0600, and refusing to start over it would cost every dictation the warm
+    worker, which is a much worse outcome than the one it prevents.
     """
     try:
         stat_result = path.parent.stat()
@@ -371,7 +393,7 @@ def _bind(path: Path) -> socket.socket | None:
         return None
     if not stat.S_ISDIR(stat_result.st_mode) or stat_result.st_uid != os.getuid():
         return None
-    if stat_result.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+    if stat_result.st_mode & stat.S_IWOTH:
         return None
     if _probe(path):
         return None

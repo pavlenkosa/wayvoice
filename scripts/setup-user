@@ -21,10 +21,27 @@ else
 fi
 
 # Apply the shortcut stored in the user's WayVoice config (F8 by default).
-"$wayvoice_cmd" apply-shortcut >/dev/null 2>&1 || true
+# The outcome is reported instead of being swallowed: this script runs after a
+# dependency was installed, and "installed successfully" next to a shortcut that
+# was never applied is exactly the combination that leaves a user with an app
+# that does nothing and no reason why.
+problems=0
+
+if ! output="$("$wayvoice_cmd" apply-shortcut 2>&1)"; then
+    printf 'setup-user: could not apply the global shortcut: %s\n' "$output" >&2
+    problems=$((problems + 1))
+fi
 
 # ydotool may be installed later from backports.
 if command -v ydotoold >/dev/null 2>&1; then
-    systemctl --user enable --now wayvoice-ydotool.service >/dev/null 2>&1 || true
+    if ! output="$(systemctl --user enable --now wayvoice-ydotool.service 2>&1)"; then
+        printf 'setup-user: could not start ydotoold: %s\n' "$output" >&2
+        problems=$((problems + 1))
+    fi
+fi
+
+if [ "$problems" -gt 0 ]; then
+    printf 'setup-user: %s step(s) did not complete; WayVoice will not react to the hotkey\n' "$problems" >&2
+    exit 1
 fi
 exit 0

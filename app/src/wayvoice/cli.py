@@ -56,27 +56,38 @@ def _language() -> str | None:
         return None
 
 
-def _run_setup_user() -> None:
+def _run_setup_user() -> tuple[bool, str]:
     """Re-apply the per-user desktop integration after a package install.
 
     ``setup-user`` applies the configured global shortcut and enables the
     ydotoold unit when ydotool is present; postinst only runs it once, at
-    package installation time. Best effort: a failure here must not turn a
-    successful install into an error.
+    package installation time.
+
+    The result is reported rather than discarded.  The package is installed at
+    this point, so a failure here cannot be allowed to look like one - but it
+    also must not be hidden, because what it breaks is the hotkey: a user whose
+    shortcut was not applied sees an app that ignores the key and has no way of
+    finding out why.
     """
     script = setup_user_script()
     if script is None:
-        return
+        return False, "setup-user not found"
     try:
-        subprocess.run(
+        proc = subprocess.run(
             [str(script)],
             check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=20,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
-    except (OSError, subprocess.SubprocessError):
-        pass
+    except subprocess.TimeoutExpired:
+        return False, "setup-user did not finish within 30s"
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, str(exc)
+    if proc.returncode == 0:
+        return True, ""
+    detail = (proc.stderr or proc.stdout or "").strip().splitlines()
+    return False, detail[-1] if detail else f"setup-user exited with {proc.returncode}"
 
 
 def _install_deps(args: list[str]) -> None:
@@ -172,7 +183,11 @@ def _install_deps(args: list[str]) -> None:
         raise SystemExit(1)
     # The desktop integration (shortcut, ydotoold unit) is applied by
     # setup-user, so re-run it: without this an installed package stays inert.
-    _run_setup_user()
+    applied, detail = _run_setup_user()
+    if not applied:
+        # Not an install failure - the package is in - but the hotkey may be
+        # dead, and that has to be said out loud.
+        print(tr("cli.deps_setup_user_failed", lang, reason=detail), file=sys.stderr)
     print(json.dumps(deps.status_all(), ensure_ascii=False, indent=2))
 
 

@@ -34,11 +34,10 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from threading import Lock
+from threading import RLock
 
 from .config import load_config
 from .paths import app_src_dir, python_executable
-from .protocol import socket_path
 from .shortcut import apply_shortcut
 
 # Sign of a running user manager.  ``/run/systemd/user`` is the historical
@@ -64,7 +63,12 @@ QUIT_TIMEOUT = 3.0
 # thread; without this both could see "no daemon answering" and each spawn one.
 # The daemon itself refuses to steal a live socket, this lock keeps two
 # processes from being spawned in the first place.
-_start_lock = Lock()
+#
+# Reentrant because restart_daemon() holds it across "ask the old daemon to
+# leave, wait for it, spawn the new one" and then calls start_daemon() - the
+# public entry point, so the tests and any caller keep working - which would
+# deadlock on a plain lock.
+_start_lock = RLock()
 
 
 def _state_home() -> Path:
@@ -201,17 +205,22 @@ def start_daemon(wait: float = 5.0) -> bool:
         if systemd_available():
             return _systemctl("start", DAEMON_UNIT)
         with _start_lock:
-            if daemon_socket_alive():
-                return True
-            try:
-                _spawn(DAEMON_MODULE)
-            except Exception as exc:
-                print(f"WayVoice: failed to start the daemon: {exc}", file=sys.stderr)
-                return False
-            return _wait_for_daemon(wait)
+            return _start_daemon_locked(wait=wait)
     except Exception as exc:
         print(f"WayVoice: could not start the daemon: {exc}", file=sys.stderr)
         return False
+
+
+def _start_daemon_locked(wait: float = 5.0) -> bool:
+    """Spawn and wait for the daemon; the caller already holds the lock."""
+    if daemon_socket_alive():
+        return True
+    try:
+        _spawn(DAEMON_MODULE)
+    except Exception as exc:
+        print(f"WayVoice: failed to start the daemon: {exc}", file=sys.stderr)
+        return False
+    return _wait_for_daemon(wait)
 
 
 def _is_daemon_process(pid: int) -> bool:
@@ -271,30 +280,37 @@ def restart_daemon(wait: float = 5.0) -> bool:
     directly spawned daemon is asked to leave through its own ``quit``
     command, so it can close the socket and the recording timer properly; only
     if it does not go away is it signalled by pid.
+
+    The whole sequence holds ``_start_lock``.  The window also starts a daemon
+    from a background thread, and without the lock the two could interleave:
+    this one asks the daemon to quit, the other spawns a replacement that binds
+    the socket, and then the quitting daemon leaves - after which there is no
+    daemon at all, and this function reports a failure that did not happen.
     """
-    try:
-        if systemd_available():
-            return _systemctl("restart", DAEMON_UNIT)
-        if daemon_socket_alive():
-            try:
-                _request("quit", timeout=1.0)
-            except Exception:
-                pass
-            deadline = time.monotonic() + QUIT_TIMEOUT
-            while time.monotonic() < deadline:
-                if not daemon_socket_alive(timeout=0.2):
-                    break
-                time.sleep(POLL_INTERVAL)
-            if daemon_socket_alive(timeout=0.2):
-                print(
-                    "WayVoice: the daemon ignored the quit request; terminating it.",
-                    file=sys.stderr,
-                )
-                _force_stop_daemon()
-        return start_daemon(wait=wait)
-    except Exception as exc:
-        print(f"WayVoice: could not restart the daemon: {exc}", file=sys.stderr)
-        return False
+    with _start_lock:
+        try:
+            if systemd_available():
+                return _systemctl("restart", DAEMON_UNIT)
+            if daemon_socket_alive():
+                try:
+                    _request("quit", timeout=1.0)
+                except Exception:
+                    pass
+                deadline = time.monotonic() + QUIT_TIMEOUT
+                while time.monotonic() < deadline:
+                    if not daemon_socket_alive(timeout=0.2):
+                        break
+                    time.sleep(POLL_INTERVAL)
+                if daemon_socket_alive(timeout=0.2):
+                    print(
+                        "WayVoice: the daemon ignored the quit request; terminating it.",
+                        file=sys.stderr,
+                    )
+                    _force_stop_daemon()
+            return start_daemon(wait=wait)
+        except Exception as exc:
+            print(f"WayVoice: could not restart the daemon: {exc}", file=sys.stderr)
+            return False
 
 
 def request_engine_setup() -> None:
