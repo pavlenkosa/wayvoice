@@ -20,6 +20,8 @@ from wayvoice import daemon as daemon_mod
 from wayvoice.daemon import WayVoiceDaemon
 from wayvoice.engine import Engine
 
+from support import isolate_engine
+
 
 def make_engine(*, present: bool, states: list[str] | None = None, progress=None,
                 warm: bool = False, delay: float = 0.0):
@@ -65,7 +67,9 @@ def make_engine(*, present: bool, states: list[str] | None = None, progress=None
         status=lambda cfg: {"state": "ready", "message": ""},
         uses_models=True,
         needs_setup=False,
-        settings=("model",),
+        # "engine_worker" is what says this engine has a warm worker at all; the
+        # real registry lists it for Faster-Whisper only.
+        settings=("model", "engine_worker"),
         model_present=model_present,
         model_download=model_download,
     )
@@ -78,6 +82,9 @@ class DaemonCase(unittest.TestCase):
     def setUp(self):
         self.patches = contextlib.ExitStack()
         self.addCleanup(self.patches.close)
+        # A daemon reads the user's config, walks the user's model cache and
+        # starts a warm worker for it; none of that belongs in a test run.
+        isolate_engine(self)
 
     def patch(self, target: str, **kwargs):
         return self.patches.enter_context(mock.patch(target, **kwargs))

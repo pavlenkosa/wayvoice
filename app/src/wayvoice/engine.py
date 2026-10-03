@@ -1260,6 +1260,10 @@ def prepare_model(
             return reply
     if not cfg.get("engine_worker", True):
         return reply
+    if engine is None or "engine_worker" not in engine.settings:
+        # No worker for this engine: the warm one speaks the Faster-Whisper
+        # protocol and would be asked to warm a model that it cannot hold.
+        return reply
     if on_warming is not None:
         try:
             on_warming()

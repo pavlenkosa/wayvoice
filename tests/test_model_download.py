@@ -219,6 +219,24 @@ class PrepareTests(unittest.TestCase):
         self.assertTrue(reply["warming"])
         self.assertTrue(warm.called)
 
+    def test_an_engine_without_a_warm_worker_is_never_warmed(self):
+        # The warm worker speaks the Faster-Whisper protocol. Asking it to warm a
+        # model for whisper.cpp or an external command would either do nothing
+        # or, worse, report a success that means nothing.
+        from dataclasses import replace
+
+        for engine_id in ("whisper-cpp", "custom"):
+            base = engine.get_engine(engine_id)
+            self.assertNotIn("engine_worker", base.settings, engine_id)
+            def download(cfg, on_progress=None, cancel_event=None):
+                return {"state": "ready", "error": ""}
+
+            fake = replace(base, model_present=lambda cfg: True, model_download=download)
+            with mock.patch.object(engine, "warm_worker") as warm:
+                reply = engine.prepare_model(fake, {"engine_worker": True})
+            self.assertFalse(reply["warming"], engine_id)
+            self.assertFalse(warm.called, engine_id)
+
     def test_a_disabled_worker_is_not_warmed(self):
         def download(cfg, on_progress=None, cancel_event=None):
             return {"state": "ready", "error": ""}

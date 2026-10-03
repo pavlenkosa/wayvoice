@@ -26,6 +26,8 @@ from wayvoice import daemon as daemon_mod
 from wayvoice.daemon import CLIENT_TIMEOUT, MAX_REQUEST_BYTES, WayVoiceDaemon
 from wayvoice.protocol import owner_lock_path, socket_path
 
+from support import isolate_engine
+
 
 def _ping(path, timeout=2.0):
     client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -88,6 +90,7 @@ class _ServerFixture:
 
 class ServeRobustnessTests(unittest.TestCase):
     def setUp(self):
+        isolate_engine(self)
         self.server = _ServerFixture(self)
         self.assertTrue(self.server.wait_until_serving(), "the daemon did not start")
         self.path = self.server.path
@@ -158,6 +161,7 @@ class OwnershipTests(unittest.TestCase):
     """Only one daemon may own the session, and it must be provable."""
 
     def setUp(self):
+        isolate_engine(self)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         patch = mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": self.tmp.name})
@@ -212,6 +216,7 @@ class ShutdownTests(unittest.TestCase):
     """Leaving must not leave the microphone behind."""
 
     def setUp(self):
+        isolate_engine(self)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         patch = mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": self.tmp.name})
@@ -247,6 +252,7 @@ class NotifyTests(unittest.TestCase):
     """A notification is decoration and must never become an error."""
 
     def setUp(self):
+        isolate_engine(self)
         from wayvoice import notify as notify_mod
 
         self.notify_mod = notify_mod
