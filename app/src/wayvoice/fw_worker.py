@@ -229,6 +229,40 @@ def ping_reply(cache: ModelCache, config: WorkerConfig) -> dict[str, Any]:
     }
 
 
+def warm_reply(cache: ModelCache, config: WorkerConfig) -> dict[str, Any]:
+    """Load the model into memory and report how long that took.
+
+    Loading a model is the slow part of a dictation - seconds for ``small``,
+    minutes for ``large-v3`` - and it is pure waiting: the model is read from
+    disk and put in RAM, with nothing to do until the user presses the key.  The
+    daemon does this once after it starts, so the first dictation costs the same
+    as the ones after it.
+
+    A failure here is reported, not raised: the model stays unloaded and the
+    worker keeps serving, which is exactly where a lazily loaded model would
+    have been anyway.
+    """
+    if cache.loaded():
+        return {"ok": True, "warm": True, "model": config.model, "seconds": 0.0}
+    started = time.monotonic()
+    try:
+        device = resolve_device(config.device)
+        cache.get(config.model, device, compute_type_for(device))
+    except Exception as exc:
+        return {
+            "ok": False,
+            "warm": False,
+            "model": config.model,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    return {
+        "ok": True,
+        "warm": True,
+        "model": config.model,
+        "seconds": round(time.monotonic() - started, 2),
+    }
+
+
 def handle_request(
     payload: dict[str, Any],
     cache: ModelCache,
@@ -237,8 +271,8 @@ def handle_request(
 ) -> dict[str, Any]:
     """Serve one request and return the reply object.
 
-    Supported commands are ``ping`` and ``transcribe``; anything else is
-    reported as an error instead of raising, so a misbehaving client cannot
+    Supported commands are ``ping``, ``warm`` and ``transcribe``; anything else
+    is reported as an error instead of raising, so a misbehaving client cannot
     take the worker down.  A cancelled transcription returns
     ``{"ok": False, "cancelled": True, ...}``.
     """
@@ -248,6 +282,8 @@ def handle_request(
     command = str(payload.get("cmd") or "").strip()
     if command == "ping":
         return ping_reply(cache, config)
+    if command == "warm":
+        return warm_reply(cache, config)
     if command != "transcribe":
         return {"ok": False, "error": f"Unknown command: {command or '<empty>'}"}
 
@@ -434,6 +470,16 @@ def _send(conn: socket.socket, reply: dict[str, Any]) -> None:
 
 def _dispatch(payload: Any, cache: ModelCache, config: WorkerConfig, state: _WorkerState) -> dict[str, Any]:
     command = str(payload.get("cmd") or "").strip() if isinstance(payload, dict) else ""
+    if command == "ping":
+        # Never blocked and never waits for the lock: this is how the daemon
+        # checks whether a warm-up that takes minutes is finished, and a ping
+        # that waited for the model would answer exactly when it is not needed.
+        return handle_request(payload, cache, config)
+    if command == "warm":
+        # Under the same lock as a transcription: loading weights into RAM while
+        # something is being decoded would double the memory for no reason.
+        with state.serial:
+            return handle_request(payload, cache, config)
     if command != "transcribe":
         return handle_request(payload, cache, config)
     request_id = str(payload.get("request_id") or "")

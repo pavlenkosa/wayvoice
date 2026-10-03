@@ -10,7 +10,13 @@ from pathlib import Path
 from unittest import mock
 
 from wayvoice import fw_worker
-from wayvoice.fw_worker import ModelCache, WorkerConfig, handle_request, run_server
+from wayvoice.fw_worker import (
+    ModelCache,
+    WorkerConfig,
+    handle_request,
+    ping_reply,
+    run_server,
+)
 
 
 class FakeSegment:
@@ -417,6 +423,99 @@ class RunServerCancelTests(unittest.TestCase):
         self.assertFalse(result["reply"]["ok"])
         self.assertTrue(result["reply"]["cancelled"])
         self.assertEqual(result["reply"]["request_id"], "slow-1")
+
+
+class WarmTests(unittest.TestCase):
+    """Loading the model before the first dictation needs it.
+
+    The daemon asks for this right after it starts, so that the first recording
+    costs the same as every one after it.
+    """
+
+    def setUp(self):
+        self.factory = RecordingFactory([FakeSegment("привет")])
+        self.cache = ModelCache(self.factory)
+        self.config = WorkerConfig(model="tiny", device="cpu", beam_size=3, vad=False)
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def test_warming_loads_the_model(self):
+        reply = handle_request({"cmd": "warm"}, self.cache, self.config)
+        self.assertTrue(reply["ok"], reply)
+        self.assertTrue(reply["warm"])
+        self.assertEqual(reply["model"], "tiny")
+        self.assertTrue(self.cache.loaded())
+        self.assertEqual(len(self.factory.calls), 1)
+
+    def test_a_second_warm_up_loads_nothing_again(self):
+        handle_request({"cmd": "warm"}, self.cache, self.config)
+        reply = handle_request({"cmd": "warm"}, self.cache, self.config)
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["seconds"], 0.0)
+        self.assertEqual(len(self.factory.calls), 1)
+
+    def test_the_ping_reports_a_warm_worker_as_warm(self):
+        self.assertFalse(ping_reply(self.cache, self.config)["warm"])
+        handle_request({"cmd": "warm"}, self.cache, self.config)
+        self.assertTrue(ping_reply(self.cache, self.config)["warm"])
+
+    def test_a_model_that_will_not_load_is_reported_and_not_raised(self):
+        # The worker stays usable: it keeps serving, and a later transcription
+        # fails on its own with the same reason.
+        def broken(model_id, device, compute_type):
+            raise OSError("model.bin is missing")
+
+        cache = ModelCache(broken)
+        reply = handle_request({"cmd": "warm"}, cache, self.config)
+        self.assertFalse(reply["ok"])
+        self.assertFalse(reply["warm"])
+        self.assertIn("model.bin is missing", reply["error"])
+        self.assertFalse(cache.loaded())
+
+    def test_the_first_transcription_after_a_warm_up_does_not_reload(self):
+        handle_request({"cmd": "warm"}, self.cache, self.config)
+        handle_request(
+            {"cmd": "transcribe", "audio": _audio_file(self.tmp.name),
+             "request_id": "r"},
+            self.cache,
+            self.config,
+        )
+        self.assertEqual(len(self.factory.calls), 1)
+
+    def test_the_duration_is_reported_so_a_slow_load_is_visible(self):
+        class SlowFactory(RecordingFactory):
+            def __call__(self, model_id, device, compute_type):
+                time.sleep(0.05)
+                return super().__call__(model_id, device, compute_type)
+
+        cache = ModelCache(SlowFactory())
+        reply = handle_request({"cmd": "warm"}, cache, self.config)
+        self.assertGreaterEqual(reply["seconds"], 0.0)
+
+
+class ServerWarmTests(unittest.TestCase):
+    """The warm-up over the socket the daemon actually uses."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.socket_path = Path(self.tmp.name) / "worker.sock"
+        self.factory = RecordingFactory([FakeSegment("привет")])
+        config = WorkerConfig(model="tiny", device="cpu", beam_size=3, vad=False)
+        # A short real idle timeout: the worker then stops itself shortly after
+        # the test, instead of the test waiting one out or leaving a live server
+        # thread behind.
+        self.thread = _start_worker_thread(
+            self.socket_path, config, self.factory, 1.0, time.monotonic
+        )
+        self.addCleanup(self.thread.join, 5.0)
+
+    def test_the_daemon_can_ask_the_running_worker_to_load_the_model(self):
+        reply = _call(self.socket_path, {"cmd": "warm"})
+        self.assertTrue(reply["ok"], reply)
+        self.assertTrue(reply["warm"])
+        # And the ping the daemon actually uses says so afterwards.
+        self.assertTrue(_call(self.socket_path, {"cmd": "ping"})["warm"])
 
 
 if __name__ == "__main__":

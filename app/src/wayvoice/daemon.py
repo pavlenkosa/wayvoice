@@ -21,6 +21,8 @@ from .engine import (
     TranscriptionTimeout,
     engine_from_config,
     engine_status,
+    model_state,
+    prepare_model,
     request_engine_setup,
     transcribe,
 )
@@ -82,11 +84,23 @@ class WayVoiceDaemon:
         self._record_timer: threading.Timer | None = None
         self._record_started = 0.0
         self._busy_started = 0.0
+        #: Progress of the background model preparation, and how to stop it.
+        self._download: dict = {
+            "state": "idle", "model": "", "done_bytes": 0, "total_bytes": 0,
+            "error": "", "warming": False,
+        }
+        self._prepare_thread: threading.Thread | None = None
+        self._prepare_cancel = threading.Event()
         _sweep_stale_recordings()
         cfg = load_config()
         engine = engine_from_config(cfg)
         if engine is not None and engine.needs_setup:
             self._prepare_engine(engine, engine_status(cfg))
+        # Warm the worker with the model that is already on disk: the first
+        # dictation of the session then costs the same as every one after it.
+        # Nothing is fetched here - a download is started when the user asks
+        # for it, by picking a model in the settings window.
+        self._start_model_prepare(cfg, download=False)
 
     @staticmethod
     def _prepare_engine(engine, status: dict) -> None:
@@ -98,6 +112,130 @@ class WayVoiceDaemon:
         """
         if status.get("state") in {"missing", "error"}:
             request_engine_setup(engine)
+
+    # ------------------------------------------------------------------
+    # Getting the model ready before it is needed
+    # ------------------------------------------------------------------
+    def _start_model_prepare(self, cfg: dict | None = None, download: bool = True) -> bool:
+        """Get the selected model ready: fetch it if asked to, then warm it.
+
+        Returns whether work was started.  Only ever one run at a time: two
+        downloads of the same 3 GB file would fight over the same cache, and the
+        second one's progress would be the first one's failure.
+
+        A model that is already there is not downloaded - the daemon asks this on
+        every start, and the answer must not involve the network - so
+        ``download=False`` is what startup uses: warm what is on disk, fetch
+        nothing.
+        """
+        settings = cfg or load_config()
+        engine = engine_from_config(settings)
+        state = model_state(engine, settings)
+        if not state["supported"]:
+            return False
+        if download:
+            if state["present"]:
+                # Already on disk: nothing to fetch, and the caller only asks
+                # for a download when it believes something is missing.
+                return False
+        else:
+            if not state["present"] or not settings.get("engine_worker", True):
+                # Nothing on disk to warm up, or the user turned the worker off.
+                return False
+        with self._lock:
+            if self._prepare_thread is not None and self._prepare_thread.is_alive():
+                return False
+            self._prepare_cancel.clear()
+            self._download = {
+                "state": "downloading" if download else "warming",
+                "model": state["model"],
+                "done_bytes": 0,
+                "total_bytes": 0,
+                "error": "",
+                "warming": not download,
+            }
+            thread = threading.Thread(
+                target=self._prepare_model_worker,
+                args=(settings, dict(self._download), download),
+                daemon=True,
+            )
+            self._prepare_thread = thread
+        try:
+            thread.start()
+        except Exception as exc:
+            with self._lock:
+                self._prepare_thread = None
+                self._download = {"state": "error", "model": state["model"],
+                                  "done_bytes": 0, "total_bytes": 0,
+                                  "error": str(exc), "warming": False}
+            return False
+        return True
+
+    def _prepare_model_worker(self, cfg: dict, reported: dict, download: bool) -> None:
+        """Fetch the model when asked to, then let the warm worker hold it.
+
+        Everything here happens on its own thread and must keep its hands off
+        the daemon's own locks: a dictation may be waiting on the hot key while
+        three gigabytes come down.
+        """
+        engine = engine_from_config(cfg)
+
+        def on_progress(done: int, total: int) -> None:
+            with self._lock:
+                # Never resurrect a download the user cancelled, and never
+                # overwrite the error of one that has already finished.
+                if self._download.get("state") != "downloading":
+                    return
+                self._download["done_bytes"] = int(done)
+                self._download["total_bytes"] = int(total)
+
+        def on_warming() -> None:
+            with self._lock:
+                if self._download.get("state") == "downloading":
+                    # Still the same wait from the user's side: the weights are
+                    # down and the model is going into memory. Reporting it only
+                    # in the final answer would leave the window sitting at 100%
+                    # for the whole of the load.
+                    self._download["warming"] = True
+
+        result = prepare_model(
+            engine, cfg, on_progress, self._prepare_cancel, on_warming, download
+        )
+        with self._lock:
+            self._download = {
+                "state": str(result.get("state") or "ready"),
+                "model": reported.get("model", ""),
+                "done_bytes": int(result.get("done") or 0),
+                "total_bytes": int(result.get("total") or 0),
+                "error": str(result.get("error") or ""),
+                # Whether the warm-up succeeded, not whether one is running:
+                # the reply is the end of the work, and a window that still said
+                # "preparing" after it finished would never stop.
+                "warming": False,
+            }
+            self._prepare_thread = None
+
+    def _cancel_model_prepare(self) -> bool:
+        with self._lock:
+            running = self._prepare_thread is not None and self._prepare_thread.is_alive()
+            self._prepare_cancel.set()
+        return running
+
+    def _model_report(self, cfg: dict) -> dict:
+        """Model state for :meth:`status`, merged with any run in flight."""
+        engine = engine_from_config(cfg)
+        state = model_state(engine, cfg)
+        with self._lock:
+            download = dict(self._download)
+        return {
+            "supported": state["supported"],
+            "present": state["present"],
+            "model": state["model"],
+            "download": download,
+            # Warming is not a download, but from the user's side it is the same
+            # wait: the model is not in memory yet and dictation will be slow.
+            "warming": bool(download.get("warming")) or download.get("state") == "warming",
+        }
 
     def status(self) -> dict:
         cfg = load_config()
@@ -115,6 +253,7 @@ class WayVoiceDaemon:
             # letting the window report a configuration the user never chose.
             "config_error": config_error(),
             "engine": engine_status(cfg),
+            "model": self._model_report(cfg),
             "shortcut": label_for(str(cfg.get("shortcut", "F8"))),
         }
 
@@ -150,6 +289,17 @@ class WayVoiceDaemon:
                 if engine is not None and engine.needs_setup:
                     self._prepare_engine(engine, est)
                 return {"ok": False, "error": est.get("message", "Recognition engine is not ready.")}
+            model = self._model_report(cfg)
+            if model["supported"] and not model["present"]:
+                # Recording into a dictation that cannot happen yet: the model
+                # would be fetched mid-transcription, which is a silent wait of
+                # minutes followed by a timeout. Start fetching now and say so
+                # instead - the user presses the key again once it is there.
+                self._start_model_prepare(cfg)
+                return {
+                    "ok": False,
+                    "error": tr("daemon.model_missing", cfg.get("ui_language"), model=model["model"]),
+                }
             try:
                 self.last_error = ""
                 self.last_warning = ""
@@ -297,6 +447,23 @@ class WayVoiceDaemon:
             self.last_error = ""
             self.last_warning = ""
             return {"ok": True}
+        if command == "prepare-model":
+            cfg = load_config()
+            if self._start_model_prepare(cfg):
+                return {"ok": True, "state": "downloading"}
+            state = self._model_report(cfg)
+            if not state["supported"]:
+                return {"ok": False, "error": "This engine has no models to download."}
+            if state["present"]:
+                return {"ok": True, "state": "ready"}
+            # Not started: a download is already running, or one just failed.
+            download = state["download"]
+            return {
+                "ok": False,
+                "error": str(download.get("error") or tr("daemon.model_prepare_busy", cfg.get("ui_language"))),
+            }
+        if command == "cancel-download":
+            return {"ok": self._cancel_model_prepare()}
         if command == "engine-setup":
             cfg = load_config()
             engine = engine_from_config(cfg)
@@ -437,6 +604,9 @@ class WayVoiceDaemon:
             except Exception as exc:  # never let this stop the shutdown
                 print(f"WayVoice: could not stop the recorder: {exc}", file=sys.stderr)
             self._transcribe_cancel.set()
+            # A download that outlives the daemon would keep fetching a file
+            # nobody is waiting for, in a session that is going away.
+            self._prepare_cancel.set()
             server.close()
             path.unlink(missing_ok=True)
 

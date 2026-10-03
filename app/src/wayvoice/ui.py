@@ -493,6 +493,25 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         self.model_state_row.add_suffix(self.model_delete_btn)
         engine_group.add(self.model_state_row)
 
+        # Downloading a model is the one thing here that takes minutes, so it
+        # gets its own row with a real bar and a cancel button instead of a
+        # subtitle that would have to be re-read to change.
+        self.model_download_row = Adw.ActionRow(title=self.t("store.download"))
+        self.model_download_bar = Gtk.ProgressBar(
+            valign=Gtk.Align.CENTER,
+            hexpand=True,
+            show_text=False,
+        )
+        self.model_download_row.add_suffix(self.model_download_bar)
+        self.model_download_cancel_btn = Gtk.Button(
+            label=self.t("common.cancel"),
+            valign=Gtk.Align.CENTER,
+        )
+        self.model_download_cancel_btn.connect("clicked", self._cancel_model_download)
+        self.model_download_row.add_suffix(self.model_download_cancel_btn)
+        self.model_download_row.set_visible(False)
+        engine_group.add(self.model_download_row)
+
         self.model_disk_row = Adw.ActionRow(
             title=self.t("store.storage"),
             subtitle=self.t("store.disk", size="…", cache="…", free="…"),
@@ -793,6 +812,22 @@ class WayVoiceWindow(Adw.ApplicationWindow):
     def _on_model_selected(self, *_args):
         self._sync_model_ui()
         self._refresh_model_state()
+        # Choosing a model is choosing weights. If the new one is not on disk,
+        # start fetching it now: the daemon would otherwise wait for the first
+        # dictation, and that wait is the invisible one this row exists to
+        # remove.
+        self._ask_daemon_to_prepare_model()
+
+    def _ask_daemon_to_prepare_model(self) -> None:
+        """Tell the daemon to fetch the selected model, off the main loop."""
+
+        def run() -> None:
+            try:
+                request("prepare-model", timeout=5.0)
+            except Exception as exc:
+                print(f"WayVoice: could not start the model download: {exc}", file=sys.stderr)
+
+        threading.Thread(target=run, daemon=True).start()
 
     def _sync_model_ui(self):
         if not hasattr(self, "model"):
@@ -856,6 +891,90 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         # shown greyed out rather than hidden, so "you cannot delete this" is
         # visible instead of looking like the feature is missing.
         self.model_delete_btn.set_visible(str(entry.get("kind") or "") != "custom")
+
+    def _apply_download_state(self, report: dict | None) -> None:
+        """Paint the download row from the daemon's model report.
+
+        The bar is driven by what the daemon says rather than by anything the
+        window measures itself: the download runs in the daemon, and a window
+        that watched the cache directory would be reporting a different thing
+        from the one the user is waiting for.
+        """
+        if not hasattr(self, "model_download_row"):
+            return
+        report = report if isinstance(report, dict) else {}
+        download = report.get("download") if isinstance(report.get("download"), dict) else {}
+        state = str(download.get("state") or "idle")
+        model_id = str(report.get("model") or "")
+        if state == "warming":
+            # No download: the model is on disk and is being read into memory so
+            # that the first dictation is as fast as the rest.
+            self.model_download_bar.pulse()
+            self.model_download_row.set_title(
+                self.t("store.warming", model=display_name(model_id) if model_id else "")
+            )
+            self.model_download_row.set_subtitle(self.t("store.warming_sub"))
+            self.model_download_row.set_visible(True)
+            return
+        if str(download.get("model") or "") != model_id:
+            # A download of a different model than the selected one - the user
+            # changed the row while the old model was still coming down.
+            # Painting its bytes next to the new model would be a lie, and the
+            # model row already says that this one is not downloaded.
+            self.model_download_row.set_visible(False)
+            return
+        if state == "downloading":
+            done = int(download.get("done_bytes") or 0)
+            total = int(download.get("total_bytes") or 0)
+            name = display_name(model_id) if model_id else ""
+            if download.get("warming"):
+                # The weights are down and the model is going into memory: for
+                # a moment there is nothing to measure, and it would look like a
+                # download that stopped.
+                self.model_download_bar.pulse()
+                self.model_download_row.set_title(self.t("store.warming", model=name))
+                self.model_download_row.set_subtitle(self.t("store.warming_sub"))
+            elif total > 0:
+                if done > 0:
+                    self.model_download_bar.set_fraction(min(1.0, done / total))
+                else:
+                    # Nothing has arrived yet but the size is known: a fixed
+                    # fraction of zero would look stuck.
+                    self.model_download_bar.pulse()
+                self.model_download_row.set_title(self.t("store.downloading", model=name))
+                self.model_download_row.set_subtitle(self.t(
+                    "store.download_progress",
+                    done=model_store.human_size(done, self.ui_lang),
+                    total=model_store.human_size(total, self.ui_lang),
+                    percent=int(min(100, done * 100 / total)),
+                ))
+            else:
+                self.model_download_bar.pulse()
+                self.model_download_row.set_title(self.t("store.downloading", model=name))
+                self.model_download_row.set_subtitle(self.t("store.download_unknown"))
+            self.model_download_row.set_visible(True)
+            return
+        if state == "error" and str(download.get("error") or ""):
+            self.model_download_bar.set_fraction(0.0)
+            self.model_download_row.set_title(self.t("store.download_failed"))
+            self.model_download_row.set_subtitle(str(download.get("error")))
+            self.model_download_row.set_visible(True)
+            return
+        self.model_download_row.set_visible(False)
+
+    def _cancel_model_download(self, *_args) -> None:
+        """Stop a running download through the daemon.
+
+        Cancelling is the daemon's job, not the window's: the download is its
+        child process, and only it can end it without leaving a helper running.
+        """
+        threading.Thread(target=self._cancel_download_worker, daemon=True).start()
+
+    def _cancel_download_worker(self) -> None:
+        try:
+            request("cancel-download", timeout=2.0)
+        except Exception as exc:
+            print(f"WayVoice: could not stop the download: {exc}", file=sys.stderr)
 
     def _refresh_model_state(self) -> None:
         """Recompute the model row, off the GTK main loop.
@@ -1217,6 +1336,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
 
         engine = reply.get("engine") or {}
         est = str(engine.get("state") or "missing")
+        self._apply_download_state(reply.get("model"))
         recording = bool(reply.get("recording"))
         busy = bool(reply.get("busy"))
         self._ui_busy = busy

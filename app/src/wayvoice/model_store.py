@@ -75,6 +75,25 @@ REPO_ALIASES: dict[str, str] = {
     "turbo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
 }
 
+#: Files that make a faster-whisper snapshot usable.  A copy of the
+#: ``allow_patterns`` list in ``faster_whisper.utils.download_model`` from the
+#: runtime the project installs (checked against faster-whisper 1.2.1).
+#:
+#: It has to be a copy, and it has to be a copy of *this* list and not of the
+#: whole repository: the Systran repos carry safetensors weights and extra
+#: files next to the CTranslate2 ``model.bin``, so fetching everything doubles
+#: the download for ``tiny`` and wastes gigabytes on ``large``.  Fetching less
+#: than this list would leave the model unusable, which is a far worse outcome
+#: than a few extra megabytes, so a mismatch is caught by the test that compares
+#: this copy with the installed runtime.
+FETCH_PATTERNS: list[str] = [
+    "config.json",
+    "preprocessor_config.json",
+    "model.bin",
+    "tokenizer.json",
+    "vocabulary.*",
+]
+
 #: Catalogue ids that name a model rather than a free-form value.
 CATALOG_IDS: list[str] = [str(item["id"]) for item in MODEL_PRESETS]
 

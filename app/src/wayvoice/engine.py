@@ -43,6 +43,8 @@ WORKER_CANCEL_GRACE = 3.0
 WORKER_RETRY_BACKOFF = 60.0
 
 _worker_lock = Lock()
+#: Guards the reader threads' line buffers of a running download.
+_download_lock = Lock()
 _worker_retry_after = 0.0
 # Handles of the workers we spawned, so an idle worker that exited can be
 # reaped instead of lingering as a zombie for the rest of the session.
@@ -115,6 +117,229 @@ def worker_socket_path() -> Path:
     that binds it), so daemon and worker can never disagree about it.
     """
     return fw_worker.default_socket_path()
+
+
+# --------------------------------------------------------------------------
+# Fetching a model
+# --------------------------------------------------------------------------
+#: Longest a single model download may take.  Generous, because ``large-v3`` is
+#: about 3 GB and a slow line is not a failure - but not infinite either: the
+#: process belongs to the user session, and a stalled connection used to leave
+#: it there with nothing to show for it.
+DOWNLOAD_TIMEOUT = 6 * 3600.0
+
+#: Download lines are parsed from the helper's stdout, which speaks
+#: ``WV-PROGRESS <done> <total>``; anything else it prints is not progress.
+_PROGRESS_PREFIX = "WV-PROGRESS"
+_READY_PREFIX = "WV-READY"
+_ERROR_PREFIX = "WV-ERROR"
+
+
+def model_is_present(model_id: str) -> bool:
+    """Whether ``model_id`` can be used without touching the network.
+
+    Weights alone are not enough: a snapshot whose ``config.json`` was deleted
+    or never finished downloading passes a weight check and then fails at load
+    time with an error about a file the user has never heard of.  Both are the
+    same missing model, so both are checked here.
+    """
+    from . import model_store
+
+    if not model_store.is_downloaded(model_id):
+        return False
+    snapshot = model_store.snapshot_dir(model_id)
+    return bool(snapshot and (snapshot / "config.json").exists())
+
+
+def _model_download_args(model_id: str) -> list[str] | None:
+    """Command that fetches ``model_id``, or ``None`` when it cannot be fetched.
+
+    ``None`` means "not a hub model": a local directory the user provides, or a
+    model for an engine that keeps its weights somewhere else entirely.
+    """
+    from . import model_store
+
+    repo = model_store.repo_id_for(model_id)
+    runtime_python = faster_runtime() / "bin/python"
+    if repo is None or not runtime_python.exists():
+        return None
+    fetch = script_path("model_fetch.py")
+    if not fetch.exists():
+        return None
+    return [
+        str(runtime_python), str(fetch),
+        "--repo", repo,
+        "--cache-dir", str(model_store.hub_root()),
+    ]
+
+
+def download_model(
+    model_id: str,
+    on_progress: Callable[[int, int], None] | None = None,
+    cancel_event: Event | None = None,
+) -> dict[str, Any]:
+    """Fetch a model into the hub cache, reporting progress as it arrives.
+
+    Returns ``{"state": "ready" | "error" | "cancelled" | "unsupported",
+    "error": str, "done": int, "total": int}``.  Never raises: this runs on the
+    daemon's preparation path, where an exception would be a daemon that cannot
+    start.
+
+    A model that is already present returns immediately without a network
+    request at all -- the daemon asks about this on every start, and a check
+    that talked to huggingface.co would be both slow and rude.
+    """
+    result: dict[str, Any] = {"state": "ready", "error": "", "done": 0, "total": 0}
+    if model_is_present(model_id):
+        return result
+    args = _model_download_args(model_id)
+    if args is None:
+        return {
+            "state": "unsupported",
+            "error": f"Cannot download this model: {model_id}",
+            "done": 0,
+            "total": 0,
+        }
+    env = os.environ.copy()
+    # The helper speaks its own progress protocol on stdout; the hub's own bars
+    # would interleave with it on stderr.
+    env["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+    env["PYTHONUNBUFFERED"] = "1"
+    try:
+        proc = subprocess.Popen(
+            args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+            start_new_session=True,
+        )
+    except (OSError, ValueError) as exc:
+        return {"state": "error", "error": str(exc), "done": 0, "total": 0}
+
+    lines: list[str] = []
+    errors: list[str] = []
+    readers = _start_line_readers(proc, lines, errors)
+    started = time.monotonic()
+    state = "ready"
+    detail = ""
+    while True:
+        if proc.poll() is not None:
+            break
+        if cancel_event is not None and cancel_event.is_set():
+            _terminate_process(proc)
+            state, detail = "cancelled", "Download cancelled"
+            break
+        if time.monotonic() - started >= DOWNLOAD_TIMEOUT:
+            _terminate_process(proc)
+            state = "error"
+            detail = f"Download did not finish within {int(DOWNLOAD_TIMEOUT // 3600)} hours"
+            break
+        _apply_download_lines(lines, result, on_progress)
+        time.sleep(0.2)
+    for reader in readers:
+        reader.join(timeout=5.0)
+    _apply_download_lines(lines, result, on_progress)
+
+    stderr = "".join(errors).strip()
+    if state != "ready":
+        result["state"] = state
+        result["error"] = detail
+        return result
+    if proc.returncode != 0:
+        result["state"] = "error"
+        # The helper's own WV-ERROR line is the real reason; stderr is the
+        # library's own last word, and the exit code is the last resort.
+        result["error"] = (
+            str(result.get("error") or "")
+            or detail
+            or (stderr.splitlines()[-1] if stderr else "")
+            or f"Download failed with code {proc.returncode}"
+        )
+        return result
+    if not model_is_present(model_id):
+        # The helper said it was done and the weights are not there. Reporting
+        # success here would send the user to the hotkey for a model that is not
+        # on disk.
+        result["state"] = "error"
+        result["error"] = "The download finished but the model is not on disk"
+    return result
+
+
+def download_configured_model(
+    cfg: dict[str, Any],
+    on_progress: Callable[[int, int], None] | None = None,
+    cancel_event: Event | None = None,
+) -> dict[str, Any]:
+    """Fetch the model the *config* names; the registry hook.
+
+    :func:`download_model` takes a model id because that is what most callers
+    have, while a registered hook is always handed the whole config.  The
+    adapter between the two lives here, in one named function, rather than as a
+    lambda in the registry where a wrong argument order would only show up as a
+    model that reports itself as "nothing to download".
+    """
+    return download_model(str(cfg.get("model", "")), on_progress, cancel_event)
+
+
+def _start_line_readers(
+    proc: subprocess.Popen[str], out: list[str], err: list[str]
+) -> list[threading.Thread]:
+    """Read the helper's output line by line, off the main thread."""
+
+    def read(stream, sink):
+        try:
+            for line in iter(stream.readline, ""):
+                sink.append(line)
+        except Exception:
+            pass
+
+    threads = []
+    for stream, sink in ((proc.stdout, out), (proc.stderr, err)):
+        if stream is None:
+            continue
+        thread = threading.Thread(target=read, args=(stream, sink), daemon=True)
+        thread.start()
+        threads.append(thread)
+    return threads
+
+
+def _apply_download_lines(
+    lines: list[str],
+    result: dict[str, Any],
+    on_progress: Callable[[int, int], None] | None,
+) -> None:
+    """Fold whatever the helper has printed so far into ``result``.
+
+    The list is the reader threads' buffer, so it is drained in one go and only
+    while holding it: two threads append to it while this runs.
+    """
+    while True:
+        with _download_lock:
+            if not lines:
+                return
+            line = lines.pop(0)
+        line = line.strip()
+        if line.startswith(_PROGRESS_PREFIX):
+            parts = line.split()
+            if len(parts) == 3:
+                try:
+                    done, total = int(parts[1]), int(parts[2])
+                except ValueError:
+                    continue
+                result["done"] = done
+                result["total"] = total
+                if on_progress is not None:
+                    try:
+                        on_progress(done, total)
+                    except Exception:
+                        # A progress callback that raises must not end a
+                        # download that is going fine.
+                        pass
+        elif line.startswith(_ERROR_PREFIX):
+            result["error"] = line[len(_ERROR_PREFIX):].strip()
+        elif line.startswith(_READY_PREFIX):
+            result["done"] = max(int(result.get("done") or 0), 1)
 
 
 def worker_pid_path() -> Path:
@@ -867,6 +1092,10 @@ class Engine:
     ``setup`` is the optional hook that prepares the engine's runtime in the
     background.  It is what ``needs_setup`` advertises to the UI, and the two
     must agree: a button that prepares nothing must not be shown.
+
+    ``model_present``/``model_download`` are the same agreement for weights: an
+    engine that reports a model as missing and has no way to fetch it would show
+    a download that cannot start.
     """
 
     id: str
@@ -877,6 +1106,13 @@ class Engine:
     needs_setup: bool
     settings: tuple[str, ...]
     setup: Callable[[], None] | None = None
+    #: Whether the engine's weights are already usable, when that is a question
+    #: this daemon can answer.  ``None`` for an engine whose weights live
+    #: outside the hub cache - a local folder, or an external command.
+    model_present: Callable[[dict[str, Any]], bool] | None = None
+    #: Fetch the weights, reporting progress; ``None`` when there is nothing to
+    #: fetch.  See :func:`download_model` for the reply shape.
+    model_download: Callable[..., dict[str, Any]] | None = None
 
 
 #: Registered engines by id.  Insertion order is the order of the UI list.
@@ -911,6 +1147,8 @@ _register(Engine(
         "engine_worker_idle_sec",
     ),
     setup=request_faster_setup,
+    model_present=lambda cfg: model_is_present(str(cfg.get("model", ""))),
+    model_download=download_configured_model,
 ))
 
 _register(Engine(
@@ -958,6 +1196,94 @@ def engine_from_config(cfg: dict[str, Any]) -> Engine | None:
     much to say about it.
     """
     return get_engine(cfg.get("engine", DEFAULT_ENGINE))
+
+
+def model_state(engine: Engine | None, cfg: dict[str, Any]) -> dict[str, Any]:
+    """What is known about the weights of the selected engine.
+
+    ``{"supported": bool, "present": bool, "model": str}``.  ``supported`` is
+    false for an engine whose weights are not ours to check - a local folder or
+    an external command - and the answer there is "not our business", not
+    "missing": the daemon must not offer to download those.
+    """
+    model_id = str(cfg.get("model", ""))
+    if engine is None or engine.model_present is None:
+        return {"supported": False, "present": True, "model": model_id}
+    try:
+        present = bool(engine.model_present(cfg))
+    except Exception:
+        # A cache that cannot even be walked is not a reason to claim the model
+        # is missing: that would start a download of something already there.
+        present = True
+    return {"supported": True, "present": present, "model": model_id}
+
+
+def prepare_model(
+    engine: Engine | None,
+    cfg: dict[str, Any],
+    on_progress: Callable[[int, int], None] | None = None,
+    cancel_event: Event | None = None,
+    on_warming: Callable[[], None] | None = None,
+    download: bool = True,
+) -> dict[str, Any]:
+    """Fetch the engine's weights, and load them into the warm worker.
+
+    Runs in the background: this is the path a user waits out while a 3 GB model
+    comes down, and the daemon has to keep answering the hot key throughout.
+    The reply carries what happened, the same shape :func:`download_model`
+    returns; the worker warm-up is reported separately in ``warming`` because it
+    is the second half of the job and the second half can fail on its own.
+
+    ``on_warming`` is called once the weights are down and the model is going
+    into memory.  It exists because that second phase can take as long as the
+    first one on a slow disk, and a window that is told only that "the download"
+    is still running would sit at 100% with nothing happening.
+
+    ``download=False`` warms the worker without fetching anything.  That is the
+    daemon's startup path on purpose: reading a model the user already has is
+    free, while fetching three gigabytes the moment WayVoice starts is a decision
+    nobody asked for - on a tethered laptop that is somebody else's bandwidth.
+
+    Engines with nothing to fetch are reported as ``ready`` without doing
+    anything, which is what lets the daemon call this unconditionally.
+    """
+    reply: dict[str, Any] = {
+        "state": "ready", "error": "", "done": 0, "total": 0, "warming": False,
+    }
+    if download and engine is not None and engine.model_download is not None:
+        result = engine.model_download(cfg, on_progress, cancel_event)
+        reply["state"] = str(result.get("state") or "ready")
+        reply["error"] = str(result.get("error") or "")
+        reply["done"] = int(result.get("done") or 0)
+        reply["total"] = int(result.get("total") or 0)
+        if reply["state"] != "ready":
+            return reply
+    if not cfg.get("engine_worker", True):
+        return reply
+    if on_warming is not None:
+        try:
+            on_warming()
+        except Exception:
+            # Telling the caller about a phase must never break that phase.
+            pass
+    reply["warming"] = warm_worker(cfg)
+    return reply
+
+
+def warm_worker(cfg: dict[str, Any], timeout: float = WORKER_START_TIMEOUT) -> bool:
+    """Make the warm worker hold the model, starting it if needed.
+
+    Returns whether the model is in memory afterwards.  A worker that cannot be
+    started is not an error here: recognition falls back to the one-shot runner,
+    which loads the model itself and still works.
+    """
+    if not ensure_worker(cfg):
+        return False
+    try:
+        reply = _worker_call({"cmd": "warm"}, timeout=max(timeout, 30.0))
+    except (OSError, ValueError, TimeoutError):
+        return False
+    return bool(reply.get("ok") and reply.get("warm"))
 
 
 def request_engine_setup(engine: Engine | None) -> bool:
