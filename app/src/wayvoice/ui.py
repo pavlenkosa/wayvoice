@@ -28,8 +28,11 @@ from .engine import (
     engine_status,
     get_engine,
     request_engine_setup,
+    stop_worker,
+    worker_info,
 )
 from .i18n import resolve_language, tr
+from . import model_store
 from .models import MODEL_PRESETS, PRESET_LABELS, display_name, forced_language, preset_index, preset_subtitle
 from .paths import command_path, setup_user_script
 from .shortcut import apply_shortcut, label_for
@@ -218,6 +221,11 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         self._dep_rows = {}
         self._dep_installing = set()
         self._dep_last_refresh = 0.0
+        # Model-files row: the cache is walked off the main loop, so a refresh
+        # can be in flight while the user changes the selection.
+        self._model_refresh_busy = False
+        self._model_refresh_pending = False
+        self._model_deleting = False
         self._install_css()
         self._install_actions()
 
@@ -248,6 +256,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         self.set_content(self.toast)
 
         GLib.idle_add(self._background_start)
+        GLib.idle_add(self._model_state_start)
         GLib.timeout_add(650, self._poll_status)
         GLib.timeout_add(900, self._poll_engine_settings)
 
@@ -326,6 +335,10 @@ class WayVoiceWindow(Adw.ApplicationWindow):
 
     def _background_start(self):
         self._apply_desktop_integration()
+        return GLib.SOURCE_REMOVE
+
+    def _model_state_start(self):
+        self._refresh_model_state()
         return GLib.SOURCE_REMOVE
 
     def _build_home(self):
@@ -463,7 +476,28 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         if preset_index(current_model) == len(MODEL_PRESETS) - 1 and current_model != "__custom__":
             custom_value = current_model
         self.custom_model.set_text(custom_value)
+        # Typing in the custom field fires this per keystroke, so it goes
+        # through the same coalescing as everything else instead of starting a
+        # scan per character.
+        self.custom_model.connect("changed", lambda *_: self._refresh_model_state())
         engine_group.add(self.custom_model)
+
+        self.model_state_row = Adw.ActionRow(title=self.t("store.state"), subtitle=self.t("health.checking"))
+        self.model_delete_btn = Gtk.Button(
+            label=self.t("common.delete"),
+            valign=Gtk.Align.CENTER,
+            sensitive=False,
+        )
+        self.model_delete_btn.add_css_class("destructive-action")
+        self.model_delete_btn.connect("clicked", self._ask_delete_model)
+        self.model_state_row.add_suffix(self.model_delete_btn)
+        engine_group.add(self.model_state_row)
+
+        self.model_disk_row = Adw.ActionRow(
+            title=self.t("store.storage"),
+            subtitle=self.t("store.disk", size="…", cache="…", free="…"),
+        )
+        engine_group.add(self.model_disk_row)
 
         self.device = Adw.ComboRow(title=self.t("settings.device"))
         self.device.set_model(Gtk.StringList.new(DEVICE_NAMES))
@@ -758,6 +792,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
 
     def _on_model_selected(self, *_args):
         self._sync_model_ui()
+        self._refresh_model_state()
 
     def _sync_model_ui(self):
         if not hasattr(self, "model"):
@@ -767,6 +802,8 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         is_custom = str(preset["id"]) == "__custom__"
         uses_models = self._selected_engine_uses_models()
         self.custom_model.set_visible(uses_models and is_custom)
+        self.model_state_row.set_visible(uses_models)
+        self.model_disk_row.set_visible(uses_models)
         forced = preset.get("language")
         if uses_models and forced:
             # The model decides the language; show which one, but do not let it
@@ -776,9 +813,192 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         else:
             self.language.set_sensitive(True)
 
+    # ------------------------------------------------------------------
+    # Model files on disk
+    # ------------------------------------------------------------------
+    def _model_state_text(self, entry: dict) -> tuple[str, bool]:
+        """Subtitle for the selected model, and whether it may be deleted.
+
+        A local path is never deletable: those files belong to the user, they are
+        not in the hub cache and WayVoice did not put them there.
+        """
+        kind = str(entry.get("kind") or "")
+        size = model_store.human_size(int(entry.get("size_bytes") or 0), self.ui_lang)
+        if kind == "local":
+            if entry.get("downloaded"):
+                return self.t("store.local", size=size), False
+            return self.t("store.local_missing"), False
+        if entry.get("downloaded"):
+            return self.t("store.downloaded", size=size), True
+        return self.t("store.missing"), False
+
+    def _apply_model_state(self, entry: dict, free_bytes: int, total_bytes: int, held: dict) -> None:
+        """Paint the row from a result computed off the UI thread."""
+        text, deletable = self._model_state_text(entry)
+        # The whole hub is shown next to our own total: the cache is shared with
+        # other applications, and a number that explains the folder is worth
+        # more than one that looks like it should.
+        self.model_disk_row.set_subtitle(self.t(
+            "store.disk",
+            size=model_store.human_size(total_bytes, self.ui_lang),
+            cache=model_store.human_size(model_store.hub_size(), self.ui_lang),
+            free=model_store.human_size(free_bytes, self.ui_lang),
+        ))
+        # A model held in the warm worker cannot go away while the worker keeps
+        # it: the next dictation would claim a model that is not on disk any
+        # more. The button explains that instead of silently doing nothing.
+        if deletable and held.get("running") and str(held.get("model") or "") == str(entry.get("id") or ""):
+            deletable = False
+            text = f"{text} · {self.t('store.delete_busy')}"
+        self.model_state_row.set_subtitle(text)
+        self.model_delete_btn.set_sensitive(deletable)
+        # A model that is not there has no button to show; a local folder is
+        # shown greyed out rather than hidden, so "you cannot delete this" is
+        # visible instead of looking like the feature is missing.
+        self.model_delete_btn.set_visible(str(entry.get("kind") or "") != "custom")
+
+    def _refresh_model_state(self) -> None:
+        """Recompute the model row, off the GTK main loop.
+
+        Walking the cache means following every snapshot symlink into every
+        blob and stat()ing the results.  On this machine that costs ~6 ms warm,
+        and the very first pass after a cold start or a download is slower, so
+        it runs in a worker thread and comes back through ``GLib.idle_add`` --
+        the same shape the dependency install uses.  A run already in flight is
+        not joined by another one; the request is remembered and re-run when it
+        finishes, so the row can never show a state older than the last change.
+        """
+        if not hasattr(self, "model_state_row"):
+            return
+        if self._model_refresh_busy:
+            self._model_refresh_pending = True
+            return
+        self._model_refresh_busy = True
+        self._model_refresh_pending = False
+        model_id = self._selected_model_id()
+        threading.Thread(target=self._model_state_worker, args=(model_id,), daemon=True).start()
+
+    def _model_state_worker(self, model_id: str) -> None:
+        try:
+            entry = model_store.describe(model_id)
+            free_bytes = model_store.disk_free()
+            total_bytes = model_store.total_size()
+            # The worker ping has a timeout of its own, so it belongs here too
+            # and not on the main loop between two frames.
+            held = worker_info()
+        except Exception as exc:  # never let a worker kill the process
+            entry = {"id": model_id, "kind": "unknown", "downloaded": False, "size_bytes": 0}
+            free_bytes = total_bytes = 0
+            held = {"running": False, "model": ""}
+            print(f"WayVoice: model state refresh failed: {exc}", file=sys.stderr)
+        GLib.idle_add(self._model_state_ready, entry, free_bytes, total_bytes, held)
+
+    def _model_state_ready(self, entry, free_bytes, total_bytes, held):
+        self._model_refresh_busy = False
+        self._apply_model_state(entry, free_bytes, total_bytes, held)
+        if self._model_refresh_pending:
+            self._refresh_model_state()
+        return GLib.SOURCE_REMOVE
+
+    def _ask_delete_model(self, *_args) -> None:
+        """Confirm, then delete the selected model."""
+        if not self.model_delete_btn.get_sensitive() or self._model_deleting:
+            return
+        model_id = self._selected_model_id()
+        if model_store.repo_dir_name(model_id) is None:
+            self._toast(self.t("store.refuse_local"))
+            return
+        # Built by hand like the shortcut dialog rather than with
+        # Gtk.AlertDialog: that widget does not even have the same properties
+        # in every GTK 4 release, and the point of a confirmation is that it
+        # must open on the versions we support.
+        name = display_name(model_id)
+        win = Gtk.Window(title=self.t("store.delete_title"), transient_for=self, modal=True)
+        win.set_default_size(440, 170)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        for side in ("top", "bottom", "start", "end"):
+            getattr(box, f"set_margin_{side}")(24)
+        title = self._label(name, "section-title", xalign=0.5)
+        title.set_halign(Gtk.Align.CENTER)
+        box.append(title)
+        body = self._label(self.t("store.delete_body", name=name), "muted", wrap=True, xalign=0.5)
+        body.set_halign(Gtk.Align.CENTER)
+        box.append(body)
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        buttons.set_halign(Gtk.Align.CENTER)
+        cancel = Gtk.Button(label=self.t("common.cancel"))
+        cancel.connect("clicked", lambda *_: win.close())
+        confirm = Gtk.Button(label=self.t("common.delete"))
+        confirm.add_css_class("destructive-action")
+        confirm.connect("clicked", self._delete_model_confirmed, win, model_id)
+        buttons.append(cancel)
+        buttons.append(confirm)
+        box.append(buttons)
+        win.set_child(box)
+        win.present()
+
+    def _delete_model_confirmed(self, _button, win, model_id: str) -> None:
+        win.close()
+        if self._model_deleting:
+            return
+        self._model_deleting = True
+        self.model_delete_btn.set_sensitive(False)
+        self.model_delete_btn.set_label(self.t("store.deleting"))
+        # rmtree of half a gigabyte plus a full rescan of the hub: seconds, not
+        # milliseconds, so it must not run where the main loop draws.
+        threading.Thread(target=self._delete_model_worker, args=(model_id,), daemon=True).start()
+
+    def _delete_model_worker(self, model_id: str) -> None:
+        try:
+            # A warm worker holds the model in memory and may be mid-request;
+            # stopping it first is what makes the deletion honest rather than a
+            # claim. Best effort: a worker that is not there needs no stopping.
+            held = worker_info()
+            if held.get("running") and str(held.get("model") or "") == model_id:
+                stop_worker()
+            result = model_store.delete(model_id)
+        except model_store.RefusedError as exc:
+            result = {"ok": False, "error_key": exc.key, "detail": exc.detail, "model_id": model_id}
+        except Exception as exc:  # never let a worker kill the process
+            result = {"ok": False, "error_key": "store.delete_failed", "detail": str(exc), "model_id": model_id}
+        GLib.idle_add(self._delete_model_ready, result)
+
+    def _delete_model_ready(self, result: dict) -> None:
+        self._model_deleting = False
+        self.model_delete_btn.set_label(self.t("common.delete"))
+        if not result.get("ok"):
+            # A refusal carries a translation key rather than a sentence, so the
+            # reason is localized here and never leaks an English-only string
+            # into the Russian UI.
+            reason = model_store.refusal_message(
+                str(result.get("error_key") or "store.delete_failed"),
+                str(result.get("detail") or ""),
+                self.ui_lang,
+            )
+            self._toast(self.t("store.delete_refused", reason=reason), timeout=6)
+            self._refresh_model_state()
+            return GLib.SOURCE_REMOVE
+        message_key = str(result.get("message_key") or "store.deleted")
+        freed = int(result.get("freed_bytes") or 0)
+        kept = int(result.get("kept_bytes") or 0)
+        if message_key == "store.deleted" and kept > 0:
+            # Some files had to stay: another model links to them. Saying the
+            # model was deleted and nothing else would hide files that are
+            # still on disk by design.
+            message_key = "store.deleted_shared"
+        self._toast(self.t(
+            message_key,
+            size=model_store.human_size(freed, self.ui_lang),
+            freed=model_store.human_size(freed, self.ui_lang),
+            kept=model_store.human_size(kept, self.ui_lang),
+        ))
+        self._refresh_model_state()
+        return GLib.SOURCE_REMOVE
+
     def _on_engine_selected(self, *_args):
         self._update_engine_visibility()
         self._sync_model_ui()
+        self._refresh_model_state()
         self._poll_engine_settings()
 
     def _selected_engine(self):
@@ -913,6 +1133,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         self.hotkey_label.set_text(label_for(self._shortcut_binding))
         self._update_cards()
         self.toast.add_toast(Adw.Toast(title=self.t("settings.saved") if ok else msg))
+        self._refresh_model_state()
         self._poll_engine_settings()
 
     def _prepare_selected_engine(self, cfg):

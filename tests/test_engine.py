@@ -8,7 +8,37 @@ from wayvoice.engine import (
     _language,
     _postprocess,
     _run_cancelable,
+    worker_info,
 )
+
+
+class WorkerInfoTests(unittest.TestCase):
+    """What the settings window asks before offering to delete a model."""
+
+    def test_no_worker_is_reported_as_not_running(self):
+        from unittest import mock
+
+        with mock.patch("wayvoice.engine._worker_ping", return_value=None):
+            self.assertEqual(worker_info(), {"running": False, "model": ""})
+
+    def test_running_worker_reports_the_model_it_holds(self):
+        from unittest import mock
+
+        with mock.patch(
+            "wayvoice.engine._worker_ping",
+            return_value={"ok": True, "config": {"model": "medium", "device": "cpu"}},
+        ):
+            info = worker_info()
+        self.assertTrue(info["running"])
+        self.assertEqual(info["model"], "medium")
+
+    def test_worker_without_config_is_running_but_unknown(self):
+        from unittest import mock
+
+        with mock.patch("wayvoice.engine._worker_ping", return_value={"ok": True}):
+            info = worker_info()
+        self.assertTrue(info["running"])
+        self.assertEqual(info["model"], "")
 
 class EngineProcessTests(unittest.TestCase):
     def test_timeout_kills_process(self):

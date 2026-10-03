@@ -434,6 +434,28 @@ def stop_worker() -> bool:
     return stopped
 
 
+def worker_info() -> dict[str, Any]:
+    """What the warm worker is holding right now.
+
+    ``{"running": bool, "model": str}``.  The settings window asks before it
+    offers to delete a model, and a model held in the worker's memory is one
+    the user is about to need again: deleting it under the worker's feet would
+    leave the recognizer claiming a model that is no longer there.  The model
+    is the raw configured value, so the caller compares it with what the window
+    shows rather than with a repository id.
+
+    Never raises and never blocks for long: a worker that does not answer the
+    ping within :data:`WORKER_PING_TIMEOUT` counts as "not running", which is
+    the same answer :func:`stop_worker` acts on.
+    """
+    reply = _worker_ping()
+    if reply is None:
+        return {"running": False, "model": ""}
+    remote = reply.get("config")
+    model = str(remote.get("model") or "") if isinstance(remote, dict) else ""
+    return {"running": True, "model": model}
+
+
 def _start_worker(cfg: dict[str, Any]) -> bool:
     """Spawn the worker process in its own session; never blocks."""
     runtime_python = faster_runtime() / "bin/python"
