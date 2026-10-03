@@ -9,7 +9,8 @@
 - Model management: size on disk, free space, the whole shared cache, and deletion that keeps files another model still uses.
 - Missing dependencies are detected, explained and can be installed from the settings.
 - Daemon, engine and hot key now start without systemd, so the Flatpak build works.
-- Faster-Whisper model is kept warm between dictations.
+- Faster-Whisper model is kept warm between dictations, and is loaded into memory when the daemon starts so the first dictation of a session is as fast as the ones after it.
+- Model downloads are a visible, cancellable step with progress in bytes, instead of a silent wait inside the first recognition.
 - Installation paths are prefix-independent.
 - New application icon.
 - Robustness: the daemon survives a silent or oversized client, and a second daemon can no longer take its socket over; a failed notification no longer aborts a recording or throws away a finished transcript; the clipboard copy and the recorder have deadlines and clean up after themselves; a cancelled dictation is no longer typed anyway; a config that cannot be parsed is reported instead of silently replaced by the defaults; a hung package install no longer leaves `dpkg` locked; `setup-user` reports a hotkey it could not apply.

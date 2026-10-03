@@ -94,6 +94,8 @@ Model weights live in the Hugging Face cache, which is shared with other program
 
 Deleting a model never removes files another model is using: the weights are shared between models, and only what nothing points at any more is freed. A model provided as a local path is yours and is never deleted.
 
+A model that is not on disk is fetched when you choose it, not when you first use it. The download shows its progress and can be cancelled, and pressing the hot key while it runs says so instead of recording something that cannot be recognised yet. Starting WayVoice never downloads anything by itself — the model it already has is loaded into memory so that the first dictation is as fast as the rest.
+
 ## Missing dependencies
 
 WayVoice needs `pw-record`, `wl-copy` and `notify-send` at runtime, and `ydotool` for automatic pasting. The settings list what is missing and can install it through the system package manager — nothing is installed unless you ask.
