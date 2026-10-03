@@ -31,6 +31,14 @@ class FakeRow:
         self.visible = value
 
 
+class FakeButton:
+    def __init__(self):
+        self.sensitive = None
+
+    def set_sensitive(self, value):
+        self.sensitive = bool(value)
+
+
 class FakeBar:
     def __init__(self):
         self.fraction = None
@@ -53,6 +61,7 @@ class DownloadRowTests(unittest.TestCase):
         self.window.t = lambda key, **kwargs: tr(key, "en", **kwargs)
         self.window.model_download_row = FakeRow()
         self.window.model_download_bar = FakeBar()
+        self.window.model_download_cancel_btn = FakeButton()
         self.row = self.window.model_download_row
         self.bar = self.window.model_download_bar
 
@@ -94,6 +103,16 @@ class DownloadRowTests(unittest.TestCase):
     def test_more_bytes_than_expected_stays_at_full(self):
         self._apply(self._downloading(done_bytes=120, total_bytes=100))
         self.assertEqual(self.bar.fraction, 1.0)
+
+    def test_cancelling_is_offered_while_bytes_are_moving(self):
+        self._apply(self._downloading(done_bytes=1, total_bytes=100))
+        self.assertTrue(self.window.model_download_cancel_btn.sensitive)
+
+    def test_cancelling_is_not_offered_while_the_model_is_loading(self):
+        # Nothing can be interrupted at that point; a button that reports
+        # success and changes nothing is worse than no button.
+        self._apply(self._downloading(done_bytes=100, total_bytes=100, warming=True))
+        self.assertFalse(self.window.model_download_cancel_btn.sensitive)
 
     def test_warming_is_its_own_message(self):
         # Nothing is being fetched any more: the weights are down and the model

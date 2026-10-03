@@ -909,6 +909,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         if state == "warming":
             # No download: the model is on disk and is being read into memory so
             # that the first dictation is as fast as the rest.
+            self.model_download_cancel_btn.set_sensitive(False)
             self.model_download_bar.pulse()
             self.model_download_row.set_title(
                 self.t("store.warming", model=display_name(model_id) if model_id else "")
@@ -927,6 +928,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
             done = int(download.get("done_bytes") or 0)
             total = int(download.get("total_bytes") or 0)
             name = display_name(model_id) if model_id else ""
+            self.model_download_cancel_btn.set_sensitive(True)
             if download.get("warming"):
                 # The weights are down and the model is going into memory: for
                 # a moment there is nothing to measure, and it would look like a
@@ -934,6 +936,9 @@ class WayVoiceWindow(Adw.ApplicationWindow):
                 self.model_download_bar.pulse()
                 self.model_download_row.set_title(self.t("store.warming", model=name))
                 self.model_download_row.set_subtitle(self.t("store.warming_sub"))
+                # A load that cannot be interrupted: offering to stop it would
+                # be a button that reports success and changes nothing.
+                self.model_download_cancel_btn.set_sensitive(False)
             elif total > 0:
                 if done > 0:
                     self.model_download_bar.set_fraction(min(1.0, done / total))

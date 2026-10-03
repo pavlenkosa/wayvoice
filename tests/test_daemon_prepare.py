@@ -201,10 +201,35 @@ class PrepareTests(DaemonCase):
         seen = harness.wait_for("cancelled")
         self.assertEqual(seen["state"], "cancelled")
 
-    def test_cancelling_when_nothing_runs_is_not_an_error(self):
+    def test_cancelling_when_nothing_runs_says_nothing_was_running(self):
         eng, calls = make_engine(present=True)
         harness = PrepareDaemon(self, eng, calls)
-        self.assertFalse(harness.daemon._cancel_model_prepare())
+        self.assertEqual(harness.daemon._cancel_model_prepare(), "nothing")
+        reply = harness.daemon.dispatch("cancel-download")
+        self.assertFalse(reply["ok"])
+        self.assertEqual(reply["phase"], "nothing")
+
+    def test_cancelling_a_warm_up_says_it_will_finish_by_itself(self):
+        # The load cannot be interrupted, so the answer must not claim that it
+        # was stopped: the window would keep waiting for a stop that never came.
+        holding = threading.Event()
+        release = threading.Event()
+
+        def warm(cfg):
+            holding.set()
+            release.wait(10.0)
+            return True
+
+        eng, calls = make_engine(present=False, progress=True)
+        harness = PrepareDaemon(self, eng, calls)
+        self.patch("wayvoice.engine.warm_worker", side_effect=warm)
+        self.addCleanup(release.set)
+        harness.daemon._start_model_prepare({})
+        self.assertTrue(holding.wait(10.0), "the warm-up never started")
+        reply = harness.daemon.dispatch("cancel-download")
+        self.assertEqual(reply["phase"], "warming")
+        # The flag is not set for a load: there is nothing that could use it.
+        self.assertFalse(harness.daemon._prepare_cancel.is_set())
 
     def test_an_engine_without_models_is_left_alone(self):
         eng, calls = make_engine(present=True)

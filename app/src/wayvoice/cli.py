@@ -48,6 +48,50 @@ def request(command: str, timeout: float = 1.5) -> dict:
         sock.close()
 
 
+def _model_command(args: list[str]) -> None:
+    """Implement ``wayvoice model [--download | --cancel]``.
+
+    The download belongs to the daemon - it is the daemon's child process, and
+    only the daemon can end it without leaving a helper running - so every
+    action here is a command sent to it rather than a download started here.
+    That also means there is nothing to do when the daemon is not running, and
+    that is reported instead of quietly downloading into a cache no daemon will
+    read.
+    """
+    lang = _language()
+    if "--download" in args:
+        reply = request("prepare-model", timeout=10.0)
+        if reply.get("ok"):
+            print(tr("cli.model_download_started", lang))
+            return
+        print(str(reply.get("error") or tr("cli.model_download_failed", lang)),
+              file=sys.stderr)
+        raise SystemExit(1)
+    if "--cancel" in args:
+        reply = request("cancel-download", timeout=5.0)
+        phase = str(reply.get("phase") or "")
+        if reply.get("ok"):
+            # "Stopped" is only true of the transfer; the load that follows it
+            # finishes on its own, and saying otherwise would be a lie.
+            print(tr(
+                "cli.model_download_stopped" if phase == "download"
+                else "cli.model_warm_continues",
+                lang,
+            ))
+            return
+        print(str(reply.get("error") or tr("cli.model_nothing_running", lang)),
+              file=sys.stderr)
+        raise SystemExit(1)
+    if args:
+        print(tr("cli.model_usage", lang), file=sys.stderr)
+        raise SystemExit(2)
+    reply = request("status", timeout=5.0)
+    if not reply.get("ok"):
+        print(str(reply.get("error") or ""), file=sys.stderr)
+        raise SystemExit(1)
+    print(json.dumps(reply.get("model") or {}, ensure_ascii=False, indent=2))
+
+
 def _language() -> str | None:
     """Return the configured UI language, or ``None`` to follow the locale."""
     try:
@@ -225,8 +269,11 @@ def main() -> None:
     if command == "engine-status":
         print(json.dumps(engine_status(load_config()), ensure_ascii=False, indent=2))
         return
+    if command == "model":
+        _model_command(args[1:])
+        return
     if command not in {"toggle", "start", "stop", "cancel", "status", "ping", "quit"}:
-        print("Использование: wayvoice {toggle|start|stop|cancel|status|deps [--install ID|--install-all]|settings|engine-setup|engine-status}", file=sys.stderr)
+        print("Использование: wayvoice {toggle|start|stop|cancel|status|model [--download|--cancel]|deps [--install ID|--install-all]|settings|engine-setup|engine-status}", file=sys.stderr)
         raise SystemExit(2)
 
     reply = request(command)

@@ -215,11 +215,27 @@ class WayVoiceDaemon:
             }
             self._prepare_thread = None
 
-    def _cancel_model_prepare(self) -> bool:
+    def _cancel_model_prepare(self) -> str:
+        """Stop a running preparation; report which part was actually stopped.
+
+        The two halves are not the same thing to interrupt.  Cancelling a
+        download stops the transfer; the model is not going to be there.  What
+        follows the weights is a read into memory, which cannot be half-done and
+        takes no notice of the flag - saying "stopped" about that would be a
+        lie, and the window would keep waiting for something that finished
+        anyway.
+        """
         with self._lock:
+            download = dict(self._download)
             running = self._prepare_thread is not None and self._prepare_thread.is_alive()
-            self._prepare_cancel.set()
-        return running
+            if not running:
+                phase = "nothing"
+            elif download.get("warming") or download.get("state") == "warming":
+                phase = "warming"
+            else:
+                phase = "download"
+                self._prepare_cancel.set()
+        return phase
 
     def _model_report(self, cfg: dict) -> dict:
         """Model state for :meth:`status`, merged with any run in flight."""
@@ -463,7 +479,14 @@ class WayVoiceDaemon:
                 "error": str(download.get("error") or tr("daemon.model_prepare_busy", cfg.get("ui_language"))),
             }
         if command == "cancel-download":
-            return {"ok": self._cancel_model_prepare()}
+            phase = self._cancel_model_prepare()
+            return {
+                "ok": phase != "nothing",
+                "phase": phase,
+                # Kept for a window built against the older reply, which only
+                # knew whether anything was running.
+                "stopped": phase != "nothing",
+            }
         if command == "engine-setup":
             cfg = load_config()
             engine = engine_from_config(cfg)
