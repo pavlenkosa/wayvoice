@@ -1264,7 +1264,16 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         # error > missing dependency > warning > engine state.
         missing_deps = self._missing_required()
         dep_warning = self.t("health.deps_missing", names=", ".join(d.label for d in missing_deps)) if missing_deps else ""
-        if error:
+        config_broken = str(reply.get("config_error") or "")
+        if config_broken:
+            # Above a warning and below a real error: the daemon works, but on
+            # settings the user did not choose, and they should know that before
+            # they start wondering why their shortcut or model changed.
+            self.health_summary.set_text(self.t("health.warning"))
+            self.health_detail.set_text(self._clip_subtitle(config_broken))
+            self.health_detail.remove_css_class("error-text")
+            self.health_detail.add_css_class("warning-text")
+        elif error:
             self.health_summary.set_text(self.t("health.error"))
             self.health_detail.set_text(error)
             self.health_detail.remove_css_class("warning-text")
@@ -1365,6 +1374,11 @@ class WayVoiceWindow(Adw.ApplicationWindow):
             f"Max recording: {cfg.get('max_recording_sec')}s",
             f"Shortcut: {label_for(str(cfg.get('shortcut', '')))}",
         ]
+        if isinstance(status, dict) and status.get("config_error"):
+            # The daemon is running on defaults because this file could not be
+            # read. That is the first thing a report should say, because every
+            # other line below describes a configuration the user never chose.
+            lines.append(f"Config problem: {status.get('config_error')}")
         if isinstance(status, dict) and status.get("last_error"):
             lines.append(f"Last error: {status.get('last_error')}")
         if isinstance(status, dict) and status.get("last_warning"):

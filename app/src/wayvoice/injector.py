@@ -26,17 +26,15 @@ class InjectionResult:
 _clipboard_lock = threading.Lock()
 _clipboard_proc: subprocess.Popen | None = None
 
+#: How long wl-copy gets to claim the Wayland selection before we assume it
+#: made it.  60 ms was the old guess; this is the same ballpark, but as a
+#: deadline that cannot be exceeded by a wedged clipboard tool.
+CLIPBOARD_SETTLE_TIMEOUT = 0.5
+
 
 def _cleanup_clipboard() -> None:
-    global _clipboard_proc
     with _clipboard_lock:
-        proc = _clipboard_proc
-        _clipboard_proc = None
-    if proc is not None and proc.poll() is None:
-        try:
-            proc.terminate()
-        except Exception:
-            pass
+        _terminate_clipboard()
 
 
 atexit.register(_cleanup_clipboard)
@@ -73,51 +71,74 @@ def copy_to_clipboard(text: str, language: str | None = None) -> None:
         raise InjectionError(describe_missing("wl-clipboard"))
 
     with _clipboard_lock:
-        old = _clipboard_proc
-        _clipboard_proc = None
-        if old is not None and old.poll() is None:
-            try:
-                old.terminate()
-                old.wait(timeout=0.25)
-            except Exception:
-                try:
-                    old.kill()
-                except Exception:
-                    pass
+        _terminate_clipboard()
 
+        proc = subprocess.Popen(
+            [binary, "--foreground", "--type", "text/plain;charset=utf-8"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=False,
+        )
+        # Remember the process before doing anything that can fail.  wl-copy
+        # only forks into its clipboard server after the selection is claimed,
+        # so a process we lose track of keeps owning the Wayland clipboard
+        # until the next dictation - or forever, if the next one never comes.
+        _clipboard_proc = proc
         try:
-            proc = subprocess.Popen(
-                [binary, "--foreground", "--type", "text/plain;charset=utf-8"],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                text=True,
-                start_new_session=False,
-            )
             assert proc.stdin is not None
             proc.stdin.write(text)
             proc.stdin.close()
         except Exception as exc:
-            try:
-                proc.kill()  # type: ignore[name-defined]
-            except Exception:
-                pass
+            _terminate_clipboard()
             raise InjectionError(tr("injector.clipboard_error", language, error=exc)) from exc
 
-        # Give wl-copy a moment to connect and claim the selection. If it has
-        # already exited, surface its real error; otherwise it is serving data.
-        time.sleep(0.06)
-        rc = proc.poll()
-        if rc is not None:
-            detail = ""
-            try:
-                if proc.stderr is not None:
-                    detail = proc.stderr.read().strip()
-            except Exception:
-                pass
-            raise InjectionError(detail or tr("injector.clipboard_write", language))
+        # Wait for the selection with a deadline instead of guessing a sleep.
+        # The daemon serves one client at a time, so this wait is added to the
+        # latency of the dictation that triggered it, and an unbounded poll()
+        # would hand the daemon over to a clipboard tool that stopped making
+        # progress.
+        deadline = time.monotonic() + CLIPBOARD_SETTLE_TIMEOUT
+        while True:
+            rc = proc.poll()
+            if rc is not None:
+                break
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.005)
 
-        _clipboard_proc = proc
+        rc = proc.poll()
+        if rc is None:
+            # Still running, which is the good case: it owns the selection.
+            return
+        _clipboard_proc = None
+        detail = ""
+        try:
+            if proc.stderr is not None:
+                detail = proc.stderr.read().strip()
+        except Exception:
+            pass
+        raise InjectionError(detail or tr("injector.clipboard_write", language))
+
+
+def _terminate_clipboard() -> None:
+    """Stop the process that currently owns our clipboard entry, if any."""
+    global _clipboard_proc
+
+    proc = _clipboard_proc
+    _clipboard_proc = None
+    if proc is None or proc.poll() is not None:
+        return
+    try:
+        proc.terminate()
+        proc.wait(timeout=0.25)
+    except Exception:
+        try:
+            proc.kill()
+            proc.wait(timeout=0.5)
+        except Exception:
+            pass
 
 
 def _ydotool_env() -> dict[str, str]:

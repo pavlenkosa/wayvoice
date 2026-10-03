@@ -47,16 +47,37 @@ def config_path() -> Path:
     return config_dir() / "config.json"
 
 
+#: Set when the last :func:`load_config` found a file it could not use.  The
+#: daemon has to keep working with the defaults in that case, but "silently
+#: pretending the user configured nothing" is how a broken file turns into a
+#: mystery, so the reason is kept and reported.
+_LAST_ERROR = ""
+
+
+def config_error() -> str:
+    """Why the last :func:`load_config` fell back to defaults, or ``""``.
+
+    Named for what the reader wants to know - whether something is wrong with
+    the settings - rather than for the bookkeeping that produced the answer.
+    """
+    return _LAST_ERROR
+
+
 def load_config() -> dict[str, Any]:
+    global _LAST_ERROR
+
     data = dict(DEFAULTS)
     path = config_path()
+    _LAST_ERROR = ""
     if path.exists():
         try:
             loaded = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(loaded, dict):
                 data.update(loaded)
-        except Exception:
-            pass
+            else:
+                _LAST_ERROR = f"{path} does not contain an object"
+        except Exception as exc:
+            _LAST_ERROR = f"{path}: {exc}"
     return data
 
 
@@ -64,7 +85,15 @@ def save_config(data: dict[str, Any]) -> None:
     config_dir().mkdir(parents=True, exist_ok=True)
     merged = dict(DEFAULTS)
     merged.update(data)
-    config_path().write_text(
+    path = config_path()
+    # Written to a temporary file and renamed, never in place: the daemon reads
+    # this file several times a minute, and a reader that catches a half-written
+    # config would silently fall back to DEFAULTS - a different engine, model,
+    # language or recording limit, with nothing said to the user. engine_setup
+    # already does this for its status file.
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(
         json.dumps(merged, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    tmp.replace(path)

@@ -5,9 +5,21 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
+from . import __version__
 from .engine import faster_runtime, faster_stamp, setup_status_path
+
+#: Longest a single pip invocation may take.  Without it a network that stops
+#: delivering leaves the status at "installing" forever: the window spins with
+#: no cancel button, and every dictation attempt spawns another setup process
+#: that then waits on the lock below.
+PIP_TIMEOUT = 1800.0
+
+#: How long a second setup process waits for the lock before deciding that one
+#: is already running.  The holder does the work; the waiter has nothing to do.
+LOCK_TIMEOUT = 2.0
 
 
 def _write(state: str, message: str, log: str = "") -> None:
@@ -31,6 +43,7 @@ def _install_once(runtime: Path, log) -> None:
             stdout=log,
             stderr=subprocess.STDOUT,
             check=True,
+            timeout=300.0,
         )
 
     python = runtime / "bin/python"
@@ -46,6 +59,7 @@ def _install_once(runtime: Path, log) -> None:
         stdout=log,
         stderr=subprocess.STDOUT,
         check=True,
+        timeout=PIP_TIMEOUT,
     )
 
     # Fail setup here rather than on the user's first dictation.
@@ -60,9 +74,29 @@ def _install_once(runtime: Path, log) -> None:
         stdout=log,
         stderr=subprocess.STDOUT,
         check=False,
+        timeout=120.0,
     )
     if probe.returncode != 0:
         raise RuntimeError("проверка совместимости Faster-Whisper/PyAV не пройдена")
+
+
+def _take_lock(lock) -> bool:
+    """Take the setup lock, waiting briefly for a holder that is finishing.
+
+    ``flock`` in blocking mode has no way out: a crashed holder releases the
+    lock, but a holder that is stuck (pip waiting on a network) keeps every
+    later process waiting forever.  Polling with a deadline gives the common
+    case - the previous attempt is about to finish - and gives up otherwise.
+    """
+    deadline = time.monotonic() + LOCK_TIMEOUT
+    while True:
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except OSError:
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.1)
 
 
 def main() -> int:
@@ -75,7 +109,13 @@ def main() -> int:
     lock_path.parent.mkdir(parents=True, exist_ok=True)
 
     with lock_path.open("w") as lock:
-        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        if not _take_lock(lock):
+            # Somebody else is already preparing the engine. Say so and leave:
+            # waiting here would pile up one blocked process per dictation
+            # attempt, and would keep reporting "installing" after the real
+            # attempt has already failed.
+            print("wayvoice-engine-setup: another setup is running", file=sys.stderr)
+            return 0
         runtime = faster_runtime()
         stamp = faster_stamp()
         if stamp.exists() and (runtime / "bin/python").exists():
@@ -85,7 +125,7 @@ def main() -> int:
         _write("installing", "Подготавливаю движок…", str(log_path))
         last_exc: Exception | None = None
         with log_path.open("a", encoding="utf-8") as log:
-            log.write("\n=== WayVoice engine setup 0.5.0 ===\n")
+            log.write(f"\n=== WayVoice engine setup {__version__} ===\n")
             for attempt in (1, 2):
                 try:
                     _install_once(runtime, log)

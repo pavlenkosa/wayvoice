@@ -26,6 +26,8 @@ from __future__ import annotations
 import json
 import os
 import socket
+import stat
+import tempfile
 import threading
 import time
 from dataclasses import dataclass
@@ -57,12 +59,25 @@ _CANCEL_GRACE = 5.0
 def default_socket_path() -> Path:
     """Return the default worker socket path.
 
-    ``XDG_RUNTIME_DIR`` is preferred because it is per-user and removed on
-    logout; ``/tmp`` is the fallback for sessions without it.
+    ``XDG_RUNTIME_DIR`` is where it belongs: it is per-user, mode 0700, and
+    removed at logout.  ``/tmp`` is a world-writable directory with predictable
+    names, and a socket there is not just a leak of a file path - whoever wins
+    the race to create it answers the daemon's requests, so another local user
+    could hand back the text that gets typed into the victim's focused window.
+    For that case a private directory is created instead of a shared one, and if
+    even that fails the worker refuses to start rather than listen somewhere
+    unsafe.
     """
     runtime = os.environ.get("XDG_RUNTIME_DIR", "").strip()
-    base = Path(runtime) if runtime else Path("/tmp")
-    return base / SOCKET_NAME
+    if runtime:
+        return Path(runtime) / SOCKET_NAME
+    private = Path(tempfile.gettempdir()) / f"wayvoice-{os.getuid()}"
+    try:
+        private.mkdir(mode=0o700, exist_ok=True)
+        os.chmod(private, 0o700)
+    except OSError:
+        pass
+    return private / SOCKET_NAME
 
 
 @dataclass(frozen=True)
@@ -343,7 +358,21 @@ def _bind(path: Path) -> socket.socket | None:
     A leftover socket file from a crashed worker is replaced.  When a live
     worker already owns the socket nothing is touched and ``None`` is
     returned, so two workers can never steal the socket from each other.
+
+    The parent directory has to be private to this user.  A socket in a
+    world-writable directory is reachable - and answerable - by anyone on the
+    machine, and what this worker returns is text that gets typed into the
+    user's window, so a worker that cannot get a private directory refuses to
+    start instead of listening somewhere shared.
     """
+    try:
+        stat_result = path.parent.stat()
+    except OSError:
+        return None
+    if not stat.S_ISDIR(stat_result.st_mode) or stat_result.st_uid != os.getuid():
+        return None
+    if stat_result.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        return None
     if _probe(path):
         return None
     try:

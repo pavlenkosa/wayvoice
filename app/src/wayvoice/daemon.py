@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 import os
 import socket
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -11,7 +14,7 @@ from pathlib import Path
 
 from . import __version__
 from .audio import AudioRecorder
-from .config import load_config
+from .config import config_error, load_config
 from .engine import (
     DEFAULT_ENGINE,
     TranscriptionCancelled,
@@ -24,8 +27,46 @@ from .engine import (
 from .injector import InjectionError, inject
 from .i18n import tr
 from .notify import notify
-from .protocol import socket_path
+from .protocol import owner_lock_path, socket_path
 from .shortcut import label_for
+
+#: How long one client may take to send its request line.  Generous for a
+#: command of a few bytes over a unix socket, and short enough that a client
+#: which connects and then says nothing cannot hold the daemon: the accept loop
+#: serves one connection at a time, so a client that never finishes its line
+#: takes the hotkey down with it.
+CLIENT_TIMEOUT = 5.0
+
+#: Longest request the daemon reads.  Real commands are tens of bytes; anything
+#: bigger is a client that is broken or hostile, and reading it into memory
+#: would be its decision, not ours.
+MAX_REQUEST_BYTES = 64 * 1024
+
+
+def _sweep_stale_recordings(max_age: float = 3600.0) -> int:
+    """Remove recordings left behind by a daemon that was killed outright.
+
+    ``cancel()`` and the shutdown hook cover every orderly exit, but a SIGKILL
+    or a power loss leaves the file behind, and at 16 kHz mono that is 32 kB for
+    every second of speech nobody is ever going to transcribe again.  Only files
+    older than ``max_age`` are touched: a recording in progress cannot be older
+    than the longest limit the user can configure, so this cannot delete one.
+    """
+    removed = 0
+    cutoff = time.time() - max_age
+    try:
+        candidates = list(Path(tempfile.gettempdir()).glob("wayvoice-*.wav"))
+    except OSError:
+        return 0
+    for candidate in candidates:
+        try:
+            if candidate.stat().st_mtime >= cutoff:
+                continue
+            candidate.unlink()
+            removed += 1
+        except OSError:
+            continue
+    return removed
 
 
 class WayVoiceDaemon:
@@ -41,6 +82,7 @@ class WayVoiceDaemon:
         self._record_timer: threading.Timer | None = None
         self._record_started = 0.0
         self._busy_started = 0.0
+        _sweep_stale_recordings()
         cfg = load_config()
         engine = engine_from_config(cfg)
         if engine is not None and engine.needs_setup:
@@ -69,6 +111,9 @@ class WayVoiceDaemon:
             "last_text": self.last_text,
             "last_error": self.last_error,
             "last_warning": self.last_warning,
+            # The daemon is running on the defaults right now; say so instead of
+            # letting the window report a configuration the user never chose.
+            "config_error": config_error(),
             "engine": engine_status(cfg),
             "shortcut": label_for(str(cfg.get("shortcut", "F8"))),
         }
@@ -120,6 +165,9 @@ class WayVoiceDaemon:
                 return {"ok": True, "state": "recording"}
             except Exception as exc:
                 self.last_error = str(exc)
+                # The notification itself cannot raise (see notify.notify), and
+                # it must not be the last thing in the handler either: an
+                # exception here would escape start_recording entirely.
                 notify("WayVoice", str(exc), enabled=cfg.get("notify", True))
                 return {"ok": False, "error": str(exc)}
 
@@ -153,7 +201,19 @@ class WayVoiceDaemon:
             self._busy_started = time.monotonic()
             self._transcribe_cancel.clear()
 
-        threading.Thread(target=self._transcribe_worker, args=(wav,), daemon=True).start()
+        thread = threading.Thread(target=self._transcribe_worker, args=(wav,), daemon=True)
+        try:
+            thread.start()
+        except Exception as exc:
+            # Without this the daemon would keep ``busy`` set forever: recording
+            # is refused, toggle turns into cancel, and only a restart of the
+            # daemon clears it. The temporary recording would leak as well.
+            self.busy = False
+            self._busy_started = 0.0
+            self._transcribe_cancel.clear()
+            wav.unlink(missing_ok=True)
+            self.last_error = str(exc)
+            return {"ok": False, "error": str(exc)}
         return {"ok": True, "state": "transcribing"}
 
     def toggle(self) -> dict:
@@ -176,6 +236,22 @@ class WayVoiceDaemon:
                 notify("WayVoice", self.last_warning, enabled=cfg.get("notify", True))
                 return
             try:
+                # Cancel means cancel. Recognition checks the flag while it
+                # decodes, but nothing between here and the injection looked at
+                # it: a cancel that arrived in the last milliseconds used to be
+                # ignored and the text was typed into whatever window the user
+                # had switched to in the meantime.
+                if self._transcribe_cancel.is_set():
+                    self.last_text = ""
+                    self.last_warning = tr(
+                        "daemon.recognition_cancelled", cfg.get("ui_language")
+                    )
+                    notify(
+                        "WayVoice",
+                        self.last_warning,
+                        enabled=cfg.get("notify", True),
+                    )
+                    return
                 result = inject(text, cfg)
                 if result.warning:
                     self.last_warning = result.warning
@@ -283,6 +359,23 @@ class WayVoiceDaemon:
 
     def serve(self) -> None:
         path = socket_path()
+        # The lock comes first and is authoritative: a second daemon must be
+        # turned away even when the first one is alive but not answering,
+        # because a daemon that is not answering is exactly the case where the
+        # probe below would hand the socket over and orphan a process that is
+        # still holding the microphone.
+        with contextlib.closing(open(owner_lock_path(), "w")) as lock:
+            try:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                print(
+                    "WayVoice: another daemon already owns this session; exiting.",
+                    file=sys.stderr,
+                )
+                return
+            self._serve_locked(path)
+
+    def _serve_locked(self, path: Path) -> None:
         if self._live_daemon(path):
             print(
                 "WayVoice: another daemon already owns the socket; exiting.",
@@ -303,8 +396,17 @@ class WayVoiceDaemon:
                     continue
                 with conn:
                     try:
+                        # The accepted socket is blocking again (CPython undoes
+                        # the listener's timeout for it), so the read has to get
+                        # its own deadline. Without it a client that connects
+                        # and stays quiet blocks this loop - and with it the hot
+                        # key - until the daemon is restarted.
+                        conn.settimeout(CLIENT_TIMEOUT)
                         data = b""
                         while not data.endswith(b"\n"):
+                            if len(data) > MAX_REQUEST_BYTES:
+                                data = b""
+                                break
                             chunk = conn.recv(4096)
                             if not chunk:
                                 break
@@ -313,15 +415,28 @@ class WayVoiceDaemon:
                             # A client that connected and left again (a probe,
                             # or a window that was closed) must not cost us the
                             # daemon: answering it would only raise EPIPE here
-                            # and take the whole accept loop down with it.
+                            # and take the whole accept loop down with it. The
+                            # same path swallows a client that sent nothing at
+                            # all within the deadline, and one that tried to
+                            # make us buffer its whole output.
                             continue
                         reply = self.dispatch(data.decode("utf-8", "replace").strip())
                         conn.sendall((json.dumps(reply, ensure_ascii=False) + "\n").encode("utf-8"))
                     except OSError:
-                        # Same for a client that hung up mid-reply.
+                        # Same for a client that hung up mid-reply, and for one
+                        # whose request took longer than CLIENT_TIMEOUT.
                         continue
         finally:
             self._cancel_record_timer()
+            # Leaving a recording behind is not a cleanup detail: pw-record keeps
+            # the microphone open and keeps writing to /tmp, so a daemon that
+            # exits mid-dictation would hold the device until something kills
+            # that process by hand.
+            try:
+                self.recorder.cancel()
+            except Exception as exc:  # never let this stop the shutdown
+                print(f"WayVoice: could not stop the recorder: {exc}", file=sys.stderr)
+            self._transcribe_cancel.set()
             server.close()
             path.unlink(missing_ok=True)
 
