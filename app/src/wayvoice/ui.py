@@ -16,6 +16,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango
 from . import __version__
 from . import deps as deps_mod
 from . import pkgsys
+from . import service
 from .cli import request
 from .config import load_config, save_config
 from .engine import ENGINE_LABELS, engine_status, request_faster_setup
@@ -160,29 +161,44 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         return label
 
     def _apply_desktop_integration(self) -> None:
-        """Run the per-user setup: apply the shortcut and enable the ydotoold
-        unit when ydotool is present.
+        """Run the per-user setup: raise the daemon, apply the shortcut and
+        enable the ydotoold unit when ydotool is present.
 
         It also runs after a dependency has been installed from the settings,
         because that integration is otherwise applied exactly once, at package
         installation time.
+
+        How this is done depends on the system: with a user manager the units
+        and ``setup-user`` do it (which is also the only way to enable the
+        ydotoold unit), without one -- a Flatpak sandbox, where ``systemctl``
+        does not even exist -- the daemon is started directly and the shortcut
+        is applied through GSettings.  See :mod:`wayvoice.service`.
         """
-        commands = [["systemctl", "--user", "start", "wayvoice.service"]]
-        setup_user = setup_user_script()
-        if setup_user is None:
-            print(
-                "WayVoice: setup-user script not found; skipping desktop integration.",
-                file=sys.stderr,
-            )
-        else:
-            commands.append([str(setup_user)])
-        for cmd in commands:
+        # The daemon start and the shortcut both talk to the outside world and
+        # can block, so they never run on the GTK main loop.
+        threading.Thread(target=self._apply_desktop_integration_worker, daemon=True).start()
+
+    def _apply_desktop_integration_worker(self) -> None:
+        if not service.start_daemon():
+            # Desktop integration is optional: never let it break the UI, but
+            # keep the reason visible for bug reports.
+            print("WayVoice: the background daemon did not come up.", file=sys.stderr)
+        if service.systemd_available():
+            setup_user = setup_user_script()
+            if setup_user is None:
+                print(
+                    "WayVoice: setup-user script not found; skipping desktop integration.",
+                    file=sys.stderr,
+                )
+                return
             try:
-                subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.Popen([str(setup_user)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             except Exception as exc:
-                # Desktop integration is optional: never let it break the UI,
-                # but keep the reason visible for bug reports.
-                print(f"WayVoice: failed to start {' '.join(cmd)}: {exc}", file=sys.stderr)
+                print(f"WayVoice: failed to start {setup_user}: {exc}", file=sys.stderr)
+            return
+        ok, msg = service.apply_shortcut_now()
+        if not ok:
+            print(f"WayVoice: global shortcut not applied: {msg}", file=sys.stderr)
 
     def _background_start(self):
         self._apply_desktop_integration()
@@ -797,10 +813,9 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         daemon_version = str(reply.get("version") or "")
         if daemon_version != __version__ and not self._restart_requested and not reply.get("recording") and not reply.get("busy"):
             self._restart_requested = True
-            try:
-                subprocess.Popen(["systemctl", "--user", "restart", "wayvoice.service"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except Exception:
-                pass
+            # Restarting waits for the new daemon to answer, so it must not
+            # block the GTK main loop the polling runs on.
+            threading.Thread(target=service.restart_daemon, daemon=True).start()
             return GLib.SOURCE_CONTINUE
 
         engine = reply.get("engine") or {}

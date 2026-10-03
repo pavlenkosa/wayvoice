@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import sys
 import threading
 import time
 import traceback
@@ -217,8 +218,54 @@ class WayVoiceDaemon:
             return {"ok": True}
         return {"ok": False, "error": f"Unknown command: {command}"}
 
+    def _live_daemon(self, path: Path) -> bool:
+        """Return whether another daemon already owns ``path``.
+
+        Without this check a second daemon would unlink the running daemon's
+        socket, bind one at the same path and the first one would be orphaned:
+        unreachable through the filesystem, yet still holding the microphone
+        and the Wayland clipboard.  Under systemd this could not happen because
+        the unit owned the lifetime, but :mod:`wayvoice.service` may now spawn
+        the daemon directly (Flatpak has no systemctl), so a double start has
+        to be refused here instead.
+
+        A socket file that nobody answers on is a leftover from a crash and is
+        safe to replace, which is what the unlink below is for.  The probe is a
+        single real ``ping``: opening a connection and dropping it would only
+        teach the running daemon nothing while risking an EPIPE on its side.
+        """
+        if not path.exists():
+            return False
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.settimeout(1.0)
+        try:
+            client.connect(str(path))
+            client.sendall(b"ping\n")
+            data = b""
+            while not data.endswith(b"\n"):
+                chunk = client.recv(256)
+                if not chunk:
+                    break
+                data += chunk
+        except OSError:
+            return False
+        finally:
+            client.close()
+        try:
+            return bool(json.loads(data.decode("utf-8", "replace")).get("ok"))
+        except (ValueError, AttributeError):
+            # Something answers on the socket but not in our protocol; treat it
+            # as occupied rather than stealing a path we do not understand.
+            return True
+
     def serve(self) -> None:
         path = socket_path()
+        if self._live_daemon(path):
+            print(
+                "WayVoice: another daemon already owns the socket; exiting.",
+                file=sys.stderr,
+            )
+            return
         path.unlink(missing_ok=True)
         server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         server.bind(str(path))
@@ -232,14 +279,24 @@ class WayVoiceDaemon:
                 except socket.timeout:
                     continue
                 with conn:
-                    data = b""
-                    while not data.endswith(b"\n"):
-                        chunk = conn.recv(4096)
-                        if not chunk:
-                            break
-                        data += chunk
-                    reply = self.dispatch(data.decode("utf-8", "replace").strip())
-                    conn.sendall((json.dumps(reply, ensure_ascii=False) + "\n").encode("utf-8"))
+                    try:
+                        data = b""
+                        while not data.endswith(b"\n"):
+                            chunk = conn.recv(4096)
+                            if not chunk:
+                                break
+                            data += chunk
+                        if not data:
+                            # A client that connected and left again (a probe,
+                            # or a window that was closed) must not cost us the
+                            # daemon: answering it would only raise EPIPE here
+                            # and take the whole accept loop down with it.
+                            continue
+                        reply = self.dispatch(data.decode("utf-8", "replace").strip())
+                        conn.sendall((json.dumps(reply, ensure_ascii=False) + "\n").encode("utf-8"))
+                    except OSError:
+                        # Same for a client that hung up mid-reply.
+                        continue
         finally:
             self._cancel_record_timer()
             server.close()

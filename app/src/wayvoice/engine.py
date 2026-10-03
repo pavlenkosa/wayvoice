@@ -14,6 +14,7 @@ from threading import Event, Lock
 from typing import Any
 
 from . import fw_worker
+from . import service
 from .models import forced_language
 from .paths import app_dir, script_path
 from .postprocess import normalize
@@ -128,14 +129,13 @@ def _read_setup_status() -> dict[str, Any]:
 
 
 def request_faster_setup() -> None:
-    try:
-        subprocess.Popen(
-            ["systemctl", "--user", "--no-block", "start", "wayvoice-engine-setup.service"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except Exception:
-        pass
+    """Ask for the Faster-Whisper runtime to be prepared in the background.
+
+    How that request reaches the machine is decided by
+    :mod:`wayvoice.service` -- the user unit where one exists, a directly
+    spawned ``wayvoice.engine_setup`` otherwise.
+    """
+    service.request_engine_setup()
 
 
 def _find_whisper_cpp(cfg: dict[str, Any]) -> str | None:
