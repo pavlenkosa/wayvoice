@@ -20,7 +20,7 @@ def _ensure_import_path() -> None:
 
 _ensure_import_path()
 
-from wayvoice import fw_worker  # noqa: E402  (needs the path bootstrap above)
+from wayvoice import fw_worker, languages  # noqa: E402  (needs the path bootstrap above)
 
 
 def _run_once(args: argparse.Namespace) -> int:
@@ -40,7 +40,10 @@ def _run_once(args: argparse.Namespace) -> int:
         {
             "cmd": "transcribe",
             "audio": args.audio,
-            "language": args.language,
+            # Normalized here as well as by the caller: the runner can be
+            # started by hand, and "auto" has to survive as "auto" so that
+            # fw_worker can turn it into the None the model expects.
+            "language": languages.normalize(args.language),
             "request_id": "one-shot",
         },
         cache,
@@ -70,7 +73,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--audio", help="WAV file to transcribe (one-shot mode)")
     parser.add_argument("--model", default="small")
-    parser.add_argument("--language", default="ru")
+    parser.add_argument("--language", default=languages.AUTO)
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
     parser.add_argument("--beam-size", type=int, default=5)
     parser.add_argument("--vad", action="store_true")

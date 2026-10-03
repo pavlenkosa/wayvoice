@@ -1,21 +1,79 @@
 from __future__ import annotations
 import re
 
-COMMANDS = [
-    (r"\bнов(?:ая|ую)\s+строк(?:а|у)\b", "\n"),
-    (r"\bнов(?:ый|ого)\s+абзац\b", "\n\n"),
-    (r"\bвопросительн(?:ый|ого)\s+знак\b", "?"),
-    (r"\bвосклицательн(?:ый|ого)\s+знак\b", "!"),
-    (r"\bточк(?:а|у)\s+с\s+запятой\b", ";"),
-    (r"\bдвоеточи(?:е|я)\b", ":"),
-    (r"\bзапят(?:ая|ую)\b", ","),
-    (r"\bточк(?:а|у)\b", "."),
+from . import languages
+
+# Spoken punctuation, one table per language.  A command only exists for the
+# language it was actually spoken in, so a table that belongs to another
+# language can only ever fire on text the user meant literally - which is why
+# "auto" can afford to apply all of them at once.
+#
+# The patterns carry no word boundaries: _compile() adds guards that treat a
+# hyphen as part of the word, so "comma-separated" stays a word and does not
+# become ",-separated".
+RU_COMMANDS = [
+    (r"нов(?:ая|ую)\s+строк(?:а|у)", "\n"),
+    (r"нов(?:ый|ого)\s+абзац", "\n\n"),
+    (r"вопросительн(?:ый|ого)\s+знак", "?"),
+    (r"восклицательн(?:ый|ого)\s+знак", "!"),
+    (r"точк(?:а|у)\s+с\s+запятой", ";"),
+    (r"двоеточи(?:е|я)", ":"),
+    (r"запят(?:ая|ую)", ","),
+    (r"точк(?:а|у)", "."),
 ]
 
-def _spoken_punctuation(text: str) -> str:
+EN_COMMANDS = [
+    (r"new\s+paragraph", "\n\n"),
+    (r"new\s+line", "\n"),
+    (r"question\s+mark", "?"),
+    (r"exclamation\s+(?:mark|point)", "!"),
+    (r"semi[ -]?colon", ";"),
+    (r"colon", ":"),
+    (r"comma", ","),
+    (r"(?:full\s+stop|period)", "."),
+]
+
+COMMANDS_BY_LANGUAGE: dict[str, list[tuple[str, str]]] = {
+    "ru": RU_COMMANDS,
+    "en": EN_COMMANDS,
+}
+
+# Kept for callers that imported it: this used to be the only table and it is
+# still the Russian one.  Use COMMANDS_BY_LANGUAGE for anything language-aware.
+COMMANDS = RU_COMMANDS
+
+def _compile(table: list[tuple[str, str]]) -> list[tuple[re.Pattern[str], str]]:
+    return [
+        (re.compile(rf"(?<![\w-]){pattern}(?![\w-])", re.IGNORECASE), replacement)
+        for pattern, replacement in table
+    ]
+
+
+_COMPILED: dict[str, list[tuple[re.Pattern[str], str]]] = {
+    code: _compile(table) for code, table in COMMANDS_BY_LANGUAGE.items()
+}
+
+
+def _tables_for(language: str | None) -> list[tuple[re.Pattern[str], str]]:
+    """Command tables to apply for a recognition language.
+
+    ``auto`` means nobody told us what was spoken, so we do not know which
+    table fits and apply all of them.  That is deliberate: a spoken-punctuation
+    command needs a whole phrase to fire, so an extra table costs nothing,
+    whereas guessing one table would leave the other's commands in the text
+    verbatim.  A language we have no table for is treated the same way - the
+    alternative is silently keeping "comma," in the middle of the sentence.
+    """
+    code = languages.normalize(language)
+    if code in _COMPILED:
+        return _COMPILED[code]
+    return _COMPILED["ru"] + _COMPILED["en"]
+
+
+def _spoken_punctuation(text: str, language: str | None = "auto") -> str:
     out = text
-    for pattern, repl in COMMANDS:
-        out = re.sub(pattern, repl, out, flags=re.IGNORECASE)
+    for pattern, repl in _tables_for(language):
+        out = pattern.sub(repl, out)
     return out
 
 def _spacing(text: str) -> str:
@@ -48,12 +106,13 @@ def normalize(
     *,
     spoken_punctuation: bool = True,
     ensure_terminal_punctuation: bool = True,
+    language: str = "auto",
 ) -> str:
     text = text.strip()
     if not text:
         return ""
     if spoken_punctuation:
-        text = _spoken_punctuation(text)
+        text = _spoken_punctuation(text, language)
     text = _spacing(text)
     text = _capitalize_sentences(text)
 

@@ -101,10 +101,18 @@ class ServeResilienceTests(unittest.TestCase):
         self.thread = threading.Thread(target=self.daemon.serve, daemon=True)
         self.addCleanup(self._stop)
         self.thread.start()
-        deadline = time.monotonic() + 5.0
-        while time.monotonic() < deadline and not self.path.exists():
-            time.sleep(0.02)
-        self.assertTrue(self.path.exists(), "the daemon did not create its socket")
+        # Wait until the daemon actually answers, not until the file appears:
+        # bind() creates it before listen(), and a connect() in between is
+        # refused, which made this flaky rather than wrong.
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
+            try:
+                if json.loads(self._request(b"ping\n").decode()).get("ok"):
+                    break
+            except (OSError, ValueError):
+                time.sleep(0.02)
+        else:
+            self.fail("the daemon did not start answering on its socket")
 
     def _stop(self):
         self.daemon._shutdown.set()
@@ -113,16 +121,18 @@ class ServeResilienceTests(unittest.TestCase):
     def _request(self, payload: bytes) -> bytes:
         client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         client.settimeout(5.0)
-        self.addCleanup(client.close)
-        client.connect(str(self.path))
-        client.sendall(payload)
-        data = b""
-        while not data.endswith(b"\n"):
-            chunk = client.recv(4096)
-            if not chunk:
-                break
-            data += chunk
-        return data
+        try:
+            client.connect(str(self.path))
+            client.sendall(payload)
+            data = b""
+            while not data.endswith(b"\n"):
+                chunk = client.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+            return data
+        finally:
+            client.close()
 
     def test_connection_without_a_request_is_ignored(self):
         # Connecting and hanging up used to make the reply raise EPIPE, which

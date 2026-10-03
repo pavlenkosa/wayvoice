@@ -7,7 +7,10 @@ from typing import Any
 DEFAULTS: dict[str, Any] = {
     "engine": "faster-whisper",
     "model": "small",
-    "language": "ru",
+    # "auto" and not a fixed language: a pinned default does not fail loudly,
+    # it silently transcribes foreign speech with the wrong grammar and
+    # spelling rules.  The recognizer detects the language per utterance.
+    "language": "auto",
     "device": "auto",
     "compute_type_cpu": "int8",
     "compute_type_cuda": "float16",

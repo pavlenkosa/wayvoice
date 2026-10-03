@@ -14,6 +14,7 @@ from threading import Event, Lock
 from typing import Any
 
 from . import fw_worker
+from . import languages
 from . import service
 from .models import forced_language
 from .paths import app_dir, script_path
@@ -565,6 +566,20 @@ def _worker_transcribe(payload: dict[str, Any], request_id: str, timeout: float,
     return reply
 
 
+def _language(cfg: dict[str, Any]) -> str:
+    """Effective recognition language for a config.
+
+    A single-language model overrides the setting, and the result is always a
+    code the engine understands: a stale value left in an old ``config.json``
+    (``"RU_ru"``, ``"klingon"``, ``""``) normalizes to a real code or to
+    :data:`~wayvoice.languages.AUTO`.  ``auto`` is passed on as ``auto``:
+    faster-whisper turns it into ``None`` for the model, and whisper.cpp
+    detects the language itself with ``-l auto``.
+    """
+    model = str(cfg.get("model", "small"))
+    return languages.normalize(forced_language(model) or cfg.get("language"))
+
+
 def _transcribe_via_worker(audio: Path, cfg: dict[str, Any], cancel_event: Event | None) -> str:
     """Transcribe through the warm worker.
 
@@ -574,12 +589,11 @@ def _transcribe_via_worker(audio: Path, cfg: dict[str, Any], cancel_event: Event
     """
     if not ensure_worker(cfg):
         raise WorkerUnavailable("the Faster-Whisper worker is not available")
-    model = str(cfg.get("model", "small"))
     request_id = uuid.uuid4().hex
     payload = {
         "cmd": "transcribe",
         "audio": str(audio),
-        "language": str(forced_language(model) or cfg.get("language", "ru") or "auto"),
+        "language": _language(cfg),
         "request_id": request_id,
     }
     reply = _worker_transcribe(
@@ -602,6 +616,9 @@ def _postprocess(text: str, cfg: dict[str, Any]) -> str:
             text,
             spoken_punctuation=bool(cfg.get("spoken_punctuation", True)),
             ensure_terminal_punctuation=bool(cfg.get("ensure_terminal_punctuation", True)),
+            # The spoken-punctuation words follow the language the speech was
+            # actually in, which is the model's own language when it forces one.
+            language=_language(cfg),
         )
     if text and cfg.get("append_space", True):
         text += " "
@@ -628,7 +645,7 @@ def _transcribe_faster(audio: Path, cfg: dict[str, Any], cancel_event: Event | N
         str(runtime_python), runner,
         "--audio", str(audio),
         "--model", str(cfg.get("model", "small")),
-        "--language", str(forced_language(str(cfg.get("model", "small"))) or cfg.get("language", "ru") or "auto"),
+        "--language", _language(cfg),
         "--device", str(cfg.get("device", "auto")),
         "--beam-size", str(int(cfg.get("beam_size", 5))),
     ]
@@ -656,7 +673,7 @@ def _transcribe_whisper_cpp(audio: Path, cfg: dict[str, Any], cancel_event: Even
         raise RuntimeError("whisper-cli was not found")
     if not model.is_file():
         raise RuntimeError("whisper.cpp model was not found")
-    language = str(cfg.get("language", "ru") or "auto")
+    language = _language(cfg)
     args = [binary, "-m", str(model), "-f", str(audio), "-l", language, "-nt", "-np"]
     if not bool(cfg.get("whisper_cpp_gpu", True)):
         args.append("-ng")

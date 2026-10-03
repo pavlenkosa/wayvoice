@@ -15,6 +15,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango
 
 from . import __version__
 from . import deps as deps_mod
+from . import languages
 from . import pkgsys
 from . import service
 from .cli import request
@@ -29,11 +30,6 @@ ENGINE_IDS = ["faster-whisper", "whisper-cpp"]
 ENGINE_NAMES = ["Faster-Whisper", "whisper.cpp"]
 DEVICES = ["auto", "cpu", "cuda"]
 DEVICE_NAMES = ["Auto", "CPU", "NVIDIA CUDA"]
-LANGUAGES = ["auto", "ru", "en", "de", "fr", "es", "it", "uk", "pl", "pt", "zh", "ja", "ko", "tr"]
-LANGUAGE_NAMES = [
-    "Auto", "Русский", "English", "Deutsch", "Français", "Español", "Italiano",
-    "Українська", "Polski", "Português", "中文", "日本語", "한국어", "Türkçe",
-]
 PASTE_MODES = ["standard", "terminal", "copy"]
 TIMEOUT_VALUES = [30, 60, 90, 120, 180]
 RECORD_VALUES = [30, 60, 120, 300, 600]
@@ -75,6 +71,118 @@ CSS = r"""
 .error-text { color: @error_color; }
 .capture-key { font-size: 24px; font-weight: 800; }
 """
+
+
+def language_choices(ui_lang: str) -> tuple[list[str], list[str]]:
+    """Recognition-language selector contents: codes with their labels.
+
+    Detection comes first and is not a language, so it gets its own
+    translated label; the rest are named by the languages themselves.
+    """
+    codes = [languages.AUTO, *languages.CODES]
+    labels = [tr("language.auto", ui_lang)]
+    labels += [languages.display_name(code, ui_lang) for code in languages.CODES]
+    return codes, labels
+
+
+def _enable_dropdown_search(dropdown) -> bool:
+    """Give a :class:`Gtk.DropDown` its search entry, best match mode.
+
+    A hundred languages are not browsable by scrolling: the user has to be
+    able to type "deutsch", "german" or even "de" and see what survives.  The
+    entry arrived in GTK 4.6 and the substring match mode in 4.10, under an
+    enum that 4.16 renamed, so each piece is probed instead of assumed - a
+    GTK that lacks them simply gets a longer popup, not a traceback.
+    """
+    if not hasattr(dropdown, "set_enable_search"):
+        return False
+    try:
+        dropdown.set_enable_search(True)
+    except (TypeError, AttributeError, ValueError):
+        return False
+    for enum_name, member in (("StringFilterMatchMode", "SUBSTRING"), ("SearchMatchMode", "SEARCH_ALL")):
+        mode = getattr(getattr(Gtk, enum_name, None), member, None)
+        if mode is not None:
+            try:
+                dropdown.set_search_match_mode(mode)
+            except (TypeError, AttributeError, ValueError):
+                pass
+            break
+    return True
+
+
+class LanguagePicker:
+    """The recognition-language control, whichever GTK gave us.
+
+    With a searchable :class:`Gtk.DropDown` (GTK 4.6+) a hundred languages are
+    a two-keystroke affair.  Without one there is only :class:`Adw.ComboRow`,
+    which still works and still lists everything - the search is the only
+    thing that goes missing, so the settings around it do not have to care
+    which control was built.
+    """
+
+    def __init__(self, title: str, codes: list[str], labels: list[str], selected: int):
+        self.codes = list(codes)
+        self._index = selected if 0 <= selected < len(codes) else 0
+        dropdown = Gtk.DropDown()
+        dropdown.set_model(Gtk.StringList.new(labels))
+        dropdown.set_valign(Gtk.Align.CENTER)
+        if _enable_dropdown_search(dropdown):
+            self._dropdown = dropdown
+            self.row = Adw.ActionRow(title=title)
+            self.row.add_suffix(dropdown)
+        else:
+            self._dropdown = None
+            combo = Adw.ComboRow(title=title)
+            combo.set_model(Gtk.StringList.new(labels))
+            self.row = combo
+        self.set_selected(self._index)
+
+    def _control(self):
+        return self._dropdown if self._dropdown is not None else self.row
+
+    # Interface shared by both controls, so callers do not branch.
+
+    def get_selected(self) -> int:
+        """Index the user actually picked.
+
+        Read back from the control instead of from the value we last wrote:
+        a :class:`Gtk.DropDown` changes its own selection and does not tell
+        anyone, so a cached index would save whichever language happened to be
+        selected before the user touched the row at all.
+        """
+        try:
+            index = int(self._control().get_selected())
+        except (TypeError, ValueError):
+            index = self._index
+        if 0 <= index < len(self.codes):
+            self._index = index
+        return self._index
+
+    def set_selected(self, index: int) -> None:
+        self._index = index if 0 <= index < len(self.codes) else 0
+        self._control().set_selected(self._index)
+
+    def set_sensitive(self, sensitive: bool) -> None:
+        self.row.set_sensitive(sensitive)
+        if self._dropdown is not None:
+            self._dropdown.set_sensitive(sensitive)
+
+    def selected_code(self) -> str:
+        return self.codes[self.get_selected()]
+
+    def select_code(self, code: str) -> bool:
+        """Select ``code``; unknown values fall back to detection.
+
+        Says whether the code was actually in the list, which is not the same
+        question as whether the selection now equals it: ``normalize`` maps
+        anything unknown to ``auto``, so comparing afterwards would answer
+        "yes" for a language that does not exist.
+        """
+        wanted = str(code or "").strip().lower()
+        found = wanted in self.codes
+        self.set_selected(self.codes.index(wanted) if found else 0)
+        return found
 
 
 class WayVoiceWindow(Adw.ApplicationWindow):
@@ -363,10 +471,17 @@ class WayVoiceWindow(Adw.ApplicationWindow):
 
         text_group = Adw.PreferencesGroup(title=self.t("settings.text"))
         page.add(text_group)
-        self.language = Adw.ComboRow(title=self.t("settings.language"))
-        self.language.set_model(Gtk.StringList.new(LANGUAGE_NAMES))
-        self.language.set_selected(self._idx(LANGUAGES, self.cfg.get("language", "ru")))
-        text_group.add(self.language)
+        language_codes, language_labels = language_choices(self.ui_lang)
+        self.language = LanguagePicker(
+            self.t("settings.language"),
+            language_codes,
+            language_labels,
+            # Old config.json files may hold anything at all here, including a
+            # language Whisper no longer knows; normalize() turns all of that
+            # into a code the list actually has.
+            self._idx(language_codes, languages.normalize(self.cfg.get("language"))),
+        )
+        text_group.add(self.language.row)
         self.auto_punct = Adw.SwitchRow(title=self.t("settings.punctuation"))
         self.auto_punct.set_active(bool(self.cfg.get("auto_punctuation", True)))
         text_group.add(self.auto_punct)
@@ -616,7 +731,9 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         self.custom_model.set_visible(self._selected_engine() == "faster-whisper" and is_custom)
         forced = preset.get("language")
         if self._selected_engine() == "faster-whisper" and forced:
-            self.language.set_selected(self._idx(LANGUAGES, str(forced)))
+            # The model decides the language; show which one, but do not let it
+            # be edited into something the model was not trained for.
+            self.language.select_code(str(forced))
             self.language.set_sensitive(False)
         else:
             self.language.set_sensitive(True)
@@ -708,7 +825,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
             return
         model_id = self._selected_model_id()
         forced = forced_language(model_id)
-        language = forced or LANGUAGES[self.language.get_selected()]
+        language = languages.normalize(forced or self.language.selected_code())
         new_ui_setting = UI_LANGUAGE_IDS[self.ui_language.get_selected()]
         cfg = load_config()
         cfg.update({
@@ -926,6 +1043,16 @@ class WayVoiceWindow(Adw.ApplicationWindow):
             self.engine_setup_btn.set_label(self.t("settings.repair") if state == "error" else self.t("settings.prepare"))
         return GLib.SOURCE_CONTINUE
 
+    def _language_label(self, value) -> str:
+        """Recognition language as the user knows it, plus the raw code.
+
+        The name is what makes the report understandable; the code is what
+        makes it reproducible, and it is the only part a developer can paste.
+        """
+        code = languages.normalize(value)
+        name = tr("language.auto", self.ui_lang) if code == languages.AUTO else languages.display_name(code, self.ui_lang)
+        return f"{name} ({code})"
+
     def _diagnostics_text(self) -> str:
         status = request("status", timeout=0.35)
         cfg = load_config()
@@ -940,7 +1067,9 @@ class WayVoiceWindow(Adw.ApplicationWindow):
             f"Engine: {cfg.get('engine')} / {cfg.get('model')}",
             f"Engine state: {(engine or {}).get('state', 'unknown') if isinstance(engine, dict) else 'unknown'}",
             f"Device: {cfg.get('device')}",
-            f"Recognition language: {cfg.get('language')}",
+            # The code alone ("yue") means nothing to whoever reads the report;
+            # the name plus the code is both readable and unambiguous.
+            f"Recognition language: {self._language_label(cfg.get('language'))}",
             f"Timeout: {cfg.get('transcription_timeout_sec')}s",
             f"Max recording: {cfg.get('max_recording_sec')}s",
             f"Shortcut: {label_for(str(cfg.get('shortcut', '')))}",

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import locale
+import warnings
 from typing import Any
+
+from . import languages
 
 SUPPORTED_UI_LANGUAGES = ("auto", "ru", "en")
 
@@ -291,19 +294,38 @@ _TRANSLATIONS = {"ru": _RU, "en": _EN}
 
 
 def resolve_language(value: str | None) -> str:
-    value = (value or "auto").strip().lower()
-    if value in {"ru", "en"}:
+    """Pick the interface language out of the configured value or the locale.
+
+    Only two interface translations exist, so this maps the whole recognition
+    language list of :mod:`wayvoice.languages` onto them: Russian gets the
+    Russian one and everything else falls back to English.  That is a choice
+    about *interface* text, not about what can be dictated - those are
+    independent, and a Ukrainian user can perfectly well want an English UI.
+    """
+    value = (value or languages.AUTO).strip().lower()
+    if value in _TRANSLATIONS:
         return value
+    candidates: list[str] = [_locale_language(locale.getlocale)]
+    if not candidates[0]:
+        # Deprecated in 3.11 and gone by 3.15, but on the systems we support it
+        # still answers where getlocale() has nothing to say.
+        candidates.append(_locale_language(getattr(locale, "getdefaultlocale", None)))
+    return "ru" if languages.detect_from_locale(candidates) == "ru" else "en"
+
+
+def _locale_language(getter) -> str:
+    """The language part of what a locale getter returned, if it returned one."""
+    if getter is None:
+        return ""
     try:
-        lang, _encoding = locale.getlocale()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            result = getter()
     except Exception:
-        lang = None
-    if not lang:
-        try:
-            lang = locale.getdefaultlocale()[0]  # type: ignore[attr-defined]
-        except Exception:
-            lang = None
-    return "ru" if str(lang or "").lower().startswith("ru") else "en"
+        return ""
+    if isinstance(result, tuple):
+        result = result[0] if result else ""
+    return str(result or "")
 
 
 def tr(key: str, language: str | None = None, **kwargs: Any) -> str:
