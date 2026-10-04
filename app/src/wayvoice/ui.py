@@ -1686,7 +1686,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         about.set_comments(self.t("about.comments"))
         about.set_developer_name(self.t("about.developer"))
         about.set_developers([self.t("about.developer")])
-        about.set_license_type(Gtk.License.GPL_3_0)
+        about.set_license_type(Gtk.License.AGPL_3_0)
         about.set_copyright("© 2026 WayVoice contributors")
         about.present()
 

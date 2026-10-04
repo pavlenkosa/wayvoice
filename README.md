@@ -136,4 +136,4 @@ WayVoice does not send recordings to a cloud service when a local recognition en
 
 ## License
 
-WayVoice is licensed under the **GNU General Public License v3.0 only** (SPDX: `GPL-3.0-only`). See [LICENSE](LICENSE).
+WayVoice is licensed under the **GNU Affero General Public License v3.0 or later** (SPDX: `AGPL-3.0-or-later`). The stronger copyleft is what lets the automatic-paste helper be shipped with the application: `ydotool` is AGPL-3.0-or-later, and its source cannot be combined with GPL-3.0-only code. See [LICENSE](LICENSE) and [third_party/ydotool](third_party/ydotool/README.wayvoice.md).

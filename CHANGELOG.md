@@ -2,6 +2,7 @@
 
 ## 0.6.0 — 2026-10-04
 
+- Licence changed from GPL-3.0-only to **AGPL-3.0-or-later**, which is what allows the automatic-paste helper to be shipped with the application: `ydotool` is AGPL-3.0-or-later, and its source cannot be combined with GPL-3.0-only code. Updated accordingly: LICENSE, packaging metadata, AppStream data, the About dialog, and a machine-readable `copyright` file in the package (Debian policy 12.5).
 - Recognition languages: all 100 that Whisper supports, each under its own name, with automatic detection as the default instead of a pinned language.
 - Spoken punctuation commands in English as well as Russian, applied per language.
 - Engine registry: engines are declared once and the window, the daemon and the CLI all ask it, instead of three places comparing engine ids.

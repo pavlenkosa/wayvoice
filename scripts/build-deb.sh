@@ -39,6 +39,10 @@ cp "$ROOT/data/io.github.stepan.WayVoice.metainfo.xml" "$PKG/usr/share/metainfo/
 cp "$ROOT/data/icons/hicolor/scalable/apps/io.github.stepan.WayVoice.svg" "$PKG/usr/share/icons/hicolor/scalable/apps/"
 cp "$ROOT/data/icons/hicolor/symbolic/apps/io.github.stepan.WayVoice-symbolic.svg" "$PKG/usr/share/icons/hicolor/symbolic/apps/"
 cp "$ROOT/README.md" "$ROOT/CHANGELOG.md" "$ROOT/LICENSE" "$PKG/usr/share/doc/wayvoice/"
+# Debian policy 12.5: the machine-readable copyright file belongs in the package,
+# and the licence of every bundled program has to be stated in it - which it is,
+# including ydotool's.
+cp "$ROOT/packaging/DEBIAN/copyright" "$PKG/usr/share/doc/wayvoice/copyright"
 cp "$ROOT/packaging/DEBIAN/postinst" "$ROOT/packaging/DEBIAN/postrm" "$ROOT/packaging/DEBIAN/prerm" "$PKG/DEBIAN/"
 
 cat > "$PKG/DEBIAN/control" <<EOF
@@ -48,6 +52,7 @@ Section: utils
 Priority: optional
 Architecture: all
 Maintainer: WayVoice Project <noreply@localhost>
+License: AGPL-3.0-or-later
 Depends: python3 (>= 3.11), python3-venv, python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1, libadwaita-1-0, pipewire-bin, wl-clipboard, libnotify-bin
 Recommends: ydotool
 Description: local speech-to-text dictation for GNOME and Wayland

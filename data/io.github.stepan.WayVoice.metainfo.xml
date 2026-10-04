@@ -5,7 +5,7 @@
   <summary>Local voice dictation for GNOME and Wayland</summary>
   <summary xml:lang="ru">Локальный голосовой ввод для GNOME и Wayland</summary>
   <metadata_license>CC0-1.0</metadata_license>
-  <project_license>GPL-3.0-only</project_license>
+  <project_license>AGPL-3.0-or-later</project_license>
   <description>
     <p>WayVoice records microphone audio through PipeWire, transcribes it locally and inserts the result into the focused application.</p>
     <p xml:lang="ru">WayVoice записывает микрофон через PipeWire, локально распознаёт речь и вставляет результат в активное приложение.</p>
