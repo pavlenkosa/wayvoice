@@ -77,24 +77,37 @@ jobs:
           fi
           TAG="v$VERSION"
 
-          # "Is there anything to release?" comes before every check about tags.
-          # The order matters more than it looks: main keeps receiving commits
-          # after a release, and the tag of the version just published points at
-          # the commit before them. Asking about the tag first would turn every
-          # one of those commits into a failed run, which is how a workflow that
-          # should be quiet most of the time ends up permanently red.
+          # "Is there anything to release?" comes before any check about where a
+          # tag points, and it needs two questions, not one. The order matters:
+          # main keeps receiving commits after a release, and the tag of the
+          # version just published points at the commit before them, so asking
+          # about that first would turn every later commit into a failed run -
+          # how a workflow that should be quiet most of the time ends up
+          # permanently red.
+          git fetch --force --tags
+          RELEASED=false
+          git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null && RELEASED=true
+
           if ! $FROM_TAG && [[ "${GITHUB_EVENT_NAME}" != "workflow_dispatch" ]]; then
             PREVIOUS="$(version_at HEAD^ 2>/dev/null || true)"
-            if [ "$PREVIOUS" = "$VERSION" ]; then
-              echo "Version is still $VERSION: nothing to release."
+            if [ "$PREVIOUS" = "$VERSION" ] && $RELEASED; then
+              echo "Version is still $VERSION and $TAG exists: nothing to release."
               echo "release=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            echo "Version ${PREVIOUS:-none} -> $VERSION"
+            # Both cases below are a release that has not happened yet: the
+            # version moved, or it moved earlier and the tag never made it to
+            # the remote. Publishing is idempotent - a version whose tag exists is
+            # not published twice - so recovering from a forgotten tag is the
+            # same code path as an ordinary bump.
+            if [ "$PREVIOUS" = "$VERSION" ]; then
+              echo "$TAG does not exist although the tree is at $VERSION: publishing it now."
+            else
+              echo "Version ${PREVIOUS:-none} -> $VERSION"
+            fi
           fi
 
           # From here on something is being released, so the tag has to agree.
-          git fetch --force --tags
           TAG_SHA=""
           if git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
             TAG_SHA="$(git rev-list -n 1 "$TAG")"
