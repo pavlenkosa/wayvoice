@@ -11,14 +11,13 @@ from pathlib import Path
 from . import __version__
 from .engine import faster_runtime, faster_stamp, setup_status_path
 
-#: Longest a single pip invocation may take.  Without it a network that stops
-#: delivering leaves the status at "installing" forever: the window spins with
-#: no cancel button, and every dictation attempt spawns another setup process
-#: that then waits on the lock below.
+#: Longest a single pip invocation may take. Without it a network that stops
+#: delivering leaves the status at "installing" forever: the window spins with no
+#: cancel button, and every dictation attempt spawns another setup process.
 PIP_TIMEOUT = 1800.0
 
-#: How long a second setup process waits for the lock before deciding that one
-#: is already running.  The holder does the work; the waiter has nothing to do.
+#: How long a second setup process waits for the lock before deciding one is
+#: already running. The holder does the work; the waiter has nothing to do.
 LOCK_TIMEOUT = 2.0
 
 
@@ -83,10 +82,9 @@ def _install_once(runtime: Path, log) -> None:
 def _take_lock(lock) -> bool:
     """Take the setup lock, waiting briefly for a holder that is finishing.
 
-    ``flock`` in blocking mode has no way out: a crashed holder releases the
-    lock, but a holder that is stuck (pip waiting on a network) keeps every
-    later process waiting forever.  Polling with a deadline gives the common
-    case - the previous attempt is about to finish - and gives up otherwise.
+    ``flock`` in blocking mode has no way out: a crashed holder releases it, but one stuck
+    on pip waiting for a network keeps every later process waiting forever. Polling with a
+    deadline covers the common case and gives up otherwise.
     """
     deadline = time.monotonic() + LOCK_TIMEOUT
     while True:
@@ -110,10 +108,9 @@ def main() -> int:
 
     with lock_path.open("w") as lock:
         if not _take_lock(lock):
-            # Somebody else is already preparing the engine. Say so and leave:
-            # waiting here would pile up one blocked process per dictation
-            # attempt, and would keep reporting "installing" after the real
-            # attempt has already failed.
+            # Somebody else is already preparing the engine. Say so and leave: waiting
+            # here would pile up one blocked process per dictation attempt, and would
+            # keep reporting "installing" after the real attempt has failed.
             print("wayvoice-engine-setup: another setup is running", file=sys.stderr)
             return 0
         runtime = faster_runtime()

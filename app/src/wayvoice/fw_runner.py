@@ -8,10 +8,9 @@ from pathlib import Path
 def _ensure_import_path() -> None:
     """Make the ``wayvoice`` package importable from this script.
 
-    The runner is executed by the engine runtime interpreter, which knows
-    nothing about the application sources.  This module lives inside the
-    package directory, so the import root is its parent -- the same layout for
-    a source checkout and for the installed package.
+    The runner is executed by the engine runtime interpreter, which knows nothing about
+    the application sources; this module lives inside the package directory, so the import
+    root is its parent - the same layout in a checkout and in the installed package.
     """
     root = Path(__file__).resolve().parent.parent
     if str(root) not in sys.path:
@@ -26,8 +25,8 @@ from wayvoice import fw_worker, languages  # noqa: E402  (needs the path bootstr
 def _run_once(args: argparse.Namespace) -> int:
     """Load the model, transcribe one file and print the text.
 
-    This is the original one-shot mode.  It stays the fallback used whenever
-    the warm worker is unavailable or disabled.
+    The original one-shot mode, and still the fallback whenever the warm worker is
+    unavailable or disabled.
     """
     config = fw_worker.WorkerConfig(
         model=args.model,

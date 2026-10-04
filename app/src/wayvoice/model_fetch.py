@@ -1,25 +1,22 @@
 """Download a model into the hub cache, reporting progress as it goes.
 
-Run by the *engine runtime* interpreter, not by the system Python, because
-``huggingface_hub`` only exists in that virtual environment.  The module lives
-inside the package and puts its parent on ``sys.path``, exactly like
-``fw_runner.py``.
+Run by the *engine runtime* interpreter, since ``huggingface_hub`` only exists in
+that virtual environment; like ``fw_runner.py``, it puts its parent on ``sys.path``.
 
-Why a separate process at all: the download can take minutes to hours, it must
-be cancellable, and the daemon has to keep answering the hot key while it runs.
-A child process gives all three for free, and it also means a download that
-crashes the hub library takes nothing else with it.
+A separate process because the download can take minutes to hours, has to be
+cancellable, and must not keep the daemon from answering the hot key - and because a
+download that crashes the hub library then takes nothing else with it.
 
-The protocol on stdout is one line per event, all prefixed so that nothing the
-library prints can be mistaken for it::
+The protocol on stdout is one prefixed line per event, so nothing the library prints
+can be mistaken for it::
 
-    WV-PROGRESS <done_bytes> <total_bytes>
-    WV-READY <snapshot_path>
-    WV-ERROR <message>
+WV-PROGRESS <done_bytes> <total_bytes>
+WV-READY <snapshot_path>
+WV-ERROR <message>
 
-Progress lines are throttled: the hub calls ``update()`` per chunk, and a
-4 GiB download would otherwise produce tens of thousands of lines for a
-consumer that repaints twice a second.
+Progress is throttled: the hub calls ``update()`` per chunk, and a 4 GiB download
+would otherwise produce tens of thousands of lines for a consumer that repaints twice
+a second.
 """
 
 from __future__ import annotations
@@ -33,10 +30,9 @@ from pathlib import Path
 def _ensure_import_path() -> None:
     """Make the ``wayvoice`` package importable from this script.
 
-    The runtime interpreter knows nothing about the application sources, and
-    this module lives inside the package directory, so the import root is its
-    parent -- the same layout for a source checkout and for the installed
-    package.
+    The runtime interpreter knows nothing about the application sources and this module
+    lives inside the package directory, so the import root is its parent - the same
+    layout in a checkout and in the installed package.
     """
     root = Path(__file__).resolve().parent.parent
     if str(root) not in sys.path:
@@ -53,17 +49,14 @@ REPORT_INTERVAL = 0.25
 def expected_total(repo_id: str, patterns: list[str]) -> int:
     """Bytes the download will put on disk, or ``0`` when that is unknown.
 
-    Read from the repository metadata instead of from the hub's progress bars.
-    Those bars are two of them - one counting bytes written, one counting bytes
-    that arrived over the network - and both are handed the size of every file,
-    while the network one additionally invents its own total as it goes.  Adding
-    them reported a 1.5 GB model as 3 GB and made the bar jump backwards.  The
-    metadata is one request, and it is also the number that stays right when the
-    files are already partly cached.
+    Read from the repository metadata, not from the hub's progress bars: those are two
+    of them (bytes written, bytes that arrived) and both are handed the size of every
+    file, while the network one also invents its own total. Adding them reported a 1.5 GB
+    model as 3 GB and made the bar jump backwards.
 
     ``0`` means "do not pretend to know": an offline machine, a rate limit or an
-    unexpected answer all leave the caller with an indeterminate bar rather than
-    a wrong percentage.
+    unexpected answer leave the caller with an indeterminate bar rather than a wrong
+    percentage.
     """
     from fnmatch import fnmatch
 
@@ -85,11 +78,9 @@ def expected_total(repo_id: str, patterns: list[str]) -> int:
 class Reporter:
     """Turns the hub's progress bars into one line of bytes.
 
-    The denominator is the size the repository says the model has; the numerator
-    is the highest number of bytes any of the hub's byte counters has reached.
-    Reporting is throttled: a download of a few gigabytes calls ``update()`` per
-    chunk, and a consumer that repaints twice a second does not need tens of
-    thousands of lines.
+    The denominator is the size the repository says the model has, the numerator the
+    highest number any of the hub's byte counters has reached, and reporting is
+    throttled for the same reason as everywhere else in this path.
     """
 
     def __init__(self, total: int = 0, interval: float = REPORT_INTERVAL) -> None:
@@ -110,10 +101,9 @@ class Reporter:
     def counts(self) -> tuple[int, int]:
         """Bytes landed so far, and bytes expected.
 
-        The hub counts the same bytes twice - once as they are written, once as
-        they arrive - so the larger counter is taken rather than the sum.  Bars
-        that never move are ignored by that maximum on their own, which is what
-        drops the network bar when the download did not go through xet.
+        The hub counts the same bytes twice - written and arrived - so the larger counter is
+        taken rather than the sum. Bars that never move drop out of that maximum on their
+        own, which is what removes the network bar when the download did not go through xet.
         """
         done = 0
         learned = 0
@@ -141,27 +131,24 @@ class Reporter:
 def progress_tqdm_class(reporter: Reporter):
     """Build the progress-bar class the hub will instantiate.
 
-    ``huggingface_hub`` takes any object with the ``tqdm`` shape and then uses
-    it as a tqdm: it feeds it with ``update()`` and ``update_transfer()``, sets
-    ``total`` as the size of each file becomes known, and reads ``n``, ``total``,
-    ``pos``, ``format_dict`` and a handful of cosmetic setters back out.  On the
-    xet path it also walks into that shape directly - the aggregate reporter
-    calls ``format_dict`` to derive a rate - so a missing attribute is an
-    ``AttributeError`` in the middle of a multi-gigabyte download, raised from a
-    callback the library swallows and prints.
+    ``huggingface_hub`` accepts any object with the ``tqdm`` shape and then uses it as a
+    tqdm: it feeds ``update()`` and ``update_transfer()``, sets ``total`` as each file's
+    size becomes known, and reads ``n``, ``total``, ``pos``, ``format_dict`` and a
+    handful of cosmetic setters back out. On the xet path it walks into that shape
+    directly as well - the aggregate reporter derives a rate from ``format_dict`` - so a
+    missing attribute is an ``AttributeError`` in the middle of a multi-gigabyte
+    download, raised from a callback the library swallows and prints.
 
-    Nothing is drawn here: this process' stdout is a pipe, and the only thing
-    worth writing to it is a number the daemon can turn into a bar.
-
-    A fresh class per call keeps the reporter private to one download, which
-    matters because ``snapshot_download`` downloads several files concurrently
-    and creates one bar for the transfer and one for the write.
+    Nothing is drawn here: stdout is a pipe, and the only thing worth writing to it is a
+    number the daemon can turn into a bar. A fresh class per call keeps one download's
+    reporter private to it, which matters because ``snapshot_download`` downloads several
+    files concurrently and makes a bar for the transfer and one for the write.
     """
 
     class _ProgressBar:
         def __init__(self, *args, **kwargs) -> None:
-            # ``total`` is 0 at creation and raised by the hub once the size of
-            # the file is known, so it has to stay a plain attribute.
+            # ``total`` is 0 at creation and raised by the hub once the size of the file
+            # is known, so it has to stay a plain attribute.
             self.n = int(kwargs.get("initial") or 0)
             self.total = int(kwargs.get("total") or 0)
             self.unit = str(kwargs.get("unit") or "")
@@ -176,9 +163,8 @@ def progress_tqdm_class(reporter: Reporter):
         def format_dict(self) -> dict[str, object]:
             """What tqdm's own ``format_dict`` carries, in the shape it is read.
 
-            The aggregate reporter reads ``rate`` from here to show a combined
-            throughput, and a download whose repository is served over xet asks
-            for it on every progress report.
+            The aggregate reporter reads ``rate`` from here for a combined throughput, and a
+            download served over xet asks for it on every progress report.
             """
             return {
                 "n": self.n,
@@ -197,10 +183,10 @@ def progress_tqdm_class(reporter: Reporter):
             reporter.report(force=False)
 
         def update_transfer(self, amount=1):
-            # Bytes on the wire. Not counted: the hub reports the same bytes as
-            # written, and adding both would double the progress of every
-            # download. The rate is kept, because that is what the aggregate
-            # reporter displays and it has no better source.
+            # Bytes on the wire. Not counted: the hub reports the same bytes as written,
+            # and adding both would double the progress of every download. The rate
+            # is kept, because that is what the aggregate reporter displays and it
+            # has no better source.
             self._rate = self._track_rate(self.n + int(amount or 0))
 
         def _track_rate(self, counter: int) -> float:
@@ -246,9 +232,9 @@ def progress_tqdm_class(reporter: Reporter):
 def download(repo_id: str, cache_dir: str = "", revision: str = "") -> str:
     """Fetch ``repo_id`` into the cache and return the snapshot directory.
 
-    Raises whatever ``snapshot_download`` raises; the caller turns it into a
-    message.  The snapshot path is printed only after the hub says it is
-    complete, so a ``WV-READY`` line always means usable weights.
+    Raises whatever ``snapshot_download`` raises; the caller turns it into a message.
+    The path is printed only after the hub reports completion, so a ``WV-READY`` line
+    always means usable weights.
     """
     from huggingface_hub import snapshot_download
 
@@ -256,10 +242,9 @@ def download(repo_id: str, cache_dir: str = "", revision: str = "") -> str:
 
     patterns = list(model_store.FETCH_PATTERNS)
     reporter = Reporter(total=expected_total(repo_id, patterns))
-    # The hub's own bars are silenced: they go to stderr and would drown the
-    # protocol this process speaks on stdout.  Only the files that make the
-    # model usable are fetched -- see model_store.FETCH_PATTERNS for why this is
-    # not simply "everything in the repository".
+    # The hub's own bars are silenced: they go to stderr and would drown the protocol
+    # this process speaks on stdout. Only the files that make the model usable are
+    # fetched - see model_store.FETCH_PATTERNS for why not the whole repository.
     kwargs = {
         "tqdm_class": progress_tqdm_class(reporter),
         "allow_patterns": patterns,
