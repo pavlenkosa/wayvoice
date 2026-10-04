@@ -85,8 +85,8 @@ CSS = r"""
 def language_choices(ui_lang: str) -> tuple[list[str], list[str]]:
     """Recognition-language selector contents: codes with their labels.
 
-    Detection comes first and is not a language, so it gets its own
-    translated label; the rest are named by the languages themselves.
+    Detection comes first and is not a language, so it gets its own translated label;
+    the rest are named by the languages themselves.
     """
     codes = [languages.AUTO, *languages.CODES]
     labels = [tr("language.auto", ui_lang)]
@@ -107,11 +107,10 @@ def engine_choices() -> tuple[list[str], list[str]]:
 def _enable_dropdown_search(dropdown) -> bool:
     """Give a :class:`Gtk.DropDown` its search entry, best match mode.
 
-    A hundred languages are not browsable by scrolling: the user has to be
-    able to type "deutsch", "german" or even "de" and see what survives.  The
-    entry arrived in GTK 4.6 and the substring match mode in 4.10, under an
-    enum that 4.16 renamed, so each piece is probed instead of assumed - a
-    GTK that lacks them simply gets a longer popup, not a traceback.
+    A hundred languages are not browsable by scrolling, so the user has to be able to
+    type "deutsch", "german" or "de" and see what survives. The entry arrived in GTK 4.6
+    and the substring match mode in 4.10, under an enum 4.16 renamed, so each piece is
+    probed: a GTK that lacks them gets a longer popup rather than a traceback.
     """
     if not hasattr(dropdown, "set_enable_search"):
         return False
@@ -133,11 +132,9 @@ def _enable_dropdown_search(dropdown) -> bool:
 class LanguagePicker:
     """The recognition-language control, whichever GTK gave us.
 
-    With a searchable :class:`Gtk.DropDown` (GTK 4.6+) a hundred languages are
-    a two-keystroke affair.  Without one there is only :class:`Adw.ComboRow`,
-    which still works and still lists everything - the search is the only
-    thing that goes missing, so the settings around it do not have to care
-    which control was built.
+    With a searchable :class:`Gtk.DropDown` a hundred languages are a two-keystroke
+    affair. Without one there is only :class:`Adw.ComboRow`, which still works and still
+    lists everything, so the settings around it do not have to care which was built.
     """
 
     def __init__(self, title: str, codes: list[str], labels: list[str], selected: int):
@@ -165,10 +162,9 @@ class LanguagePicker:
     def get_selected(self) -> int:
         """Index the user actually picked.
 
-        Read back from the control instead of from the value we last wrote:
-        a :class:`Gtk.DropDown` changes its own selection and does not tell
-        anyone, so a cached index would save whichever language happened to be
-        selected before the user touched the row at all.
+        Read back from the control rather than from the value last written: a
+        :class:`Gtk.DropDown` changes its own selection without telling anyone, so a cached
+        index would report whatever was selected before the user touched the row.
         """
         try:
             index = int(self._control().get_selected())
@@ -193,9 +189,8 @@ class LanguagePicker:
     def select_code(self, code: str) -> bool:
         """Select ``code``; unknown values fall back to detection.
 
-        Says whether the code was actually in the list, which is not the same
-        question as whether the selection now equals it: ``normalize`` maps
-        anything unknown to ``auto``, so comparing afterwards would answer
+        Says whether the code was in the list at all, which ``normalize`` hides: it maps
+        anything unknown to ``auto``, so comparing the selection afterwards would answer
         "yes" for a language that does not exist.
         """
         wanted = str(code or "").strip().lower()
@@ -298,21 +293,17 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         return label
 
     def _apply_desktop_integration(self) -> None:
-        """Run the per-user setup: raise the daemon, apply the shortcut and
-        enable the ydotoold unit when ydotool is present.
+        """Run the per-user setup: raise the daemon, apply the shortcut and enable the
+        ydotoold unit when ydotool is present.
 
-        It also runs after a dependency has been installed from the settings,
-        because that integration is otherwise applied exactly once, at package
-        installation time.
-
-        How this is done depends on the system: with a user manager the units
-        and ``setup-user`` do it (which is also the only way to enable the
-        ydotoold unit), without one -- a Flatpak sandbox, where ``systemctl``
-        does not even exist -- the daemon is started directly and the shortcut
-        is applied through GSettings.  See :mod:`wayvoice.service`.
+        Also runs after a dependency is installed from the settings, since that integration
+        is otherwise applied once, at package installation time. With a user manager the
+        units and ``setup-user`` do it - the only way to enable the ydotoold unit - and
+        without one the daemon is started directly and the shortcut applied through GSettings.
+        See :mod:`wayvoice.service`.
         """
-        # The daemon start and the shortcut both talk to the outside world and
-        # can block, so they never run on the GTK main loop.
+        # The daemon start and the shortcut both talk to the outside world and can block,
+        # so they never run on the GTK main loop.
         threading.Thread(target=self._apply_desktop_integration_worker, daemon=True).start()
 
     def _apply_desktop_integration_worker(self) -> None:
@@ -480,16 +471,15 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         if preset_index(current_model) == len(MODEL_PRESETS) - 1 and current_model != "__custom__":
             custom_value = current_model
         self.custom_model.set_text(custom_value)
-        # Typing in the custom field fires this per keystroke, so it goes
-        # through the same coalescing as everything else instead of starting a
-        # scan per character.
+        # Typing in the custom field fires this per keystroke, so it goes through the
+        # same coalescing as everything else instead of scanning per character.
         self.custom_model.connect("changed", lambda *_: self._refresh_model_state())
         engine_group.add(self.custom_model)
 
         self.model_state_row = Adw.ActionRow(title=self.t("store.state"), subtitle=self.t("health.checking"))
-        # The download has to be reachable without changing the model: a model
-        # that is not on disk used to be fetched as a side effect of choosing a
-        # different one, which is a place a user goes to only by accident.
+        # The download has to be reachable without changing the model: a model that is
+        # not on disk used to be fetched as a side effect of choosing a different one,
+        # which is a place a user goes to only by accident.
         self.model_fetch_btn = Gtk.Button(
             label=self.t("store.download_now"),
             valign=Gtk.Align.CENTER,
@@ -497,9 +487,9 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         self.model_fetch_btn.connect("clicked", self._ask_to_fetch_the_model)
         self.model_fetch_btn.set_visible(False)
         self.model_state_row.add_suffix(self.model_fetch_btn)
-        #: The last state the window heard about, so the button can be shown or
-        #: hidden from either side: the cache walk says what is on disk, the
-        #: daemon says what is being done about it.
+        #: The last state the window heard about, so the button can be shown or hidden
+        #: from either side: the cache walk says what is on disk, the daemon says what
+        #: is being done about it.
         self._model_entry: dict = {}
         self._download_report: dict = {}
         self.model_delete_btn = Gtk.Button(
@@ -512,9 +502,9 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         self.model_state_row.add_suffix(self.model_delete_btn)
         engine_group.add(self.model_state_row)
 
-        # Downloading a model is the one thing here that takes minutes, so it
-        # gets its own row with a real bar and a cancel button instead of a
-        # subtitle that would have to be re-read to change.
+        # Downloading a model is the one thing here that takes minutes, so it gets its
+        # own row with a real bar and a cancel button instead of a subtitle that would
+        # have to be re-read to change.
         self.model_download_row = Adw.ActionRow(title=self.t("store.download"))
         self.model_download_bar = Gtk.ProgressBar(
             valign=Gtk.Align.CENTER,
@@ -563,9 +553,9 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         self.custom_command.set_tooltip_text(self.t("settings.custom_command_sub"))
         engine_group.add(self.custom_command)
 
-        # Config key -> row for every engine-specific row.  A row is shown
-        # exactly when the selected engine owns its key, so a new engine brings
-        # its settings along instead of needing an id comparison per row.
+        # Config key -> row for every engine-specific row. A row is shown exactly when
+        # the selected engine owns its key, so a new engine brings its settings along
+        # instead of needing an id comparison per row.
         self._engine_rows = (
             ("model", self.model),
             ("custom_model", self.custom_model),
@@ -687,10 +677,9 @@ class WayVoiceWindow(Adw.ApplicationWindow):
     def _refresh_dependency_rows(self, force: bool = False):
         """Recompute every dependency row from the current PATH state.
 
-        ``_poll_status`` ticks every 650 ms, so the probe is throttled: a full
-        pass costs a handful of PATH lookups and must not repaint the rows on
-        every tick. While an install is running the throttle is bypassed so the
-        spinner state stays correct.
+        ``_poll_status`` ticks every 650 ms, so the probe is throttled and must not repaint
+        the rows on every tick. An install in progress bypasses the throttle so the spinner
+        state stays correct.
         """
         if not force and not self._dep_installing:
             now = time.monotonic()
@@ -733,8 +722,8 @@ class WayVoiceWindow(Adw.ApplicationWindow):
                     button.set_visible(False)
                     subtitle = self.t("settings.deps_manual")
                 elif packages is None:
-                    # The package name for this manager is not known with
-                    # certainty; never invent one.
+                    # The package name for this manager is not known with certainty; never
+                    # invent one.
                     button.set_visible(False)
                     subtitle = self.t("settings.deps_no_name")
                 else:
@@ -768,9 +757,8 @@ class WayVoiceWindow(Adw.ApplicationWindow):
 
         self._dep_installing.add(dep_id)
         self._refresh_dependency_rows(force=True)
-        # The package manager blocks and pkexec shows an authorization dialog,
-        # so the work runs off the UI thread and the result comes back through
-        # GLib.idle_add, exactly like the daemon's transcription worker.
+        # The package manager blocks and pkexec shows an authorization dialog, so the
+        # work runs off the UI thread and comes back through GLib.idle_add.
         threading.Thread(
             target=self._install_dependency_worker,
             args=(dep_id, packages),
@@ -788,10 +776,9 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         self._dep_installing.discard(dep_id)
         self._refresh_dependency_rows(force=True)
         if ok:
-            # Installing a package is not enough on its own: the desktop
-            # integration (global shortcut, ydotoold unit) is applied by
-            # setup-user, which postinst only runs once. Re-run it so a
-            # dependency installed later really starts working.
+            # Installing a package is not enough on its own: setup-user applies the global
+            # shortcut and enables the ydotoold unit, and postinst runs it only once.
+            # Re-run it so a dependency installed later really starts working.
             self._apply_desktop_integration()
             self.toast.add_toast(Adw.Toast(title=self.t("toast.deps_installed")))
             return GLib.SOURCE_REMOVE
@@ -831,12 +818,11 @@ class WayVoiceWindow(Adw.ApplicationWindow):
     def _on_model_selected(self, *_args):
         self._sync_model_ui()
         model_id = self._selected_model_id()
-        # Choosing a model is choosing weights, and weights are the one thing here
-        # that costs gigabytes of somebody's bandwidth. A model that is already
-        # on disk needs no permission - it is only loaded - so the answer comes
-        # from the state report, which knows what is on disk, and the download is
-        # only started after the user has said yes. Without the question, a
-        # single click in a dropdown started a download the user never asked for.
+        # Choosing a model is choosing weights, and weights are the one thing here that
+        # costs gigabytes of somebody's bandwidth. A model already on disk needs no
+        # permission - it is only loaded - so the answer comes from the state report,
+        # and the download starts only after the user has said yes. Without the
+        # question, one click in a dropdown started a download nobody asked for.
         self._download_confirmation_for = model_id
         self._refresh_model_state()
 
@@ -850,13 +836,13 @@ class WayVoiceWindow(Adw.ApplicationWindow):
             return
         self._download_confirmation_for = None
         if entry.get("downloaded"):
-            # Free, and invisible otherwise: the first dictation would pay for
-            # loading the model, and nothing would have said so.
+            # Free, and invisible otherwise: the first dictation would pay for loading
+            # the model, and nothing would have said so.
             self._ask_daemon_to_prepare_model()
             return
         if str(entry.get("kind") or "") != "hub":
-            # A local path or a name nothing can fetch: there is nothing to ask
-            # about, and the daemon says so for itself.
+            # A local path or a name nothing can fetch: there is nothing to ask about,
+            # and the daemon says so for itself.
             self._ask_daemon_to_prepare_model()
             return
         self._ask_about_download(model_id, int(entry.get("size_bytes") or 0))
@@ -864,8 +850,8 @@ class WayVoiceWindow(Adw.ApplicationWindow):
     def _ask_about_download(self, model_id: str, size_bytes: int) -> None:
         """The question, before the gigabytes."""
         if size_bytes <= 0:
-            # The size is what the catalogue says; a model whose files are not on
-            # disk has none to count, and a question without a number is a guess.
+            # The size is what the catalogue says; a model whose files are not on disk
+            # has none to count, and a question without a number is a guess.
             size = self.t("store.download_unknown_size")
         else:
             size = model_store.human_size(size_bytes, self.ui_lang)
@@ -907,16 +893,13 @@ class WayVoiceWindow(Adw.ApplicationWindow):
     def _ask_daemon_to_prepare_model(self) -> None:
         """Ask the daemon to make the selected model ready, off the main loop.
 
-        Which half this is depends on what the model needs: a fetch if its
-        weights are not on disk, a load into the worker if they are. Both are the
-        daemon's business - the download is its child process, and only it can end
-        that child without leaving a helper running - so this asks rather than
-        does, and the answer comes back on the next status poll.
+        Which half this is depends on what the model needs: a fetch if its weights are not on
+        disk, a load into the worker if they are. Both belong to the daemon - the download is
+        its child process, and only it can end that child without leaving a helper running -
+        so this asks rather than does, and the answer comes back on the next status poll.
 
-        The question about a fetch has already been asked and answered by the
-        time anything calls this. A refusal here would be a no-op; a fetch that
-        starts without the user having been asked is the thing this indirection
-        exists to prevent.
+        The question about a fetch has already been asked and answered by the time anything
+        calls this, so a refusal here would be a no-op.
         """
 
         def run() -> None:
@@ -955,8 +938,8 @@ class WayVoiceWindow(Adw.ApplicationWindow):
     def _model_state_text(self, entry: dict) -> tuple[str, bool]:
         """Subtitle for the selected model, and whether it may be deleted.
 
-        A local path is never deletable: those files belong to the user, they are
-        not in the hub cache and WayVoice did not put them there.
+        A local path is never deletable: those files belong to the user and WayVoice did not
+        put them there.
         """
         kind = str(entry.get("kind") or "")
         size = model_store.human_size(int(entry.get("size_bytes") or 0), self.ui_lang)
@@ -972,36 +955,35 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         """Paint the row from a result computed off the UI thread."""
         self._model_entry = dict(entry) if isinstance(entry, dict) else {}
         text, deletable = self._model_state_text(entry)
-        # The whole hub is shown next to our own total: the cache is shared with
-        # other applications, and a number that explains the folder is worth
-        # more than one that looks like it should.
+        # The whole hub is shown next to our own total: the cache is shared with other
+        # applications, and a number that explains the folder beats one that looks
+        # like it should.
         self.model_disk_row.set_subtitle(self.t(
             "store.disk",
             size=model_store.human_size(total_bytes, self.ui_lang),
             cache=model_store.human_size(model_store.hub_size(), self.ui_lang),
             free=model_store.human_size(free_bytes, self.ui_lang),
         ))
-        # A model held in the warm worker cannot go away while the worker keeps
-        # it: the next dictation would claim a model that is not on disk any
-        # more. The button explains that instead of silently doing nothing.
+        # A model held in the warm worker cannot go away while the worker keeps it: the
+        # next dictation would claim a model that is not on disk. The button explains
+        # that instead of silently doing nothing.
         if deletable and held.get("running") and str(held.get("model") or "") == str(entry.get("id") or ""):
             deletable = False
             text = f"{text} · {self.t('store.delete_busy')}"
         self.model_state_row.set_subtitle(text)
         self.model_delete_btn.set_sensitive(deletable)
-        # A model that is not there has no button to show; a local folder is
-        # shown greyed out rather than hidden, so "you cannot delete this" is
-        # visible instead of looking like the feature is missing.
+        # A model that is not there has no button to show; a local folder is greyed out
+        # rather than hidden, so "you cannot delete this" is visible instead of looking
+        # like a missing feature.
         self.model_delete_btn.set_visible(str(entry.get("kind") or "") != "custom")
         self._refresh_fetch_button()
 
     def _refresh_fetch_button(self) -> None:
         """Show the download button exactly when it is the right thing to press.
 
-        A hub model that is not on disk, and nothing being done about it yet.
-        While a download or a warm-up is running the row below already shows the
-        progress and the way to stop it, so a second button would be a third
-        answer to the same question.
+        A hub model that is not on disk, with nothing being done about it yet. While a
+        download or a warm-up runs, the row below already shows the progress and the way to
+        stop it, so a second button would be a third answer to the same question.
         """
         if not hasattr(self, "model_fetch_btn"):
             return
@@ -1025,9 +1007,8 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         if not model_id:
             return
         if str(entry.get("kind") or "") != "hub":
-            # A local path cannot be fetched, and the row says so in its own
-            # subtitle; a button here would be one that reports success and
-            # changes nothing.
+            # A local path cannot be fetched and its row says so in its own subtitle; a
+            # button here would report success and change nothing.
             self._toast(self.t("store.refuse_local"))
             return
         self._ask_about_download(model_id, int(entry.get("size_bytes") or 0))
@@ -1035,34 +1016,30 @@ class WayVoiceWindow(Adw.ApplicationWindow):
     def _apply_download_state(self, report: dict | None) -> None:
         """Paint the download row from the daemon's model report.
 
-        The bar is driven by what the daemon says rather than by anything the
-        window measures itself: the download runs in the daemon, and a window
-        that watched the cache directory would be reporting a different thing
-        from the one the user is waiting for.
+        The bar follows what the daemon says rather than anything the window measures: the
+        download runs in the daemon, and a window watching the cache directory would be
+        reporting a different thing from the one the user is waiting for.
         """
         if not hasattr(self, "model_download_row"):
             return
         report = report if isinstance(report, dict) else {}
         self._download_report = report
-        # Before any branch below: every one of them returns, and the button in
-        # the model row is a question about both what is on disk and what is
-        # being done about it.
+        # Before any branch below, all of which return: the button in the model row asks
+        # about both what is on disk and what is being done about it.
         self._refresh_fetch_button()
         download = report.get("download") if isinstance(report.get("download"), dict) else {}
         state = str(download.get("state") or "idle")
         model_id = str(report.get("model") or "")
         if str(download.get("model") or "") != model_id:
-            # Work on a different model than the selected one - the user changed
-            # the row while the old model was still coming down, or was being
-            # loaded into the worker. Painting its bytes, or its warm-up, next to
-            # the new model would be a lie: the model row already says that this
-            # one is not downloaded. This has to come before the warm-up below,
-            # which is where a stale one used to slip through.
+            # Work on a different model than the selected one - the user changed the row
+            # while the old model was still coming down or being loaded. Painting its
+            # bytes, or its warm-up, next to the new model would be a lie, and this has
+            # to come before the warm-up below.
             self.model_download_row.set_visible(False)
             return
         if state == "warming":
-            # No download: the model is on disk and is being read into memory so
-            # that the first dictation is as fast as the rest.
+            # No download: the model is on disk and is being read into memory so that the
+            # first dictation is as fast as the rest.
             self.model_download_cancel_btn.set_sensitive(False)
             self.model_download_bar.pulse()
             self.model_download_row.set_title(
@@ -1077,21 +1054,21 @@ class WayVoiceWindow(Adw.ApplicationWindow):
             name = display_name(model_id) if model_id else ""
             self.model_download_cancel_btn.set_sensitive(True)
             if download.get("warming"):
-                # The weights are down and the model is going into memory: for
-                # a moment there is nothing to measure, and it would look like a
-                # download that stopped.
+                # The weights are down and the model is going into memory: for a moment
+                # there is nothing to measure, and it would look like a download that
+                # stopped.
                 self.model_download_bar.pulse()
                 self.model_download_row.set_title(self.t("store.warming", model=name))
                 self.model_download_row.set_subtitle(self.t("store.warming_sub"))
-                # A load that cannot be interrupted: offering to stop it would
-                # be a button that reports success and changes nothing.
+                # A load that cannot be interrupted: offering to stop it would be a button
+                # that reports success and changes nothing.
                 self.model_download_cancel_btn.set_sensitive(False)
             elif total > 0:
                 if done > 0:
                     self.model_download_bar.set_fraction(min(1.0, done / total))
                 else:
-                    # Nothing has arrived yet but the size is known: a fixed
-                    # fraction of zero would look stuck.
+                    # Nothing has arrived yet but the size is known: a fixed fraction of
+                    # zero would look stuck.
                     self.model_download_bar.pulse()
                 self.model_download_row.set_title(self.t("store.downloading", model=name))
                 self.model_download_row.set_subtitle(self.t(
@@ -1117,8 +1094,8 @@ class WayVoiceWindow(Adw.ApplicationWindow):
     def _cancel_model_download(self, *_args) -> None:
         """Stop a running download through the daemon.
 
-        Cancelling is the daemon's job, not the window's: the download is its
-        child process, and only it can end it without leaving a helper running.
+        Cancelling is the daemon's job: the download is its child process, and only it can
+        end it without leaving a helper running.
         """
         threading.Thread(target=self._cancel_download_worker, daemon=True).start()
 
@@ -1131,13 +1108,11 @@ class WayVoiceWindow(Adw.ApplicationWindow):
     def _refresh_model_state(self) -> None:
         """Recompute the model row, off the GTK main loop.
 
-        Walking the cache means following every snapshot symlink into every
-        blob and stat()ing the results.  On this machine that costs ~6 ms warm,
-        and the very first pass after a cold start or a download is slower, so
-        it runs in a worker thread and comes back through ``GLib.idle_add`` --
-        the same shape the dependency install uses.  A run already in flight is
-        not joined by another one; the request is remembered and re-run when it
-        finishes, so the row can never show a state older than the last change.
+        Walking the cache follows every snapshot symlink into every blob and stats the
+        results - ~6 ms warm here, slower on the first pass after a cold start - so it runs
+        in a worker thread and comes back through ``GLib.idle_add``. A run already in flight
+        is not joined by another one; the request is remembered and re-run when the first
+        finishes, so the row cannot show a state older than the last change.
         """
         if not hasattr(self, "model_state_row"):
             return
@@ -1154,8 +1129,8 @@ class WayVoiceWindow(Adw.ApplicationWindow):
             entry = model_store.describe(model_id)
             free_bytes = model_store.disk_free()
             total_bytes = model_store.total_size()
-            # The worker ping has a timeout of its own, so it belongs here too
-            # and not on the main loop between two frames.
+            # The worker ping has a timeout of its own, so it belongs here and not on the
+            # main loop between two frames.
             held = worker_info()
         except Exception as exc:  # never let a worker kill the process
             entry = {"id": model_id, "kind": "unknown", "downloaded": False, "size_bytes": 0}
@@ -1180,10 +1155,9 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         if model_store.repo_dir_name(model_id) is None:
             self._toast(self.t("store.refuse_local"))
             return
-        # Built by hand like the shortcut dialog rather than with
-        # Gtk.AlertDialog: that widget does not even have the same properties
-        # in every GTK 4 release, and the point of a confirmation is that it
-        # must open on the versions we support.
+        # Built by hand like the shortcut dialog rather than with Gtk.AlertDialog: that
+        # widget does not have the same properties in every GTK 4 release, and a
+        # confirmation has to open on the versions we support.
         name = display_name(model_id)
         win = Gtk.Window(title=self.t("store.delete_title"), transient_for=self, modal=True)
         win.set_default_size(440, 170)
@@ -1222,9 +1196,9 @@ class WayVoiceWindow(Adw.ApplicationWindow):
 
     def _delete_model_worker(self, model_id: str) -> None:
         try:
-            # A warm worker holds the model in memory and may be mid-request;
-            # stopping it first is what makes the deletion honest rather than a
-            # claim. Best effort: a worker that is not there needs no stopping.
+            # A warm worker holds the model in memory and may be mid-request, so it is
+            # stopped first: that is what makes the deletion honest rather than a claim.
+            # Best effort - a worker that is not there needs no stopping.
             held = worker_info()
             if held.get("running") and str(held.get("model") or "") == model_id:
                 stop_worker()
@@ -1239,9 +1213,8 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         self._model_deleting = False
         self.model_delete_btn.set_label(self.t("common.delete"))
         if not result.get("ok"):
-            # A refusal carries a translation key rather than a sentence, so the
-            # reason is localized here and never leaks an English-only string
-            # into the Russian UI.
+            # A refusal carries a translation key rather than a sentence, so the reason
+            # is localized here and never leaks an English-only string into the UI.
             reason = model_store.refusal_message(
                 str(result.get("error_key") or "store.delete_failed"),
                 str(result.get("detail") or ""),
@@ -1254,9 +1227,8 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         freed = int(result.get("freed_bytes") or 0)
         kept = int(result.get("kept_bytes") or 0)
         if message_key == "store.deleted" and kept > 0:
-            # Some files had to stay: another model links to them. Saying the
-            # model was deleted and nothing else would hide files that are
-            # still on disk by design.
+            # Some files had to stay: another model links to them. Saying only that the
+            # model was deleted would hide files that are still on disk by design.
             message_key = "store.deleted_shared"
         self._toast(self.t(
             message_key,
@@ -1390,9 +1362,9 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         ok, msg = apply_shortcut(self._shortcut_binding)
         self._prepare_selected_engine(cfg)
         if new_ui_setting != self.ui_lang_setting:
-            # Restart the UI so that the new interface language is applied.
-            # The settings binary path is resolved explicitly and passed as
-            # $0, so the restart never depends on a login-shell PATH.
+            # Restart the UI so the new interface language is applied. The settings
+            # binary path is resolved explicitly and passed as $0, so the restart never
+            # depends on a login-shell PATH.
             restart_cmd = command_path("wayvoice-settings")
             subprocess.Popen(
                 ["/bin/sh", "-c", 'sleep 0.35; exec "$0"', restart_cmd],
@@ -1409,11 +1381,10 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         self._poll_engine_settings()
 
     def _prepare_selected_engine(self, cfg):
-        """Prepare the selected engine when it can be prepared, and is not ready.
+        """Prepare the selected engine when it can be prepared and is not ready.
 
-        Engines that need no preparation (whisper.cpp, an external command) are
-        left alone: there is nothing to prepare, and their settings are the only
-        thing that can make them ready.
+        Engines that need no preparation (whisper.cpp, an external command) are left alone:
+        their settings are the only thing that can make them ready.
         """
         engine = engine_from_config(cfg)
         if engine is None or not engine.needs_setup:
@@ -1426,8 +1397,8 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         cfg["engine"] = self._selected_engine()
         save_config(cfg)
         if not request_engine_setup(engine_from_config(cfg)):
-            # The button is only visible for engines that need preparation, so
-            # there is nothing to show a spinner for.
+            # The button is only visible for engines that need preparation, so there is
+            # nothing to show a spinner for.
             return
         self.engine_status_row.set_subtitle(self.t("settings.preparing"))
         self.engine_setup_btn.set_visible(False)
@@ -1444,8 +1415,8 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         cfg = load_config()
         engine = engine_from_config(cfg)
         self.engine_card.set_text(engine_label(cfg.get("engine")) or "—")
-        # Only an engine with its own model list has a model to show; the
-        # others keep their own model (or none) among their own settings.
+        # Only an engine with its own model list has a model to show; the others keep
+        # theirs (or none) among their own settings.
         self.model_card.set_text(display_name(str(cfg.get("model", "small"))) if engine and engine.uses_models else "—")
         self.paste_card.set_text({"standard": "Ctrl+V", "terminal": "Ctrl+Shift+V", "copy": self.t("paste.clipboard_short")}.get(str(cfg.get("paste_mode")), "—"))
 
@@ -1482,8 +1453,8 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         daemon_version = str(reply.get("version") or "")
         if daemon_version != __version__ and not self._restart_requested and not reply.get("recording") and not reply.get("busy"):
             self._restart_requested = True
-            # Restarting waits for the new daemon to answer, so it must not
-            # block the GTK main loop the polling runs on.
+            # Restarting waits for the new daemon to answer, so it must not block the GTK
+            # main loop the polling runs on.
             threading.Thread(target=service.restart_daemon, daemon=True).start()
             return GLib.SOURCE_CONTINUE
 
@@ -1532,9 +1503,9 @@ class WayVoiceWindow(Adw.ApplicationWindow):
             self.mic_icon.set_from_icon_name("emblem-system-symbolic")
 
         self._set_state_style(state)
-        # Missing blocking dependencies are reported as a warning, below a real
-        # error and above a plain daemon warning, so the priority order stays
-        # error > missing dependency > warning > engine state.
+        # Missing blocking dependencies are reported as a warning, below a real error and
+        # above a plain daemon warning: error > missing dependency > warning > engine
+        # state.
         missing_deps = self._missing_required()
         dep_warning = self.t("health.deps_missing", names=", ".join(d.label for d in missing_deps)) if missing_deps else ""
         config_broken = str(reply.get("config_error") or "")
@@ -1581,8 +1552,8 @@ class WayVoiceWindow(Adw.ApplicationWindow):
     def _pending_engine_config(self) -> dict:
         """The config as this window currently shows it, for a status probe.
 
-        Every engine-specific row is taken from its widget, so switching to an
-        engine reports that engine's state without saving anything first.
+        Every engine-specific row is taken from its widget, so switching to an engine reports
+        that engine's state without saving anything first.
         """
         cfg = load_config()
         cfg["engine"] = self._selected_engine()
@@ -1619,8 +1590,8 @@ class WayVoiceWindow(Adw.ApplicationWindow):
     def _language_label(self, value) -> str:
         """Recognition language as the user knows it, plus the raw code.
 
-        The name is what makes the report understandable; the code is what
-        makes it reproducible, and it is the only part a developer can paste.
+        The name makes the report understandable; the code makes it reproducible, and it is
+        the only part a developer can paste.
         """
         code = languages.normalize(value)
         name = tr("language.auto", self.ui_lang) if code == languages.AUTO else languages.display_name(code, self.ui_lang)
@@ -1640,24 +1611,24 @@ class WayVoiceWindow(Adw.ApplicationWindow):
             f"Engine: {cfg.get('engine')} / {cfg.get('model')}",
             f"Engine state: {(engine or {}).get('state', 'unknown') if isinstance(engine, dict) else 'unknown'}",
             f"Device: {cfg.get('device')}",
-            # The code alone ("yue") means nothing to whoever reads the report;
-            # the name plus the code is both readable and unambiguous.
+            # The code alone ("yue") means nothing to whoever reads the report; the name
+            # plus the code is both readable and unambiguous.
             f"Recognition language: {self._language_label(cfg.get('language'))}",
             f"Timeout: {cfg.get('transcription_timeout_sec')}s",
             f"Max recording: {cfg.get('max_recording_sec')}s",
             f"Shortcut: {label_for(str(cfg.get('shortcut', '')))}",
         ]
         if isinstance(status, dict) and status.get("config_error"):
-            # The daemon is running on defaults because this file could not be
-            # read. That is the first thing a report should say, because every
-            # other line below describes a configuration the user never chose.
+            # The daemon is running on defaults because this file could not be read. That
+            # is the first thing a report should say, since every other line below
+            # describes a configuration the user never chose.
             lines.append(f"Config problem: {status.get('config_error')}")
         if isinstance(status, dict) and status.get("last_error"):
             lines.append(f"Last error: {status.get('last_error')}")
         if isinstance(status, dict) and status.get("last_warning"):
             lines.append(f"Last warning: {status.get('last_warning')}")
-        # The whole block is deliberately plain English: it is pasted into bug
-        # reports, where the existing OS/Python/Engine lines set the format.
+        # The whole block is plain English on purpose: it is pasted into bug reports,
+        # where the existing OS/Python/Engine lines set the format.
         lines.append(f"Package manager: {manager}")
         lines.append("Dependencies:")
         for row in deps_mod.status_all():
