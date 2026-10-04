@@ -905,13 +905,28 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         self._ask_daemon_to_prepare_model()
 
     def _ask_daemon_to_prepare_model(self) -> None:
-        """Tell the daemon to fetch the selected model, off the main loop."""
+        """Ask the daemon to make the selected model ready, off the main loop.
+
+        Which half this is depends on what the model needs: a fetch if its
+        weights are not on disk, a load into the worker if they are. Both are the
+        daemon's business - the download is its child process, and only it can end
+        that child without leaving a helper running - so this asks rather than
+        does, and the answer comes back on the next status poll.
+
+        The question about a fetch has already been asked and answered by the
+        time anything calls this. A refusal here would be a no-op; a fetch that
+        starts without the user having been asked is the thing this indirection
+        exists to prevent.
+        """
 
         def run() -> None:
             try:
                 request("prepare-model", timeout=5.0)
             except Exception as exc:
-                print(f"WayVoice: could not start the model download: {exc}", file=sys.stderr)
+                print(
+                    f"WayVoice: could not ask the daemon to prepare the model: {exc}",
+                    file=sys.stderr,
+                )
 
         threading.Thread(target=run, daemon=True).start()
 

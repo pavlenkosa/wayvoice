@@ -65,6 +65,10 @@ def _model_command(args: list[str]) -> None:
     That also means there is nothing to do when the daemon is not running, and
     that is reported instead of quietly downloading into a cache no daemon will
     read.
+
+    Neither option takes a model name: what gets prepared is the model the
+    configuration names, and a name here would be silently ignored - see the
+    refusal below.
     """
     lang = _language()
     if args not in ([], ["--download"], ["--cancel"]):

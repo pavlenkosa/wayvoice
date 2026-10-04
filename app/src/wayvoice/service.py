@@ -254,6 +254,12 @@ def _force_stop_daemon() -> bool:
     The worker-stopping code in :mod:`wayvoice.engine` established the pattern
     (verify the cmdline in ``/proc``, then SIGTERM, wait, SIGKILL) and its
     liveness helper is reused here.
+
+    SIGTERM is enough, and is expected to be: the daemon handles it by asking its
+    own loop to stop, which is what stops the recorder and removes the socket. The
+    SIGKILL is the escalation for a daemon wedged so badly that its handler never
+    runs - and a recorder that outlives a SIGKILL is a cost of the design, since
+    the recorder is in a session of its own in order to be finalised deliberately.
     """
     from .engine import _pid_alive
 
