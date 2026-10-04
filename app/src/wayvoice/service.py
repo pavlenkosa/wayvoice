@@ -1,28 +1,17 @@
 """Single place that decides how this system starts the WayVoice parts.
 
-The packaged (Debian) installation drives everything through ``systemctl
---user``: three user units plus ``setup-user``.  A Flatpak build has no
-``systemctl`` at all, and the host user manager cannot see ``/app`` either, so
-every one of those calls fails silently and the daemon, the engine preparation
-and the global shortcut are never applied.
+The Debian package drives everything through ``systemctl --user``. A Flatpak build
+has no ``systemctl`` and the host user manager cannot see ``/app``, so every one of
+those calls fails and the daemon, the engine preparation and the shortcut are never
+applied. Both shapes end up behind one API: with a user manager, keep using the
+units; without one, do the same work directly.
 
-This module hides that difference behind one API:
+Only the standard library is used, nothing runs through a shell, and every entry
+point is best effort - the callers (the GTK window, the daemon, the CLI) all swallow
+failures.
 
-* a user manager is available -> keep using the units, exactly as before;
-* it is not -> do the same work directly (spawn the daemon, run the engine
-  setup, apply the shortcut through GSettings).
-
-Only the standard library is used, nothing is ever run through a shell, and
-every entry point is best effort: the callers (the GTK window, the daemon, the
-CLI) all swallow failures, so a failure here must never be worse than one
-there.
-
-Import graph: this module imports only :mod:`wayvoice.config`,
-:mod:`wayvoice.paths`, :mod:`wayvoice.protocol` and :mod:`wayvoice.shortcut`.
-The daemon request (:func:`wayvoice.cli.request`) is imported lazily inside the
-functions that need it, because :mod:`wayvoice.cli` imports
-:mod:`wayvoice.engine`, which imports *this* module -- a top-level import would
-close the cycle.
+:mod:`wayvoice.cli` is imported lazily inside the functions that need it: it imports
+:mod:`wayvoice.engine`, which imports this module.
 """
 
 from __future__ import annotations
@@ -40,11 +29,9 @@ from .config import load_config
 from .paths import app_src_dir, python_executable
 from .shortcut import apply_shortcut
 
-# Sign of a running user manager.  ``/run/systemd/user`` is the historical
-# marker and is still created by older systemd releases; current ones (257 on
-# Debian 13, for one) only expose the user manager's control socket under the
-# runtime directory.  Either one means "systemctl --user works", both are pure
-# filesystem probes.
+# Sign of a running user manager: ``/run/systemd/user`` on older systemd, the
+# manager's control socket under the runtime directory on current ones (257 on
+# Debian 13). Either means "systemctl --user works"; both are filesystem probes.
 SYSTEMD_USER_RUNTIME = "/run/systemd/user"
 
 DAEMON_UNIT = "wayvoice.service"
@@ -58,16 +45,13 @@ POLL_INTERVAL = 0.1
 # Grace period for a "quit" to actually make the daemon leave.
 QUIT_TIMEOUT = 3.0
 
-# Serialises start/restart. The window asks for the daemon from its startup
-# path and again after installing a dependency, and both run in their own
-# thread; without this both could see "no daemon answering" and each spawn one.
-# The daemon itself refuses to steal a live socket, this lock keeps two
-# processes from being spawned in the first place.
+# Serialises start/restart. The window asks for the daemon from its startup path
+# and again after installing a dependency, each in its own thread, and without this
+# both could see "no daemon answering" and each spawn one. The daemon refuses to
+# steal a live socket; this keeps two processes from being spawned at all.
 #
-# Reentrant because restart_daemon() holds it across "ask the old daemon to
-# leave, wait for it, spawn the new one" and then calls start_daemon() - the
-# public entry point, so the tests and any caller keep working - which would
-# deadlock on a plain lock.
+# Reentrant because restart_daemon() holds it across "ask the old daemon to leave,
+# wait, spawn the new one" and then calls start_daemon().
 _start_lock = RLock()
 
 
@@ -76,11 +60,8 @@ def _state_home() -> Path:
 
 
 def service_log_path() -> Path:
-    """Return the log file the directly spawned processes write into.
-
-    Lives next to ``engine-setup.log`` in the state directory, which is the
-    place the rest of the project already uses for its run-time state.
-    """
+    """Log file the directly spawned processes write into, next to
+    ``engine-setup.log`` in the state directory."""
     return _state_home() / "wayvoice" / "daemon.log"
 
 
@@ -93,21 +74,14 @@ def _user_manager_socket() -> Path:
 def systemd_available() -> bool:
     """Return whether the user units can be used on this system.
 
-    Both conditions are required and both are pure filesystem probes -- nothing
-    is started for the check:
+    Two filesystem probes, nothing started: ``systemctl`` on ``PATH`` (absent in the
+    Flatpak sandbox) and a user manager that is actually running. A container image that
+    ships ``systemctl`` without systemd has neither, and every call in it would fail
+    with "Failed to connect to bus".
 
-    * ``systemctl`` on ``PATH``.  Inside the Flatpak sandbox (org.gnome.Platform)
-      the binary does not exist at all;
-    * a user manager that is actually running, i.e. either the historical
-      ``/run/systemd/user`` directory or its control socket in
-      ``$XDG_RUNTIME_DIR/systemd/private``.  A container image that ships
-      ``systemctl`` without systemd has neither, and every ``systemctl --user``
-      call in it would fail with "Failed to connect to bus".
-
-    This matters because the wrong answer is not a cosmetic one: on a desktop
-    that does have a user manager the units own the daemon's lifetime (and the
-    ``graphical-session.target`` pairing), so falling back to spawning a daemon
-    by hand there would only create a second, unmanaged copy.
+    The wrong answer is not cosmetic either: where a user manager exists the units own
+    the daemon's lifetime, and a second, unmanaged daemon would be worse than the
+    failure.
     """
     if shutil.which("systemctl") is None:
         return False
@@ -115,10 +89,7 @@ def systemd_available() -> bool:
 
 
 def _request(command: str, timeout: float = 1.0) -> dict:
-    """Send one command to the daemon through the regular CLI transport.
-
-    Imported lazily on purpose, see the module docstring.
-    """
+    """Send one command to the daemon through the regular CLI transport."""
     from .cli import request
 
     return request(command, timeout=timeout)
@@ -133,12 +104,11 @@ def daemon_socket_alive(timeout: float = 0.3) -> bool:
 
 
 def _child_env() -> dict[str, str]:
-    """Return the environment for a directly spawned WayVoice process.
+    """Environment for a directly spawned WayVoice process.
 
-    The import root of the package is put on ``PYTHONPATH`` so that
-    ``python -m wayvoice.daemon`` resolves the same sources this process was
-    started from, in a source checkout as well as in the ``<prefix>/lib/...``
-    layout, where the package is not installed into ``site-packages``.
+    The import root goes on ``PYTHONPATH`` so ``python -m wayvoice.daemon`` resolves
+    the same sources this process was started from, in a checkout and in the
+    ``<prefix>/lib/...`` layout alike, where the package is not in ``site-packages``.
     """
     env = os.environ.copy()
     root = str(app_src_dir())
@@ -186,10 +156,8 @@ def _systemctl(*args: str) -> bool:
 def start_user_unit(unit: str) -> bool:
     """Start a packaged user unit without blocking; ``True`` when launched.
 
-    Used for the ydotoold unit, which the daemon raises by itself when it turns
-    out not to be running: enabling it at package installation time is not enough,
-    because a session that was already open when the package arrived does not
-    start a newly enabled unit until the next login.
+    Used for the ydotoold unit: enabling it at installation time does nothing for a
+    session that was already open when the package arrived.
     """
     if not systemd_available():
         return False
@@ -209,10 +177,9 @@ def _wait_for_daemon(wait: float) -> bool:
 def start_daemon(wait: float = 5.0) -> bool:
     """Make sure a daemon is running, and report whether one really is.
 
-    With a user manager this is the old ``systemctl --user start
-    wayvoice.service``; without one the daemon is spawned directly and its
-    socket is polled.  A daemon that is already answering is never killed and
-    never duplicated -- the second process would fight over the same socket.
+    With a user manager, ``systemctl --user start wayvoice.service``; without one, a
+    direct spawn and a poll of its socket. A daemon that already answers is never
+    killed and never duplicated.
     """
     try:
         if systemd_available():
@@ -239,10 +206,9 @@ def _start_daemon_locked(wait: float = 5.0) -> bool:
 def _is_daemon_process(pid: int) -> bool:
     """Return whether ``pid`` is started as ``python -m wayvoice.daemon``.
 
-    Same trick as ``engine._is_worker_process``: pids get recycled, so the
-    command line is verified before anything is signalled.  Only the exact
-    ``-m wayvoice.daemon`` form counts -- the module name alone would also match
-    an interactive ``python -m wayvoice.daemon`` of the current user.
+    pids get recycled, so the command line is verified before anything is signalled,
+    and only the exact ``-m wayvoice.daemon`` form counts - the module name alone would
+    also match an interactive run of the same module.
     """
     try:
         raw = Path(f"/proc/{pid}/cmdline").read_bytes()
@@ -264,15 +230,10 @@ def _daemon_pids() -> list[int]:
 def _force_stop_daemon() -> bool:
     """Terminate a daemon that ignored ``quit``; best effort.
 
-    The worker-stopping code in :mod:`wayvoice.engine` established the pattern
-    (verify the cmdline in ``/proc``, then SIGTERM, wait, SIGKILL) and its
-    liveness helper is reused here.
-
-    SIGTERM is enough, and is expected to be: the daemon handles it by asking its
-    own loop to stop, which is what stops the recorder and removes the socket. The
-    SIGKILL is the escalation for a daemon wedged so badly that its handler never
-    runs - and a recorder that outlives a SIGKILL is a cost of the design, since
-    the recorder is in a session of its own in order to be finalised deliberately.
+    SIGTERM is the expected path: the daemon handles it by asking its own loop to stop,
+    which is what stops the recorder and removes the socket. SIGKILL is the escalation
+    for a daemon wedged past its handler, and a recorder that outlives it is the cost of
+    running it in a session of its own.
     """
     from .engine import _pid_alive
 
@@ -295,16 +256,13 @@ def _force_stop_daemon() -> bool:
 def restart_daemon(wait: float = 5.0) -> bool:
     """Replace the running daemon with a fresh one.
 
-    Used when the daemon reports a version that does not match the window.  A
-    directly spawned daemon is asked to leave through its own ``quit``
-    command, so it can close the socket and the recording timer properly; only
-    if it does not go away is it signalled by pid.
+    A directly spawned daemon is asked to leave through its own ``quit`` so it can close
+    the socket and the recording timer; only if it stays is it signalled by pid.
 
-    The whole sequence holds ``_start_lock``.  The window also starts a daemon
-    from a background thread, and without the lock the two could interleave:
-    this one asks the daemon to quit, the other spawns a replacement that binds
-    the socket, and then the quitting daemon leaves - after which there is no
-    daemon at all, and this function reports a failure that did not happen.
+    The sequence holds ``_start_lock``, because the window also starts a daemon from a
+    background thread: without it that spawn could bind the socket after this one has
+    asked the old daemon to quit, leaving no daemon at all and a failure that did not
+    happen.
     """
     with _start_lock:
         try:
@@ -335,9 +293,8 @@ def restart_daemon(wait: float = 5.0) -> bool:
 def request_engine_setup() -> None:
     """Ask for the Faster-Whisper runtime to be prepared, one way or another.
 
-    Replaces the direct ``systemctl`` call the callers used before.  Soft by
-    design: the engine setup is a long background job, and every caller treats
-    "not started" as "the engine stays unprepared" and says so in the UI.
+    Soft by design: the engine setup is a long background job, and every caller treats
+    "not started" as "the engine stays unprepared" and says so.
     """
     try:
         if systemd_available():
@@ -351,13 +308,9 @@ def request_engine_setup() -> None:
 def apply_shortcut_now() -> tuple[bool, str]:
     """Apply the configured global shortcut directly.
 
-    ``setup-user`` does this on a packaged system, together with enabling the
-    ydotoold unit, which needs systemd.  Without a user manager the shortcut is
-    all that can be done here, so it is applied directly through GSettings --
-    exactly what ``wayvoice apply-shortcut`` does.
-
-    Returns ``(True, "")`` when a user manager is present: there, the packaged
-    integration owns the shortcut and this must not touch it.
+    ``setup-user`` does this on a packaged system; without a user manager it is the only
+    thing that can be done here. Returns ``(True, "")`` when a user manager is present,
+    since there the packaged integration owns the shortcut.
     """
     try:
         if systemd_available():

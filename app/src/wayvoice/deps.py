@@ -1,17 +1,13 @@
 """Registry of the external (system) requirements of WayVoice.
 
-Everything WayVoice needs that does *not* come from a Python distribution is
-described here in one place: the CLI binaries that have to be present, whether
-the application still works without them, why they are needed and how they are
-named by the package managers we support.
+Everything needed that does not come from a Python distribution: the commands that
+have to be present, whether the application works without them, why they are needed
+and how the supported package managers name them.
 
-The registry deliberately does not install anything.  Callers (settings UI,
-``wayvoice deps``) ask for a status, and only an explicit user action may
-trigger :mod:`wayvoice.pkgsys`.
-
-Package names are never guessed: a manager without a confidently known package
-name simply has no entry for that dependency, and the caller falls back to
-telling the user to install the package by hand.
+Nothing is installed from here. Callers (the settings window, ``wayvoice deps``) ask
+for a status, and only an explicit user action may trigger :mod:`wayvoice.pkgsys`.
+Package names are never guessed: a manager without a confidently known name simply
+has no entry, and the caller falls back to telling the user to install by hand.
 """
 
 from __future__ import annotations
@@ -38,17 +34,15 @@ class Dependency:
     """One external requirement of the application.
 
     Attributes:
-        id: stable identifier used by the CLI (``wayvoice deps --install id``).
-        label: short human-readable name; kept untranslated because it names
-            a program or a well-known component.
-        binaries: every command that must be present.  A dependency is
-            satisfied only when *all* of them are found.
-        required: ``True`` when the main dictation flow stops working without
-            it, ``False`` when there is a usable fallback.
-        purpose_key: i18n key explaining why the dependency exists.
-        packages: package names per manager; a manager that is missing from
-            the mapping means "not known for that manager".
-        note: rare, non-localizable hint.
+    id: stable identifier used by the CLI (``wayvoice deps --install id``).
+    label: short human-readable name, untranslated because it names a program.
+    binaries: every command that must be present; the dependency is satisfied only when
+    all of them are found.
+    required: ``True`` when the main dictation flow stops working without it.
+    purpose_key: i18n key explaining why the dependency exists.
+    packages: package names per manager; a manager missing from the mapping means "not
+    known for that manager".
+    note: rare, non-localizable hint.
     """
 
     id: str
@@ -133,9 +127,9 @@ DEPENDENCIES: tuple[Dependency, ...] = (
             DNF: "ydotool",
             PACMAN: "ydotool",
             ZYPPER: "ydotool",
-            # Alpine Linux and Void Linux do not package ydotool at all, so no
-            # name is offered here: the UI tells the user to build or install
-            # it manually instead of running a command that cannot succeed.
+            # Alpine and Void do not package ydotool at all, so no name is offered
+            # here: the UI asks for a manual install instead of a command that
+            # cannot succeed.
         },
     ),
 )
@@ -157,10 +151,8 @@ def get(dep_id: str) -> Dependency | None:
 def find_command(name: str) -> str | None:
     """Where a dependency's command is, if it is anywhere at all.
 
-    ``PATH`` first, then a copy bundled with the application. The order matters:
-    a distribution's own package is updated by its own security fixes and should
-    win over the one we build, and a bundled copy that is never preferred is dead
-    weight rather than a fallback.
+    ``PATH`` first, then a bundled copy: a distribution's package is updated by its own
+    security fixes, and a bundled copy that never wins is dead weight.
     """
     found = shutil.which(name)
     if found:
@@ -175,11 +167,10 @@ def find_command(name: str) -> str | None:
 
 
 def status_of(dep: Dependency) -> dict:
-    """Probe for every binary of ``dep``, on ``PATH`` and bundled.
+    """Probe every binary of ``dep``, on ``PATH`` and bundled.
 
-    Returns a dict with ``found`` (at least one binary present), ``missing``
-    (the binaries that are absent), ``binary_path`` (the first binary found,
-    for diagnostics) and ``ok`` (every binary present).
+    Returns ``found`` (at least one binary present), ``missing``, ``binary_path`` (the
+    first one found, for diagnostics) and ``ok`` (every binary present).
     """
     missing: list[str] = []
     binary_path: str | None = None
@@ -228,23 +219,17 @@ def missing_optional() -> list[dict]:
 
 
 def _row_ok(row: dict) -> bool:
-    """Return ``True`` when a :func:`status_all` row has nothing missing.
-
-    ``status_all()`` is documented to expose ``found`` and ``missing``; the
-    "all binaries present" decision is derived from ``missing`` so that both
-    row shapes stay consistent.
-    """
+    """Return ``True`` when a :func:`status_all` row has nothing missing."""
     return not row.get("missing")
 
 
 def describe_missing(dep_or_id, language: str | None = None) -> str:
     """Return a localized "what is missing and why" sentence.
 
-    ``dep_or_id`` may be a :class:`Dependency` or its id.  ``language`` is
-    forwarded to :func:`wayvoice.i18n.tr` so that long-lived callers (the
-    daemon, the injector) can report in the language the user picked.  The text
-    is built from the actual list of missing binaries, so it never mentions a
-    package name that may be wrong for the running distribution.
+    ``dep_or_id`` may be a :class:`Dependency` or its id; ``language`` is forwarded to
+    :func:`wayvoice.i18n.tr` so long-lived callers can report in the user's language.
+    The text is built from the binaries actually missing, so it never names a package
+    that may be wrong for the running distribution.
     """
     dep = dep_or_id if isinstance(dep_or_id, Dependency) else get(str(dep_or_id))
     if dep is None:

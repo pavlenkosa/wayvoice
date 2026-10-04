@@ -64,18 +64,14 @@ MANAGERS: dict[str, Manager] = {
 
 # Probe order, most unambiguous binary name first:
 #
-#   xbps-install  only exists on Void Linux;
+#   xbps-install  only on Void Linux;
 #   pacman        only on Arch and its derivatives;
-#   zypper        SUSE family, checked before dnf because openSUSE also ships a
-#                 dnf front-end while a Fedora system never has zypper;
-#   apt-get       Debian family. Checked before dnf: the reverse mistake is the
-#                 plausible one, because Debian based images sometimes carry a
-#                 dnf front-end, whereas apt-get essentially never appears on a
-#                 Fedora or RHEL system;
+#   zypper        SUSE family, before dnf: openSUSE ships a dnf front-end while a
+#                 Fedora system never has zypper;
+#   apt-get       Debian family, before dnf for the same reason in reverse - Debian
+#                 based images sometimes carry a dnf front-end;
 #   dnf           Fedora/RHEL family;
-#   apk           last: the bare name "apk" is easily provided by unrelated
-#                 software (the apk-tools Python bindings, Android tooling), so
-#                 it is only trusted when nothing more specific matched.
+#   apk           last: the bare name is easily provided by unrelated software.
 DETECT_ORDER: tuple[str, ...] = (
     deps.XBPS,
     deps.PACMAN,
@@ -124,8 +120,8 @@ def pkexec_path() -> str | None:
     return shutil.which("pkexec")
 
 
-#: How long to wait for the manager to be asked what it has.  This runs on the
-#: main loop of the settings window, so it is a lookup, not a download.
+#: How long to wait for the manager to be asked what it has. A lookup, not a
+#: download, even though it runs on the settings window's main loop.
 AVAILABILITY_TIMEOUT = 4.0
 
 
@@ -150,8 +146,8 @@ def package_available(name: str, manager: str | None = None) -> bool | None:
     except (OSError, subprocess.SubprocessError):
         return None
     # Other managers: the registry only offers a name where one is known, and
-    # nothing here can answer the question cheaply and reliably enough to refuse
-    # on.  So the question is not asked, and the manager keeps the last word.
+    # nothing here can answer the question cheaply enough to refuse on, so the
+    # manager keeps the last word.
     return None
 
 
@@ -285,9 +281,9 @@ def install_packages(
         return False, tr("pkgsys.no_packages", language)
     for name in packages:
         if package_available(name) is False:
-            # Before anything is started, and before a password prompt: there is
-            # nothing to install, and a dialog that cannot succeed is worse than
-            # an answer.
+            # Checked before anything is started, and before a password prompt:
+            # there is nothing to install, and a dialog that cannot succeed is worse
+            # than an answer.
             return False, tr("pkgsys.package_unavailable", language, package=name)
 
     elevated: list[str] = []
@@ -304,11 +300,10 @@ def install_packages(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            # Its own session, so the timeout below can take down the whole
-            # tree.  Killing only pkexec leaves apt-get running, and apt still
-            # holds /var/lib/dpkg/lock: the next attempt by the user then fails
-            # with "Could not get lock", which says nothing about the timeout
-            # that caused it.
+            # Its own session, so the timeout below can take down the whole tree.
+            # Killing only pkexec leaves apt-get holding /var/lib/dpkg/lock, and the
+            # next attempt fails with "Could not get lock", which says nothing about
+            # the timeout that caused it.
             start_new_session=True,
         )
     except OSError as exc:
