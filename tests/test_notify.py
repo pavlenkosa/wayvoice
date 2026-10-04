@@ -1,12 +1,11 @@
 """One notification per dictation, updated in place.
 
-A dictation passes through three states - recording, transcribing, done - and
-each of them used to arrive as its own popup, so the notification center filled
-up with three lines per dictation and stopped being read. The notification the
-server already has is now replaced instead of repeated.
+A dictation passes through three states - recording, transcribing, done - and each used
+to arrive as its own popup, so the notification center filled up with three lines per
+dictation. The notification the server already has is now replaced instead of repeated.
 
-``notify-send`` is faked; what is under test is which id this module remembers
-and what it does with it.
+``notify-send`` is faked; what is under test is which id this module remembers and what
+it does with it.
 """
 
 import subprocess
@@ -79,10 +78,8 @@ class NotifyTests(unittest.TestCase):
         self.addCleanup(popen.stop)
 
         # notify() hands the program to a thread of its own, so the id is not
-        # remembered until that thread runs. Only the threads this module starts
-        # are recorded and joined - every other thread in the process belongs to
-        # somebody else, and joining one of those would be a test that hangs for
-        # reasons of its own.
+        # remembered until that thread runs. Only those threads are recorded and joined
+        # - every other thread in the process belongs to somebody else.
         self.threads = []
         threads = self.threads
         real_thread = threading.Thread
@@ -105,8 +102,8 @@ class NotifyTests(unittest.TestCase):
             self.assertFalse(thread.is_alive(), "the delivery thread did not finish")
 
     def test_the_first_notification_asks_for_no_replacement(self):
-        # Nothing of ours is on the screen yet, so there is nothing to replace;
-        # an invented id would land on another program's notification.
+        # Nothing of ours is on the screen yet, so there is nothing to replace; an
+        # invented id would land on another program's notification.
         notify_mod.notify("WayVoice", "recording started")
         self._deliver()
         self.assertFalse(self.fake.has("-r"))
@@ -121,8 +118,8 @@ class NotifyTests(unittest.TestCase):
         self.assertEqual(self.fake.value_after("-r", 1), "7")
 
     def test_the_id_the_server_returns_wins_over_the_one_we_had(self):
-        # A notification the user dismissed is no longer replaceable. The id this
-        # call prints is the truth, so it is what the next call uses.
+        # A notification the user dismissed is no longer replaceable. The id this call
+        # prints is the truth, so it is what the next call uses.
         self.fake.printed = "8"
         notify_mod.notify("WayVoice", "text inserted")
         self._deliver()
@@ -169,8 +166,8 @@ class NotifyTests(unittest.TestCase):
         self.assertIsNone(notify_mod.notification_id())
 
     def test_the_id_is_read_from_stdout(self):
-        # Without the pipe the id never arrives, and every notification after the
-        # first is a new popup: the behaviour this replaces.
+        # Without the pipe the id never arrives, and every notification after the first
+        # is a new popup: the behaviour this replaces.
         notify_mod.notify("WayVoice", "recording started")
         self._deliver()
         self.assertEqual(self.fake.kwargs[0].get("stdout"), subprocess.PIPE)
@@ -199,8 +196,8 @@ class NotifyTests(unittest.TestCase):
         self.assertTrue(fake.kill.called, "a wedged notification program was left")
 
     def test_a_stand_in_that_returns_nothing_does_not_break_the_next_call(self):
-        # A test double elsewhere in the suite returns a bare object from
-        # communicate(); unpacking that blindly would raise on every dictation.
+        # A stand-in elsewhere in the suite returns a bare object from communicate();
+        # unpacking that blindly would raise on every dictation.
         fake = mock.Mock()
         fake.communicate.return_value = None
         with mock.patch.object(notify_mod.subprocess, "Popen", return_value=fake):

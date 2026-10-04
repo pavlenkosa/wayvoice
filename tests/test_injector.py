@@ -1,16 +1,13 @@
 """The path that puts recognized text into the user's window.
 
-This module had no tests at all, and reading it turned up two ways it could
-break exactly there:
+Two ways this could break exactly there, both of which happened: waiting for
+``wl-copy`` to claim the clipboard with ``poll()`` and no deadline, so a clipboard tool
+that stopped making progress held the caller and, since the daemon serves one client
+at a time, the whole daemon; and remembering the ``wl-copy`` process only after every
+step that could fail, so a failure in between leaked a process that kept owning the
+clipboard.
 
-* it waited for ``wl-copy`` to claim the clipboard with ``poll()`` and no
-  deadline, so a clipboard tool that stopped making progress held the caller -
-  and because the daemon serves one client at a time, the whole daemon;
-* it remembered the ``wl-copy`` process only after every step that could fail,
-  so a failure in between leaked a process that kept owning the clipboard.
-
-The process is faked throughout: what is under test is this module's own logic,
-not wl-copy.
+The process is faked throughout: what is under test is this module's own logic.
 """
 
 import contextlib
@@ -73,9 +70,8 @@ class ClipboardTests(unittest.TestCase):
         return mock.patch.object(injector.shutil, "which", return_value=path)
 
     def test_a_hanging_wl_copy_cannot_hold_the_caller(self):
-        # The regression: an unbounded poll() meant the daemon's single-threaded
-        # accept loop sat inside a clipboard copy for as long as wl-copy felt
-        # like staying quiet.
+        # An unbounded poll() meant the daemon's single-threaded accept loop sat inside
+        # a clipboard copy for as long as wl-copy felt like staying quiet.
         proc = FakeProc(exit_after=None)  # never exits: it owns the selection
         with self._which(), self._popen(proc), mock.patch.object(
             injector.time, "sleep"
@@ -85,11 +81,10 @@ class ClipboardTests(unittest.TestCase):
         self.assertGreaterEqual(proc._polls, 1)
 
     def test_the_wait_for_the_selection_is_bounded(self):
-        # The loop must be able to end on its deadline, not only on the exit of a
-        # clipboard tool that has stopped making progress. The clock here steps
-        # forward by exactly what the loop sleeps, so the number of iterations is
-        # the deadline: a loop that ignored it would either spin until the clock
-        # ran out or wait forever.
+        # The loop must be able to end on its deadline, not only on the exit of a tool
+        # that stopped making progress. The clock here advances by exactly what the loop
+        # sleeps, so the iteration count is the deadline: a loop that ignored it would
+        # spin until the clock ran out or wait forever.
         proc = FakeProc(exit_after=None)
         slept = []
         now = [0.0]
@@ -102,9 +97,9 @@ class ClipboardTests(unittest.TestCase):
         def sleep(seconds):
             now[0] += seconds
             slept.append(seconds)
-            # The guard is here and not only on the clock because a loop without
-            # a deadline never reads the clock at all: without this the failure
-            # would be a hung test, and a hung test is a test nobody waits for.
+            # The guard is here and not only on the clock because a loop without a
+            # deadline never reads the clock at all; without it the failure would be a
+            # hung test.
             if len(slept) > budget:
                 raise AssertionError(
                     "the settle loop kept going long past its deadline"
@@ -124,10 +119,9 @@ class ClipboardTests(unittest.TestCase):
         self.assertFalse(proc.terminated)
 
     def test_a_tool_that_exits_is_waited_for_only_until_it_does(self):
-        # The other end of the loop: a tool that exits on its own ends the wait
-        # early, and its exit is a failure with the reason it gave - the text did
-        # not make it into the clipboard, and saying otherwise would send the
-        # user to paste an empty selection.
+        # The other end of the loop: a tool that exits on its own ends the wait early,
+        # and its exit is a failure carrying the reason it gave - saying otherwise would
+        # send the user to paste an empty selection.
         proc = FakeProc(exit_after=10, stderr="wl-copy: no Wayland display")
         slept = []
         with self._which(), self._popen(proc), mock.patch.object(
@@ -140,9 +134,8 @@ class ClipboardTests(unittest.TestCase):
         self.assertIsNone(injector._clipboard_proc, "an exited tool was kept")
 
     def test_a_failed_write_does_not_leak_the_process(self):
-        # The regression: proc was assigned to the module global only after the
-        # write, so a write that raised lost the process - and a lost wl-copy
-        # keeps the Wayland clipboard for the rest of the session.
+        # proc was assigned to the module global only after the write, so a write that
+        # raised lost the process - and a lost wl-copy keeps the Wayland clipboard.
         proc = FakeProc(stdin_fails=True)
         with self._which(), self._popen(proc):
             with self.assertRaises(injector.InjectionError):
@@ -192,9 +185,9 @@ class ClipboardTests(unittest.TestCase):
 class WhichYdotoolTests(unittest.TestCase):
     """Which ``ydotool`` runs the paste: the system's if there is one.
 
-    The bundled copy is what makes automatic paste work on a distribution that
-    does not package the helper at all - Debian 13 has no ``ydotool`` - and it is
-    the one the package manager is never asked about.
+    The bundled copy is what makes automatic paste work on a distribution that does not
+    package the helper at all - Debian 13 has no ``ydotool`` - and it is the one the
+    package manager is never asked about.
     """
 
     def setUp(self):
@@ -238,8 +231,8 @@ class WhichYdotoolTests(unittest.TestCase):
             self.assertEqual(injector.ydotool_command(), str(bundled))
 
     def test_the_resolved_path_is_the_one_that_runs(self):
-        # Running "ydotool" by name again would ignore the resolution and find
-        # whatever PATH has - which is the case this whole fallback exists for.
+        # Running "ydotool" by name again would ignore the resolution and find whatever
+        # PATH has, which is the case this whole fallback exists for.
         bundled = self._bundled_program()
         ran = []
         with mock.patch.object(injector.shutil, "which", return_value=None), \
@@ -263,10 +256,9 @@ class WhichYdotoolTests(unittest.TestCase):
 class HelperSocketTests(unittest.TestCase):
     """Whether the ydotoold helper is there, asked of the socket and not of the file.
 
-    A real socket in a temporary directory is used on purpose: the difference
-    between "the socket file exists" and "something answers on the socket" is
-    the whole point, and a mock could not tell a lying filesystem from a
-    working one.
+    A real socket in a temporary directory: the difference between "the file exists" and
+    "something answers" is the whole point, and a mock could not tell a lying filesystem
+    from a working one.
     """
 
     def setUp(self):
@@ -281,11 +273,9 @@ class HelperSocketTests(unittest.TestCase):
         return listener
 
     def test_a_socket_nobody_answers_is_not_a_running_helper(self):
-        # The regression, in one line: ydotoold is killed without removing its
-        # socket, so a file that is there says nothing. Treating its presence as
-        # a live helper is what let dictation stop pasting with nothing wrong
-        # visible anywhere. The listener is closed on purpose - leaving it open
-        # would test the case where the helper is alive.
+        # ydotoold is killed without removing its socket, so a file that is there says
+        # nothing. The listener is closed on purpose; leaving it open would test the
+        # case where the helper is alive.
         listener = self._bind()
         listener.close()
         self.assertTrue(self.path.exists(), "the stale socket should be left behind")
@@ -308,10 +298,9 @@ class HelperSocketTests(unittest.TestCase):
             self.assertEqual(injector._ydotool_env()["YDOTOOL_SOCKET"], str(socket_path))
 
     def test_the_legacy_default_is_used_when_the_helper_uses_it(self):
-        # ydotool 0.1.8 puts its socket in /tmp and ignores XDG_RUNTIME_DIR.
-        # The path is redirected into the temporary directory rather than
-        # created for real: a test that leaves a socket behind in /tmp is a test
-        # that can confuse the next ydotoold on the machine.
+        # ydotool 0.1.8 puts its socket in /tmp and ignores XDG_RUNTIME_DIR. The path is
+        # redirected into the temporary directory rather than created for real: a socket
+        # left in /tmp can confuse the next ydotoold on the machine.
         runtime = Path(self.tmp.name) / "run"
         runtime.mkdir()
         legacy = Path(self.tmp.name) / "legacy.sock"
@@ -344,12 +333,11 @@ class HelperSocketTests(unittest.TestCase):
 class HelperStartTests(unittest.TestCase):
     """The daemon raises ydotoold itself when it is not answering.
 
-    The unit is enabled at package installation time, which does nothing for a
-    session that was already open when the package arrived: the unit is enabled,
-    nobody starts it, and every dictation is recognized and then not pasted
-    until the next login. This is the failure that was reported as "it cannot
-    paste anything", and the fix is one systemctl call that the daemon can make
-    by itself.
+    The unit is enabled at installation time, which does nothing for a session that was
+    already open when the package arrived: nobody starts it, and every dictation is
+    recognized and then not pasted until the next login. That is the failure reported as
+    "it cannot paste anything", and the fix is one systemctl call the daemon can make by
+    itself.
     """
 
     def setUp(self):
@@ -388,8 +376,8 @@ class HelperStartTests(unittest.TestCase):
             self.assertTrue(injector.ensure_helper_running(wait=5))
 
     def test_a_helper_that_never_comes_up_is_reported_as_down(self):
-        # Bounded, so a paste cannot hang on a systemctl that is stuck: the text
-        # is already in the clipboard and the user is waiting for it.
+        # Bounded, so a paste cannot hang on a systemctl that is stuck: the text is
+        # already in the clipboard and the user is waiting for it.
         now = [0.0]
         slept = []
 
@@ -455,10 +443,9 @@ class PasteDiagnosticsTests(unittest.TestCase):
         return mock.patch.object(injector.shutil, "which", return_value="/usr/bin/ydotool")
 
     def test_ydotools_own_explanation_is_not_thrown_away(self):
-        # The regression: ydotool prints its failures on stdout, and stdout went
-        # to /dev/null, so the user got "ydotool exited with an error" and the
-        # only line naming the cause - "failed to connect socket ..." - was
-        # discarded. The whole diagnosis was written where nobody looks.
+        # ydotool prints its failures on stdout, and stdout went to /dev/null, so the
+        # user got "ydotool exited with an error" and the only line naming the cause was
+        # discarded.
         with self._present(), self._ydotool(
             stdout="failed to connect socket `/run/user/1000/wayvoice-ydotool.sock': "
                    "No such file or directory\nPlease check if ydotoold is running.\n"
@@ -498,8 +485,8 @@ class PasteDiagnosticsTests(unittest.TestCase):
         self.assertTrue(message)
 
     def test_a_failure_is_written_to_the_service_log(self):
-        # "It does not paste" has to be a line in journalctl, or the only way to
-        # find out is to ask the user to describe what they see.
+        # "It does not paste" has to be a line in journalctl, or the only way to find
+        # out is to ask the user to describe what they see.
         stderr = io.StringIO()
         with self._present(), self._ydotool(stdout="Please check if ydotoold is running."), \
              mock.patch.object(injector, "helper_answering", return_value=True), \
@@ -540,10 +527,9 @@ class InjectTests(unittest.TestCase):
         self.addCleanup(setattr, injector, "_clipboard_proc", None)
         injector._helper_started_at = None
         self.addCleanup(setattr, injector, "_helper_started_at", None)
-        # The helper probe talks to a real socket and, when nothing answers,
-        # to a real systemd. A test that depends on whether the machine running
-        # it happens to have ydotoold up is a test that fails on the wrong
-        # computer, so the answer is fixed here.
+        # The helper probe talks to a real socket and, when nothing answers, to a real
+        # systemd. Depending on whether the machine running this has ydotoold up is
+        # depending on the wrong computer, so the answer is fixed here.
         answering = mock.patch.object(injector, "helper_answering", return_value=True)
         answering.start()
         self.addCleanup(answering.stop)
@@ -611,9 +597,8 @@ class InjectTests(unittest.TestCase):
             mock.patch.object(injector, "_run", side_effect=record),
         ):
             injector.inject("текст", {"paste_mode": "terminal"})
-        # The program that runs is the resolved path, not the bare name: that is
-        # what lets the bundled copy be used at all on a system whose PATH has
-        # no ydotool in it.
+        # The program that runs is the resolved path, not the bare name: that is what
+        # lets the bundled copy be used on a system whose PATH has no ydotool in it.
         self.assertEqual(seen["cmd"][0], "/usr/bin/ydotool")
         # 29:x are the bracket-key codes: the terminal profile sends ESC [ once.
         self.assertEqual(seen["cmd"][1:3], ["key", "29:1"])
