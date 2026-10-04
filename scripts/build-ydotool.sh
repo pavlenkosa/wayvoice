@@ -25,16 +25,21 @@ if [ ! -d "$SRC/Client" ] || [ ! -f "$SRC/Daemon/ydotoold.c" ]; then
     exit 1
 fi
 
+# No -Wall: the sources are vendored unpatched, so their warnings are not ours to
+# fix here, and four of them on every package build would drown out the ones from
+# our own code. -Werror would fail the build on upstream's code, which is not a
+# thing a package that vendors code should be doing either.
+#
+# The version is a lie on purpose and a harmless one: these binaries are not a
+# distribution package, so nothing should read a version out of them and expect
+# it to mean anything. Upstream stamps its own git describe here.
+compile() {
+    cc -O2 -pipe -DVERSION='"bundled"' "$@"
+}
+
 mkdir -p "$OUT"
-# No -Wall: the sources are vendored unpatched, so their warnings are not ours
-# to fix here, and four of them on every package build would drown out the ones
-# from our own code. -Werror would fail the build on upstream's code, which is
-# not a thing a package that vendors code should be doing either.
-COMMON="-O2 -pipe -DVERSION=\"bundled\""
-# shellcheck disable=SC2086  # the flags are a list, deliberately unquoted
-cc $COMMON -o "$OUT/ydotoold" "$SRC/Daemon/ydotoold.c"
-# shellcheck disable=SC2086
-cc $COMMON -I"$SRC/Client" -o "$OUT/ydotool" \
+compile -o "$OUT/ydotoold" "$SRC/Daemon/ydotoold.c"
+compile -I"$SRC/Client" -o "$OUT/ydotool" \
     "$SRC/Client/ydotool.c" \
     "$SRC/Client/tool_click.c" \
     "$SRC/Client/tool_mousemove.c" \

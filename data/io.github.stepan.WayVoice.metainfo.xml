@@ -15,6 +15,9 @@
   <supports><control>pointing</control><control>keyboard</control></supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.6.1" date="2026-10-04">
+      <description><p>Automatic pasting now works on distributions that do not package ydotool: the helper is built from vendored sources and shipped with the package. A distribution's own copy is always preferred. Licence is AGPL-3.0-or-later, and the release is published by pushing a tag.</p></description>
+    </release>
     <release version="0.6.0" date="2026-10-04">
       <description><p>Model management with a visible, cancellable download, all 100 recognition languages, an engine registry, a warm worker that loads the model when the daemon starts, and a daemon that starts with or without systemd.</p></description>
     </release>

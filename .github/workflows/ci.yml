@@ -52,8 +52,10 @@ jobs:
             scripts/wayvoice-daemon \
             scripts/wayvoice-settings \
             scripts/wayvoice-engine-setup \
+            scripts/wayvoice-ydotoold \
             scripts/setup-user \
             scripts/build-deb.sh \
+            scripts/build-ydotool.sh \
             packaging/DEBIAN/postinst \
             packaging/DEBIAN/postrm \
             packaging/DEBIAN/prerm

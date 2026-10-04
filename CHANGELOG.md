@@ -1,16 +1,19 @@
 # Changelog
 
-## 0.6.0 — 2026-10-04
+## 0.6.1 — 2026-10-04
 
-- The release workflow publishes from a tag you pushed, and refuses to do anything when the tag is missing or points elsewhere. It used to create and push the tag itself, which silently disabled its own automatic path: GitHub does not start workflows from pushes made with `GITHUB_TOKEN`, so the tag appeared on the remote with nothing having run, and a later `git push` of the same tag answered “Everything up-to-date”.
 - The Debian package now ships its own `ydotool`, built from vendored sources, so automatic pasting works on distributions that do not package it — Debian 13 has none, in any component. A system's own copy is always preferred, the bundled one is a fallback, and a package built without a compiler simply has none.
 - Licence changed from GPL-3.0-only to **AGPL-3.0-or-later**, which is what allows the automatic-paste helper to be shipped with the application: `ydotool` is AGPL-3.0-or-later, and its source cannot be combined with GPL-3.0-only code. Updated accordingly: LICENSE, packaging metadata, AppStream data, the About dialog, and a machine-readable `copyright` file in the package (Debian policy 12.5).
+- Missing dependencies are detected before anything is installed, and a package the system's repositories do not carry is reported as such: the settings no longer offer a button that ends in “Unable to locate package” after an authorization dialog and a password prompt. Debian 13 has no `ydotool` package in any component, and the query that finds this out is made in the C locale, because apt translates its output.
+- The release workflow publishes from a tag you pushed, and refuses to do anything when the tag is missing or points elsewhere. It used to create and push the tag itself, which silently disabled its own automatic path: GitHub does not start workflows from pushes made with `GITHUB_TOKEN`, so the tag appeared on the remote with nothing having run, and a later `git push` of the same tag answered “Everything up-to-date”.
+
+## 0.6.0 — 2026-10-04
+
 - Recognition languages: all 100 that Whisper supports, each under its own name, with automatic detection as the default instead of a pinned language.
 - Spoken punctuation commands in English as well as Russian, applied per language.
 - Engine registry: engines are declared once and the window, the daemon and the CLI all ask it, instead of three places comparing engine ids.
 - External command engine is now reachable from the settings window.
 - Model management: size on disk, free space, the whole shared cache, and deletion that keeps files another model still uses.
-- Missing dependencies are detected, explained and can be installed from the settings. A package the system's repositories do not carry is reported as such before anything is started, instead of an authorization prompt and a package manager failing to find it.
 - Daemon, engine and hot key now start without systemd, so the Flatpak build works.
 - Faster-Whisper model is kept warm between dictations, and is loaded into memory when the daemon starts so the first dictation of a session is as fast as the ones after it.
 - Model downloads are a visible, cancellable step with progress in bytes, instead of a silent wait inside the first recognition.
