@@ -22,6 +22,7 @@ import time
 import unittest
 from pathlib import Path
 
+from wayvoice import engine
 from wayvoice.paths import app_src_dir, python_executable
 
 from support import isolate_environment
@@ -109,13 +110,37 @@ class SignalShutdownTests(unittest.TestCase):
         self.addCleanup(self._cleanup)
         self._write_config()
 
+    def _fake_runtime(self) -> Path:
+        """A runtime that says "ready" and holds nothing.
+
+        The daemon under test is a real process, so it asks the real engine
+        whether it is prepared.  With the data home pointed at an empty
+        directory the answer is "missing", and the daemon then asks for the
+        engine to be prepared - which is a detached ``pip install`` of
+        faster-whisper into the test's own temporary directory.  It ran on every
+        single run of this file, put half a gigabyte there, and left it behind
+        when the directory was cleaned up under it: enough to fill a 7 GB
+        /tmp after a few dozen runs, and slow enough to notice.
+
+        What the status looks for is a stamp beside an interpreter, so a stamp
+        beside a two-line script is a runtime that is ready and does nothing.
+        """
+        runtime = Path(os.environ["WAYVOICE_RUNTIME"])
+        (runtime / "bin").mkdir(parents=True, exist_ok=True)
+        interpreter = runtime / "bin" / "python"
+        interpreter.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        interpreter.chmod(0o755)
+        (runtime / engine.RUNTIME_STAMP).touch()
+        return runtime
+
     def _env(self) -> dict:
-        # Only the PATH is changed on top of the redirect: every XDG variable is
-        # already pointed at this test's own directory, and the child must see
-        # exactly what this process sees.
+        # Only the PATH and the runtime are changed on top of the redirect: every
+        # XDG variable is already pointed at this test's own directory, and the
+        # child must see exactly what this process sees.
         return {
             **os.environ,
             "PATH": f"{self.bin_dir}:{os.environ.get('PATH', '')}",
+            "WAYVOICE_RUNTIME": str(self._fake_runtime()),
             "GSETTINGS_BACKEND": "memory",
             "PYTHONPATH": str(app_src_dir()),
             "PYTHONUNBUFFERED": "1",

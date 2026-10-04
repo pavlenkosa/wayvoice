@@ -12,6 +12,7 @@ not about the network.
 import io
 import json
 import os
+import subprocess
 import sys
 import unittest
 from unittest import mock
@@ -230,11 +231,26 @@ if __name__ == "__main__":
 # cannot fail for anything the library actually calls.  That is how an
 # AttributeError could ship in the middle of a real download.
 def _hub_runtime() -> str | None:
-    """The engine runtime interpreter, which is where huggingface_hub lives."""
+    """The engine runtime interpreter, if it can import huggingface_hub.
+
+    Not merely "a file called bin/python exists": an earlier version of this
+    check looked no further, and a leftover directory from an interrupted setup
+    - or one a test created - satisfied it.  The probe then failed with
+    ModuleNotFoundError and the test failed, on a machine with no library to be
+    incompatible with.  One extra subprocess settles it.
+    """
     from wayvoice import engine
 
     python = engine.faster_runtime() / "bin/python"
-    return str(python) if python.exists() else None
+    if not python.exists():
+        return None
+    probe = subprocess.run(
+        [str(python), "-c", "import huggingface_hub"],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    return str(python) if probe.returncode == 0 else None
 
 
 def _hub_probe(source: str) -> str:
@@ -262,7 +278,13 @@ class HubCompatibilityTests(unittest.TestCase):
 
     def setUp(self):
         if _hub_runtime() is None:
-            self.skipTest("the Faster-Whisper runtime is not installed")
+            # Not a failure: these two check compatibility with a library that
+            # only exists once the engine runtime is installed, and a machine
+            # without it has nothing to be incompatible with.
+            self.skipTest(
+                "no engine runtime with huggingface_hub: the bar is checked "
+                "against the library where it is installed"
+            )
 
     def test_the_bar_offers_every_attribute_the_hub_touches(self):
         # Read out of the library's own source: every attribute it reaches for

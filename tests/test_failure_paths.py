@@ -97,7 +97,17 @@ class RunCancelableTests(unittest.TestCase):
 
 
 class InstallTimeoutTests(unittest.TestCase):
-    """A timeout has to take the package manager's children with it."""
+    """A timeout has to take the package manager's children with it.
+
+    The privilege question is answered here rather than inherited: these tests
+    are about what happens when the manager does not finish, and whether the
+    caller is root, and whether pkexec is installed, are three different
+    questions. On a machine where the answer was "not root and no pkexec" the
+    code returned before starting anything, and the tests failed on a missing
+    attribute instead of on the behaviour they are about.
+    """
+
+    ARGV = ["apt-get", "install", "-y", "wl-clipboard"]
 
     def _run(self, stderr: str):
         child = FakeChild(stderr=stderr)
@@ -110,17 +120,26 @@ class InstallTimeoutTests(unittest.TestCase):
         def kill_tree(proc):
             proc.returncode = -9
 
-        with mock.patch.object(pkgsys.subprocess, "Popen", side_effect=fake_popen):
-            with mock.patch.object(pkgsys, "_kill_tree", side_effect=kill_tree):
-                ok, message = pkgsys.install_packages(
+        with mock.patch.object(pkgsys.subprocess, "Popen", side_effect=fake_popen), \
+             mock.patch.object(pkgsys, "_kill_tree", side_effect=kill_tree), \
+             mock.patch.object(pkgsys, "requires_privilege", return_value=False), \
+             mock.patch.object(pkgsys, "pkexec_path", return_value=None) as pkexec, \
+             mock.patch.object(pkgsys, "dry_run_command", return_value=list(self.ARGV)):
+            ok, message = pkgsys.install_packages(
                 ["wl-clipboard"], timeout=0.1, language="en"
             )
+        # Proof that the path under test is the one these tests are about: had
+        # the code asked for pkexec, the answer above would have turned the run
+        # into "needs root privileges", and the tests would have been reporting
+        # whatever this machine happens to have installed.
+        self.assertFalse(pkexec.called, "the privileged path was taken")
         return ok, message, child
 
     def test_the_manager_runs_in_its_own_session(self):
         # Killing only pkexec leaves apt-get running, and apt still holds
         # /var/lib/dpkg/lock - which is what the user sees on the next attempt.
         _ok, _message, child = self._run("")
+        self.assertEqual(child.command, self.ARGV)
         self.assertTrue(child.kwargs.get("start_new_session"))
 
     def test_a_timed_out_install_says_so_in_seconds(self):

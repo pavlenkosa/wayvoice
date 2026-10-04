@@ -27,22 +27,28 @@ from wayvoice import engine as _engine
 #: ``XDG_RUNTIME_DIR`` is in the list because it is where both sockets live, and
 #: a test that binds the real one collides with a running daemon.
 #:
-#: ``XDG_DATA_HOME`` is deliberately *not* redirected.  It holds the engine
-#: runtime, which is a prepared virtual environment shared by every test that
-#: touches the engine; pointing a test at an empty directory makes
-#: ``engine_status`` answer "not prepared", and the daemon's constructor then
-#: asks for the engine to be prepared - a real ``systemctl`` call or a detached
-#: ``pip install`` from inside a unit test.  Reading the real runtime is safe:
-#: nothing in a test run writes to it.  A test that really exercises the engine
-#: setup has to redirect this one itself.
+#: ``XDG_DATA_HOME`` used to be left alone, because it holds the engine runtime
+#: and an empty one makes ``engine_status`` answer "not prepared".  That was the
+#: wrong trade: leaving it real makes every engine-dependent test depend on what
+#: this machine happens to have installed - on a machine without the runtime they
+#: failed, and six of them failed on CI, which is a machine without it by
+#: definition.  The engine's readiness is now stated by the test instead (see
+#: ``isolate_engine``), which is also the honest arrangement: a test about the
+#: model logic should say what it assumes about the engine.
+#:
+#: ``WAYVOICE_RUNTIME`` is in the list because it takes precedence over both of
+#: the locations above, so a value inherited from the environment would quietly
+#: win over the redirect.
 _XDG_VARS = (
     "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
     "XDG_STATE_HOME",
     "XDG_CACHE_HOME",
     "XDG_RUNTIME_DIR",
     "HF_HOME",
     "HF_HUB_CACHE",
     "HUGGINGFACE_HUB_CACHE",
+    "WAYVOICE_RUNTIME",
 )
 
 #: What each engine hook is replaced with.  ``True``/``ready`` mean "there is
@@ -57,6 +63,16 @@ _ISOLATED = {
         "state": "ready", "error": "", "done": 0, "total": 0,
     },
 }
+
+#: What the engine answers when a test's daemon asks whether it is ready.
+#:
+#: The engine's own status is a question about this machine: does a prepared
+#: runtime exist, is a setup running, did one fail.  A test about model logic has
+#: no business inheriting the answer - on a machine without the runtime it said
+#: "not prepared" and the daemon refused to record, which is correct behaviour
+#: and the wrong subject for those tests.  A test that really exercises the
+#: engine patches the status itself.
+_READY_ENGINE = {"state": "ready", "message": "Ready"}
 
 #: Module globals a test run can move and must not leave moved.
 #:
@@ -106,6 +122,10 @@ def isolate_engine(test) -> None:
     Call from ``setUp``.  A test that needs different behaviour patches the same
     names afterwards and gets it for as long as its own patch lasts.
 
+    Three things are answered here rather than inherited from the machine: the
+    worker is not started, the model counts as present, and the engine counts as
+    ready.  That last one is the subtle one - see ``_READY_ENGINE``.
+
     The guarantees are checked by ``test_isolation.py``, which is worth reading
     before trusting this one: everything here is a promise to the tests that
     follow, and a promise that quietly stops being kept costs a code path its
@@ -117,3 +137,11 @@ def isolate_engine(test) -> None:
     for name, value in _ISOLATED_GLOBALS.items():
         test.addCleanup(setattr, _engine, name, _ORIGINAL_GLOBALS[name])
         setattr(_engine, name, value)
+    # The daemon imported the name, so patching the engine's does not reach it.
+    from wayvoice import daemon as _daemon
+
+    for module in (_engine, _daemon):
+        name = "engine_status"
+        original = getattr(module, name)
+        test.addCleanup(setattr, module, name, original)
+        setattr(module, name, lambda cfg: dict(_READY_ENGINE))

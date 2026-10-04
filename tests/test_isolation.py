@@ -21,22 +21,16 @@ import support
 
 
 class _Case(unittest.TestCase):
-    """A test case whose setUp does nothing, to drive the helpers by hand."""
+    """A test case that can assert on the state *after* its cleanup ran.
 
-    def setUp(self):
-        self.cleanups = []
-        self.addCleanup(self._run_cleanups)
+    Half of what is being checked here is that nothing is left behind, and that
+    cannot be asserted from inside the test that still has its replacements in
+    place.  ``doCleanups`` is the framework's own method: it runs and empties the
+    list, so the teardown that follows finds nothing left to do.
+    """
 
-    def addCleanup(self, func, *args, **kwargs):
-        self.cleanups.append((func, args, kwargs))
-
-    def _run_cleanups(self):
-        # The list is emptied first: this method is itself one of the cleanups,
-        # so a test that runs them by hand and again through the framework would
-        # otherwise call it from inside itself.
-        pending, self.cleanups = self.cleanups, []
-        for func, args, kwargs in reversed(pending):
-            func(*args, **kwargs)
+    def _after_cleanup(self) -> None:
+        self.doCleanups()
 
 
 class EnvironmentIsolationTests(_Case):
@@ -55,7 +49,7 @@ class EnvironmentIsolationTests(_Case):
                 Path(redirected).is_dir(),
                 f"{name} points somewhere that does not exist: {redirected}",
             )
-        self._run_cleanups()
+        self._after_cleanup()
         for name, value in before.items():
             self.assertEqual(os.environ.get(name), value, f"{name} was not restored")
 
@@ -66,12 +60,23 @@ class EnvironmentIsolationTests(_Case):
         root = support.isolate_environment(self)
         self.assertEqual(os.environ["XDG_RUNTIME_DIR"], str(root / "XDG_RUNTIME_DIR"))
 
-    def test_the_data_home_is_deliberately_not_redirected(self):
-        # The engine runtime lives there. Redirecting it makes engine_status
-        # answer "not prepared", and a daemon test then asks for the engine to be
-        # prepared - a real systemctl call from inside a unit test.
+    def test_the_data_home_is_redirected(self):
+        # It holds the engine runtime, and leaving it real made every
+        # engine-dependent test depend on what this machine has installed: on a
+        # machine without the runtime, six of them failed on CI - which is a
+        # machine without it by definition. The engine's readiness is stated by
+        # isolate_engine instead, which is the honest arrangement: a test about
+        # model logic says what it assumes about the engine rather than
+        # inheriting the answer.
+        root = support.isolate_environment(self)
+        self.assertIn("XDG_DATA_HOME", support._XDG_VARS)
+        self.assertTrue(os.environ["XDG_DATA_HOME"].startswith(str(root)))
+
+    def test_the_runtime_override_is_redirected_too(self):
+        # WAYVOICE_RUNTIME takes precedence over both locations above, so a value
+        # inherited from the environment would quietly win over the redirect.
         support.isolate_environment(self)
-        self.assertNotIn("XDG_DATA_HOME", support._XDG_VARS)
+        self.assertIn("WAYVOICE_RUNTIME", support._XDG_VARS)
 
 
 class EngineIsolationTests(_Case):
@@ -82,7 +87,7 @@ class EngineIsolationTests(_Case):
         support.isolate_engine(self)
         self.assertIsNot(engine._start_worker, real)
         self.assertFalse(engine._start_worker({}), "a test asked for a real worker")
-        self._run_cleanups()
+        self._after_cleanup()
         self.assertIs(engine._start_worker, real)
 
     def test_a_model_is_reported_as_present_without_looking_at_the_cache(self):
@@ -98,8 +103,26 @@ class EngineIsolationTests(_Case):
         self.addCleanup(setattr, engine, "_worker_retry_after", moved)
         support.isolate_engine(self)
         self.assertEqual(engine._worker_retry_after, 0.0)
-        self._run_cleanups()
+        self._after_cleanup()
         self.assertEqual(engine._worker_retry_after, moved, "the deadline was left moved")
+
+    def test_the_engine_is_reported_ready(self):
+        # The answer to "is the engine prepared" is a question about this
+        # machine, and a test about model logic has no business inheriting it.
+        support.isolate_engine(self)
+        from wayvoice import daemon, engine
+
+        for module in (engine, daemon):
+            self.assertEqual(module.engine_status({})["state"], "ready")
+
+    def test_the_engine_status_is_restored_afterwards(self):
+        from wayvoice import daemon, engine
+
+        before = (engine.engine_status, daemon.engine_status)
+        support.isolate_engine(self)
+        self._after_cleanup()
+        self.assertEqual(engine.engine_status, before[0])
+        self.assertEqual(daemon.engine_status, before[1])
 
     def test_the_download_hook_succeeds_without_a_process(self):
         support.isolate_engine(self)
