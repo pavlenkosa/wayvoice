@@ -1,12 +1,11 @@
 """The download helper and the protocol it speaks.
 
-A model download is the longest thing WayVoice ever waits for, and the window
-shows it as a progress bar.  That bar is fed by lines this module prints, so
-the interesting questions are what counts as progress, what is ignored, and
-what the caller gets told when the download fails.
+A model download is the longest thing WayVoice ever waits for, and the window shows it
+as a progress bar fed by the lines this module prints. The interesting questions are
+what counts as progress, what is ignored, and what the caller is told when the download
+fails.
 
-``huggingface_hub`` is faked throughout: these tests are about the reporting,
-not about the network.
+``huggingface_hub`` is faked throughout: these tests are about the reporting.
 """
 
 import io
@@ -72,9 +71,9 @@ class ReporterTests(unittest.TestCase):
         self.assertEqual(reporter.counts(), (400, 1000))
 
     def test_the_same_bytes_counted_twice_are_not_added(self):
-        # The hub has one counter for bytes written and one for bytes received,
-        # and both are given the size of every file. Summing them reported a
-        # 1.5 GB model as 3 GB and made the bar sit at 50% when it was done.
+        # The hub has one counter for bytes written and one for bytes received, and
+        # both are given the size of every file. Summing them reported a 1.5 GB model
+        # as 3 GB and made the bar sit at 50% when it was done.
         reporter = model_fetch.Reporter(total=1000)
         bars = model_fetch.progress_tqdm_class(reporter)
         written = bars(total=1000, unit="B")
@@ -154,8 +153,8 @@ class ExpectedTotalTests(unittest.TestCase):
             self.assertEqual(model_fetch.expected_total("org/name", ["model.bin"]), 0)
 
     def test_a_failing_metadata_call_leaves_it_unknown(self):
-        # Offline, rate limited or simply a different hub: an indeterminate bar
-        # is better than a percentage that is not true.
+        # Offline, rate limited or simply a different hub: an indeterminate bar is
+        # better than a percentage that is not true.
         hub = FakeHub()
         hub.model_info = mock.Mock(side_effect=OSError("offline"))
         with _fake_hub(hub):
@@ -224,20 +223,17 @@ if __name__ == "__main__":
 # --------------------------------------------------------------------------
 # Compatibility with the installed huggingface_hub
 # --------------------------------------------------------------------------
-# The bar in this module is not a tqdm: it is whatever shape the hub expects,
-# and the hub is the only thing that decides that shape.  Both tests below read
-# the requirement out of the *installed library* - one from its source, one by
-# driving it - because a test that enumerates the methods of our own class
-# cannot fail for anything the library actually calls.  That is how an
-# AttributeError could ship in the middle of a real download.
+# The bar in this module is not a tqdm: it is whatever shape the hub expects, and the
+# hub is the only thing that decides that shape. Both tests below read the requirement
+# out of the *installed library* - one from its source, one by driving it - because a
+# test enumerating the methods of our own class cannot fail for anything the library
+# actually calls.
 def _hub_runtime() -> str | None:
     """The engine runtime interpreter, if it can import huggingface_hub.
 
-    Not merely "a file called bin/python exists": an earlier version of this
-    check looked no further, and a leftover directory from an interrupted setup
-    - or one a test created - satisfied it.  The probe then failed with
-    ModuleNotFoundError and the test failed, on a machine with no library to be
-    incompatible with.  One extra subprocess settles it.
+    Not merely "a file called bin/python exists": a leftover directory from an interrupted
+    setup satisfied that, and the probe then failed with ModuleNotFoundError on a machine
+    with no library to be incompatible with. One extra subprocess settles it.
     """
     from wayvoice import engine
 
@@ -278,19 +274,18 @@ class HubCompatibilityTests(unittest.TestCase):
 
     def setUp(self):
         if _hub_runtime() is None:
-            # Not a failure: these two check compatibility with a library that
-            # only exists once the engine runtime is installed, and a machine
-            # without it has nothing to be incompatible with.
+            # Not a failure: these two check compatibility with a library that only
+            # exists once the engine runtime is installed.
             self.skipTest(
                 "no engine runtime with huggingface_hub: the bar is checked "
                 "against the library where it is installed"
             )
 
     def test_the_bar_offers_every_attribute_the_hub_touches(self):
-        # Read out of the library's own source: every attribute it reaches for
-        # on a progress-bar object, in the xet reporter and in the two snapshot
-        # download classes that feed it.  A name that appears there and not on
-        # our bar is an AttributeError waiting for the first chunk of a download.
+        # Read out of the library's own source: every attribute it reaches for on a
+        # progress-bar object, in the xet reporter and in the two snapshot download
+        # classes that feed it. A name that appears there and not on our bar is an
+        # AttributeError waiting for the first chunk of a download.
         required = _hub_probe(
             "import ast, inspect, json\n"
             "from huggingface_hub.utils import _xet_progress_reporting as xpr\n"
@@ -329,9 +324,8 @@ class HubCompatibilityTests(unittest.TestCase):
         )
 
     def test_the_installed_xet_reporter_can_report_into_the_bar(self):
-        # The behavioural version: hand the real reporter a real bar and push a
-        # progress report through it.  This is the path a multi-gigabyte model
-        # takes, and it is where the AttributeError was raised.
+        # The behavioural version: hand the real reporter a real bar and push a progress
+        # report through it, which is the path a multi-gigabyte model takes.
         output = _hub_probe(
             "import json\n"
             "from types import SimpleNamespace\n"

@@ -1,12 +1,12 @@
 """Getting the model onto the disk before anyone waits for it.
 
 Recognition used to begin by fetching several gigabytes, silently, inside the
-transcription: the user pressed the key, spoke, waited, and eventually either
-saw text or a timeout.  These tests cover the replacement - an explicit,
-visible, cancellable download - and the warm-up that follows it.
+transcription: the user pressed the key, spoke, waited, and eventually either saw text
+or a timeout. These tests cover the replacement - an explicit, visible, cancellable
+download - and the warm-up that follows it.
 
-No network: the helper process is replaced by a script that speaks the same
-protocol, and the cache is a temporary directory.
+No network: the helper process is replaced by a script that speaks the same protocol,
+and the cache is a temporary directory.
 """
 
 import json
@@ -98,16 +98,14 @@ class PresenceTests(unittest.TestCase):
 class ModelStateTests(unittest.TestCase):
     """``model_state`` decides two things at once, and conflating them breaks dictation.
 
-    Whether WayVoice can fetch a model depends on the *value* in the config, not
-    only on the engine: a local directory is a model the engine loads from disk,
-    and calling it "missing" made the daemon refuse every hot-key press. These
-    tests pin the answer for every shape of value the settings window accepts.
+    Whether WayVoice can fetch a model depends on the *value* in the config, not only on
+    the engine: a local directory is a model the engine loads from disk, and calling it
+    "missing" made the daemon refuse every hot-key press. These tests pin the answer for
+    every shape of value the settings window accepts.
 
-    Both halves of the environment are pinned here.  Without them the answer for
-    a catalogue model depends on what this machine happens to have downloaded -
-    which is how this class was passing for the wrong reason: an earlier module
-    left the presence hook replaced, and the day that stopped happening the test
-    started failing on a machine with a different cache.
+    Both halves of the environment are pinned here. Without them the answer for a
+    catalogue model depends on what the machine has downloaded, which is how this class
+    once passed for the wrong reason: an earlier module left the presence hook replaced.
     """
 
     def setUp(self):
@@ -180,9 +178,8 @@ class DownloadTests(unittest.TestCase):
     def _download(self, mode: str, **kwargs):
         """Run a download against a helper that plays back ``mode``.
 
-        The language is given so that the messages under test are the ones this
-        suite reads; without it they would follow the locale of the machine, and
-        a Russian laptop would fail every assertion about an English sentence.
+        The language is given so that the messages under test are the ones this suite reads;
+        without it they follow the locale of the machine.
         """
         kwargs.setdefault("language", "en")
         with mock.patch.object(
@@ -269,9 +266,9 @@ class PrepareTests(unittest.TestCase):
     def _engine_with(self, **overrides):
         """The Faster-Whisper entry with some hooks replaced.
 
-        ``Engine`` is frozen, so the registry entry is replaced wholesale rather
-        than patched: the registered hooks are function objects captured at
-        import time, and patching the module attribute would not reach them.
+        ``Engine`` is frozen, so the registry entry is replaced wholesale rather than patched:
+        the registered hooks are function objects captured at import time, and patching the
+        module attribute would not reach them.
         """
         from dataclasses import replace
 
@@ -303,9 +300,9 @@ class PrepareTests(unittest.TestCase):
         self.assertTrue(warm.called)
 
     def test_an_engine_without_a_warm_worker_is_never_warmed(self):
-        # The warm worker speaks the Faster-Whisper protocol. Asking it to warm a
-        # model for whisper.cpp or an external command would either do nothing
-        # or, worse, report a success that means nothing.
+        # The warm worker speaks the Faster-Whisper protocol. Asking it to warm a model
+        # for whisper.cpp or an external command would do nothing, or report a success
+        # that means nothing.
         from dataclasses import replace
 
         for engine_id in ("whisper-cpp", "custom"):
@@ -367,9 +364,9 @@ class PrepareTests(unittest.TestCase):
         self.assertEqual((reply["done"], reply["total"]), (30, 90))
 
     def test_the_registered_hook_fetches_the_model_the_config_names(self):
-        # The hook is handed the whole config while the work takes a model id.
-        # Getting that wrong did not raise: the model id became a dict, nothing
-        # resolved, and every download reported "there is nothing to fetch".
+        # The hook is handed the whole config while the work takes a model id. Getting
+        # that wrong did not raise: the model id became a dict, nothing resolved, and
+        # every download reported "there is nothing to fetch".
         asked = []
 
         def capture(model_id):
@@ -429,11 +426,10 @@ class WarmWorkerTests(unittest.TestCase):
                 self.assertFalse(engine.warm_worker({}))
 
     def test_a_model_that_is_still_loading_is_watched_until_it_is_there(self):
-        # The reply to ``warm`` only comes when the load is finished, and a load
-        # of three gigabytes takes longer than any deadline worth having. Asking
-        # and then watching the ping is what keeps the answer honest in both
-        # directions: not "warm" while it loads, and not "not warm" because the
-        # clock ran out on a model that was on its way.
+        # The reply to ``warm`` only comes when the load is finished, and three
+        # gigabytes takes longer than any deadline worth having. Asking and then
+        # watching the ping keeps the answer honest both ways: not "warm" while it
+        # loads, and not "not warm" because the clock ran out on a model on its way.
         pings = [
             {"ok": True, "warm": False},
             {"ok": True, "warm": False},
@@ -446,10 +442,10 @@ class WarmWorkerTests(unittest.TestCase):
             self.assertTrue(engine.warm_worker({}, timeout=30.0))
 
     def test_a_worker_that_dies_while_being_watched_is_not_waited_for(self):
-        # The clock is generous on purpose - it has to be, for large models - so
-        # the only thing that ends the waiting early is the worker being gone.
-        # Otherwise a crashed worker would hold the daemon's preparation thread
-        # for the whole deadline, and nothing would be reported the whole time.
+        # The clock is generous on purpose - it has to be for large models - so the only
+        # thing that ends the waiting early is the worker being gone. Otherwise a
+        # crashed worker would hold the preparation thread for the whole deadline with
+        # nothing reported.
         began = time.monotonic()
         with mock.patch.object(engine, "ensure_worker", return_value=True), \
              mock.patch.object(engine, "_worker_call", side_effect=TimeoutError("busy")), \
@@ -461,9 +457,8 @@ class WarmWorkerTests(unittest.TestCase):
         )
 
     def test_a_model_that_never_arrives_is_reported_as_not_warm(self):
-        # The other end of the deadline: a worker that answers but never warms.
-        # False here is the truth - recognition still works through the one-shot
-        # runner - and reporting it late would be worse than reporting it.
+        # The other end of the deadline: a worker that answers but never warms. False
+        # here is the truth - recognition still works through the one-shot runner.
         with mock.patch.object(engine, "ensure_worker", return_value=True), \
              mock.patch.object(engine, "_worker_call", side_effect=TimeoutError("busy")), \
              mock.patch.object(engine, "_worker_ping", return_value={"ok": True, "warm": False}), \
@@ -475,8 +470,8 @@ class FetchPatternsTests(unittest.TestCase):
     """The list of files has to match the engine that will read them."""
 
     def test_the_patterns_match_the_installed_runtime(self):
-        # Same reasoning as the alias table: it is a copy, and a stale copy
-        # leaves a model that cannot load. Skipped when there is no runtime.
+        # Same reasoning as the alias table: a copy, and a stale copy leaves a model that
+        # cannot load. Skipped when there is no runtime.
         runtime = engine.faster_runtime()
         python = runtime / "bin/python"
         if not python.exists():
@@ -499,8 +494,8 @@ class FetchPatternsTests(unittest.TestCase):
         self.assertEqual(sorted(installed), sorted(model_store.FETCH_PATTERNS))
 
     def test_the_patterns_are_not_a_wildcard(self):
-        # A wrong entry is not a crash: it is gigabytes fetched for nothing, or
-        # a model that is missing a file at load time.
+        # A wrong entry is not a crash: it is gigabytes fetched for nothing, or a model
+        # missing a file at load time.
         self.assertNotIn("*", model_store.FETCH_PATTERNS)
         self.assertIn("vocabulary.*", model_store.FETCH_PATTERNS)
 
