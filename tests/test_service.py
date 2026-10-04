@@ -1,8 +1,7 @@
 """Tests for :mod:`wayvoice.service`, the systemd-or-not start layer.
 
-Nothing here really starts a process or waits on a socket: both the daemon
-socket and ``subprocess`` are mocked, so the whole module runs offline and
-instantly.
+Nothing here really starts a process or waits on a socket: both the daemon socket and
+``subprocess`` are mocked, so the module runs offline and instantly.
 """
 
 import subprocess
@@ -28,8 +27,8 @@ class SystemdAvailableTests(unittest.TestCase):
         self.assertFalse(self.probe(None, True, True))
 
     def test_no_user_manager_means_no_systemd(self):
-        # systemctl is installed in a container, but no user manager ever ran:
-        # neither /run/systemd/user nor the control socket exists.
+        # systemctl is installed in a container, but no user manager ever ran: neither
+        # /run/systemd/user nor the control socket exists.
         self.assertFalse(self.probe("/usr/bin/systemctl", False, False))
 
     def test_runtime_dir_means_systemd(self):
@@ -151,8 +150,8 @@ class EngineSetupRequestTests(unittest.TestCase):
 
     def test_direct_path_spawns_the_module(self):
         # The spawn is real (only Popen is mocked) so that what is checked is the
-        # command line the user would get. Mocking the spawn too made "Popen was
-        # not called" unreachable rather than true: nothing could have called it.
+        # command line the user would get. Mocking the spawn too made "Popen was not
+        # called" unreachable rather than true.
         with tempfile.TemporaryDirectory() as tmp:
             log = Path(tmp) / "state" / "engine-setup.log"
             with mock.patch.object(service, "systemd_available", return_value=False), \

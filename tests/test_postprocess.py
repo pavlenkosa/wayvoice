@@ -32,14 +32,14 @@ class PostprocessTests(unittest.TestCase):
         self.assertEqual(text, "Строка два, строка три.")
 
     def test_auto_applies_both_tables(self):
-        # Nobody told us what was spoken, so both sets of commands have to be
-        # honoured rather than leaving half of them in the text.
+        # Nobody told us what was spoken, so both sets of commands have to be honoured
+        # rather than leaving half of them in the text.
         self.assertEqual(normalize("привет comma мир"), "Привет, мир.")
         self.assertEqual(normalize("hello запятая world"), "Hello, world.")
 
     def test_language_without_a_table_still_drops_the_known_commands(self):
-        # No German table exists; guessing one would be worse than the
-        # alternative, which is the same behaviour as auto.
+        # No German table exists; guessing one would be worse than the alternative,
+        # which is the same behaviour as auto.
         self.assertEqual(normalize("hallo comma welt", language="de"), "Hallo, welt.")
 
     def test_commands_can_be_turned_off(self):

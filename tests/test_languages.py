@@ -10,8 +10,8 @@ class NormalizeTests(unittest.TestCase):
         self.assertEqual(languages.normalize("yue"), "yue")
 
     def test_spellings_of_the_same_language_agree(self):
-        # Everything a locale, a config file or a hand-edited string can throw
-        # at us has to land on the same code.
+        # Everything a locale, a config file or a hand-edited string can throw at us has
+        # to land on the same code.
         for value in ("RU_ru", "ru-RU", " RU ", "Ru_RU.UTF-8"):
             self.assertEqual(languages.normalize(value), "ru")
         self.assertEqual(languages.normalize("de-DE"), "de")
@@ -56,8 +56,8 @@ class DisplayNameTests(unittest.TestCase):
         self.assertEqual(languages.display_name("ru", "en"), "Русский (Russian)")
 
     def test_other_ui_gets_the_native_name_only(self):
-        # A Russian speaker looking for русский should not be shown
-        # "Русский (Russian)" - the translation adds nothing for them.
+        # A Russian speaker looking for русский should not be shown "Русский
+        # (Russian)" - the translation adds nothing for them.
         self.assertEqual(languages.display_name("de", "ru"), "Deutsch")
         self.assertEqual(languages.display_name("ru", "ru"), "Русский")
 

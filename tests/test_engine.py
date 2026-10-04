@@ -47,10 +47,9 @@ class WorkerInfoTests(unittest.TestCase):
 class WorkerVersionTests(unittest.TestCase):
     """A worker outliving an update must not answer for the new code.
 
-    The warm worker deliberately survives daemon restarts - that is what makes
-    the second dictation fast.  After an update the daemon is new and the worker
-    is not, so the version has to be part of the match or the previous release
-    keeps decoding speech.
+    The warm worker deliberately survives daemon restarts - that is what makes the second
+    dictation fast - so after an update the version has to be part of the match or the
+    previous release keeps decoding speech.
     """
 
     def test_a_worker_from_another_version_does_not_match(self):
@@ -75,9 +74,9 @@ class WorkerVersionTests(unittest.TestCase):
         self.assertTrue(_worker_settings_match(reply, {"model": "small"}))
 
     def test_a_worker_started_with_another_model_is_not_used(self):
-        # The version is only half of the match: a worker left over from a
-        # changed setting decodes with the wrong model, which sounds like
-        # recognition being broken rather than like a stale worker.
+        # The version is only half of the match: a worker left over from a changed
+        # setting decodes with the wrong model, which sounds like recognition being
+        # broken rather than like a stale worker.
         reply = {
             "ok": True,
             "version": __import__("wayvoice").__version__,
@@ -86,8 +85,8 @@ class WorkerVersionTests(unittest.TestCase):
         self.assertFalse(_worker_settings_match(reply, {"model": "small"}))
 
     def test_a_worker_that_reports_no_version_is_still_trusted(self):
-        # An older worker has no version field at all. Refusing it would mean
-        # never using a warm worker again after one restart.
+        # An older worker has no version field at all. Refusing it would mean never
+        # using a warm worker again after one restart.
         reply = {"ok": True, "config": {"model": "small", "device": "auto", "beam_size": 5, "vad": True}}
         self.assertTrue(_worker_settings_match(reply, {"model": "small"}))
 

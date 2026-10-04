@@ -1,9 +1,8 @@
 """The recognition-language row must report what the user picked.
 
-These tests need a real GTK, because the bug they guard against is the
-control's own state: a :class:`Gtk.DropDown` changes its selection without
-telling anyone, so nothing but reading it back can catch it.  Without a
-display there is nothing to read, and the test steps aside.
+These tests need a real GTK, because the bug they guard against is the control's own
+state: a :class:`Gtk.DropDown` changes its selection without telling anyone, so nothing
+but reading it back can catch it.
 """
 
 import os
@@ -13,11 +12,10 @@ import unittest
 def _gtk_available() -> bool:
     """Whether this process can really open a GTK window.
 
-    ``Gtk.init_check()`` is not the question, and asking it is how a whole test
-    run used to die: on a machine with the bindings installed but no display - a
-    build server, a plain ssh session - it still answers true, the tests below go
-    on to build widgets, and GTK takes the process down with it. A segfault is
-    worse than a failure, because it takes the other four hundred tests with it.
+    Not ``Gtk.init_check()``: with the bindings installed but no display - a build server, a
+    plain ssh session - that still answers true, the tests go on to build widgets, and GTK
+    takes the process down. A segfault is worse than a failure, because it takes the other
+    four hundred tests with it.
     """
     if not (os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY")):
         return False
@@ -78,8 +76,8 @@ class LanguagePickerTests(unittest.TestCase):
     def test_select_code_reports_whether_the_language_exists(self):
         self.assertTrue(self.picker.select_code("yue"))
         self.assertEqual(self.picker.selected_code(), "yue")
-        # "klingon" normalizes to detection as well, but saying "yes" here
-        # would claim a language the list does not contain.
+        # "klingon" normalizes to detection too, but saying "yes" here would claim a
+        # language the list does not contain.
         self.assertFalse(self.picker.select_code("klingon"))
         self.assertEqual(self.picker.selected_code(), "auto")
 
@@ -100,10 +98,10 @@ class LanguagePickerTests(unittest.TestCase):
 class LanguageChoiceTests(unittest.TestCase):
     """The label list itself: no widgets, but the module that builds it.
 
-    ``wayvoice.ui`` imports GTK, so this skips rather than fails where the
-    bindings are absent - the unit-test job runs under the interpreter
-    setup-python installed, which cannot see the system ``python3-gi``.  A module
-    that fails to import fails the whole discovery run, not just itself.
+    ``wayvoice.ui`` imports GTK, so this skips rather than fails where the bindings are
+    absent - the unit-test job runs under the interpreter setup-python installed, which
+    cannot see the system ``python3-gi``. A module that fails to import fails the whole
+    discovery run.
     """
 
     def setUp(self):
