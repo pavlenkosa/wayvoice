@@ -1,3 +1,4 @@
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -190,3 +191,74 @@ class DescribeMissingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BundledCommandTests(unittest.TestCase):
+    """Where a command is looked for: ``PATH`` first, then a bundled copy.
+
+    The bundled one is a fallback, never a preference. A distribution's package is
+    the copy that receives security updates, and a bundled fallback that won would
+    be a second, unmaintained copy of a program that writes to the kernel's input
+    layer - which is a worse thing than either copy alone.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.bundled = Path(self.tmp.name) / "ydotool"
+        self.bundled.mkdir()
+        self.patcher = mock.patch.object(
+            deps, "bundled_dir", return_value=self.bundled
+        )
+        self.patcher.start()
+        self.addCleanup(self.patcher.stop)
+
+    def _program(self, name: str) -> Path:
+        path = self.bundled / name
+        path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        path.chmod(0o755)
+        return path
+
+    def test_a_system_copy_wins_over_the_bundled_one(self):
+        self._program("ydotoold")
+        with mock.patch.object(
+            deps.shutil, "which", return_value="/usr/bin/ydotoold"
+        ) as which:
+            self.assertEqual(deps.find_command("ydotoold"), "/usr/bin/ydotoold")
+        self.assertEqual(which.call_args[0][0], "ydotoold")
+
+    def test_the_bundled_copy_is_used_when_the_system_has_none(self):
+        bundled = self._program("ydotool")
+        with mock.patch.object(deps.shutil, "which", return_value=None):
+            self.assertEqual(deps.find_command("ydotool"), str(bundled))
+
+    def test_a_copy_that_is_not_executable_does_not_count(self):
+        path = self.bundled / "ydotool"
+        path.write_text("not a program", encoding="utf-8")
+        path.chmod(0o644)
+        with mock.patch.object(deps.shutil, "which", return_value=None):
+            self.assertIsNone(deps.find_command("ydotool"))
+
+    def test_a_directory_named_like_the_command_does_not_count(self):
+        (self.bundled / "ydotool").mkdir()
+        with mock.patch.object(deps.shutil, "which", return_value=None):
+            self.assertIsNone(deps.find_command("ydotool"))
+
+    def test_the_dependency_is_satisfied_by_a_bundled_copy(self):
+        # Otherwise the settings window would tell the user automatic paste is
+        # missing while the program that does it is sitting right there.
+        self._program("ydotool")
+        self._program("ydotoold")
+        with mock.patch.object(deps.shutil, "which", return_value=None):
+            status = deps.status_of(deps.get("ydotool"))
+        self.assertTrue(status["ok"], status)
+        self.assertEqual(status["missing"], ())
+
+    def test_a_half_bundled_copy_is_still_missing(self):
+        # The client without the daemon cannot press anything: the daemon is what
+        # owns /dev/uinput.
+        self._program("ydotool")
+        with mock.patch.object(deps.shutil, "which", return_value=None):
+            status = deps.status_of(deps.get("ydotool"))
+        self.assertFalse(status["ok"])
+        self.assertEqual(status["missing"], ("ydotoold",))

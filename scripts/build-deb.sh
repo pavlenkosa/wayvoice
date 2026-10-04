@@ -29,8 +29,26 @@ cp -a "$ROOT/app/." "$PKG/usr/lib/wayvoice/app/"
 # wayvoice-setup.service) depends on the installation prefix.
 cp "$ROOT/scripts/wayvoice" "$ROOT/scripts/wayvoice-daemon" "$ROOT/scripts/wayvoice-settings" "$ROOT/scripts/wayvoice-engine-setup" "$PKG/usr/bin/"
 cp "$ROOT/scripts/setup-user" "$PKG/usr/bin/setup-user"
+# The launcher for the bundled helper. It finds the copy relative to itself, so
+# nothing here or in the unit names an installation prefix.
+cp "$ROOT/scripts/wayvoice-ydotoold" "$PKG/usr/bin/wayvoice-ydotoold"
 cp "$ROOT/systemd/"*.service "$PKG/usr/lib/systemd/user/"
+# /dev/uinput is root-owned, and the paste helper needs it. The rule grants it to
+# the logged-in user through uaccess, which is what a seat device is for.
 cp "$ROOT/data/80-wayvoice-uinput.rules" "$PKG/usr/lib/udev/rules.d/80-wayvoice-uinput.rules"
+# The bundled ydotool, unless this machine has no compiler. Not a dependency of
+# anything: with no helper the application falls back to the clipboard, and says
+# so. Skipped quietly rather than fatally - a machine that cannot compile C can
+# still use voice dictation.
+if "$ROOT/scripts/build-ydotool.sh" "$PKG/usr/lib/wayvoice/ydotool"; then
+    # AGPL-6: the object code travels with its licence and a pointer to where
+    # the sources are. Both are inside the package, which is the only place a
+    # user who has the binary will look.
+    cp "$ROOT/third_party/ydotool/LICENSE" "$PKG/usr/lib/wayvoice/ydotool/LICENSE"
+    cp "$ROOT/third_party/ydotool/README.wayvoice.md" "$PKG/usr/lib/wayvoice/ydotool/README.md"
+else
+    echo "wayvoice: continuing without the bundled ydotool" >&2
+fi
 # Lets the settings UI and `wayvoice deps --install` run the package manager
 # through pkexec; without it polkit would deny every install attempt.
 cp "$ROOT/packaging/io.github.stepan.WayVoice.manage-deps.policy" "$PKG/usr/share/polkit-1/actions/"
@@ -65,7 +83,7 @@ EOF
 chmod 0755 "$PKG/DEBIAN"
 chmod g-s "$PKG/DEBIAN"
 chmod 0755 "$PKG/DEBIAN/postinst" "$PKG/DEBIAN/postrm" "$PKG/DEBIAN/prerm"
-chmod 0755 "$PKG/usr/bin/wayvoice" "$PKG/usr/bin/wayvoice-daemon" "$PKG/usr/bin/wayvoice-settings" "$PKG/usr/bin/wayvoice-engine-setup" "$PKG/usr/bin/setup-user"
+chmod 0755 "$PKG/usr/bin/wayvoice" "$PKG/usr/bin/wayvoice-daemon" "$PKG/usr/bin/wayvoice-settings" "$PKG/usr/bin/wayvoice-engine-setup" "$PKG/usr/bin/setup-user" "$PKG/usr/bin/wayvoice-ydotoold"
 # md5sums is generated below from every file under usr, so the polkit policy is
 # covered automatically; only its mode needs pinning (0644, world readable).
 chmod 0644 "$PKG/usr/share/polkit-1/actions/io.github.stepan.WayVoice.manage-deps.policy"

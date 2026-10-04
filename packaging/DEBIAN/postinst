@@ -4,7 +4,9 @@ set -e
 if command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload >/dev/null 2>&1 || true
     systemctl --global enable wayvoice.service wayvoice-setup.service >/dev/null 2>&1 || true
-    if command -v ydotoold >/dev/null 2>&1; then
+    # Either copy counts: the unit prefers the system's ydotoold and falls back
+    # to the one bundled with the package, so enabling it is right in both cases.
+    if command -v ydotoold >/dev/null 2>&1 || command -v wayvoice-ydotoold >/dev/null 2>&1; then
         systemctl --global enable wayvoice-ydotool.service >/dev/null 2>&1 || true
     fi
 fi

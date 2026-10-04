@@ -35,6 +35,18 @@ def app_src_dir() -> Path:
     return app_dir() / "src"
 
 
+def bundled_dir(name: str) -> Path:
+    """Return where a program bundled with the application is installed.
+
+    ``<root>/<name>`` in a source checkout, ``<prefix>/lib/wayvoice/<name>`` in
+    the Debian package, which is the same place the engine runtime goes.  A
+    directory that does not exist is the normal case: a source checkout has no
+    bundled programs unless it was built, and a package built without a compiler
+    has none. Callers therefore have to look before they assume.
+    """
+    return app_dir().parent / name
+
+
 def package_dir() -> Path:
     """Return the directory containing the ``wayvoice`` package modules."""
     return app_src_dir() / "wayvoice"

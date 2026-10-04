@@ -14,7 +14,9 @@ not wl-copy.
 """
 
 import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from wayvoice import injector
@@ -183,6 +185,72 @@ class ClipboardTests(unittest.TestCase):
         self.assertIsNone(injector._clipboard_proc, "a dead process was kept")
 
 
+class WhichYdotoolTests(unittest.TestCase):
+    """Which ``ydotool`` runs the paste: the system's if there is one.
+
+    The bundled copy is what makes automatic paste work on a distribution that
+    does not package the helper at all - Debian 13 has no ``ydotool`` - and it is
+    the one the package manager is never asked about.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.bundled = Path(self.tmp.name)
+        patcher = mock.patch.object(
+            injector, "find_command", side_effect=injector.find_command
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        dir_patch = mock.patch.object(
+            injector.find_command.__module__ and __import__(
+                "wayvoice.deps", fromlist=["bundled_dir"]
+            ),
+            "bundled_dir",
+            return_value=self.bundled,
+        )
+        dir_patch.start()
+        self.addCleanup(dir_patch.stop)
+
+    def _bundled_program(self) -> Path:
+        path = self.bundled / "ydotool"
+        path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        path.chmod(0o755)
+        return path
+
+    def test_the_system_copy_is_preferred(self):
+        self._bundled_program()
+        with mock.patch.object(injector.shutil, "which", return_value="/usr/bin/ydotool"):
+            self.assertEqual(injector.ydotool_command(), "/usr/bin/ydotool")
+
+    def test_the_bundled_copy_is_used_when_there_is_no_system_one(self):
+        bundled = self._bundled_program()
+        with mock.patch.object(injector.shutil, "which", return_value=None):
+            self.assertEqual(injector.ydotool_command(), str(bundled))
+
+    def test_the_resolved_path_is_the_one_that_runs(self):
+        # Running "ydotool" by name again would ignore the resolution and find
+        # whatever PATH has - which is the case this whole fallback exists for.
+        bundled = self._bundled_program()
+        ran = []
+        with mock.patch.object(injector.shutil, "which", return_value=None), \
+             mock.patch.object(
+                 injector, "_run",
+                 side_effect=lambda argv, **kw: ran.append(argv) or subprocess.CompletedProcess(argv, 0, "", ""),
+             ):
+            ok, _message = injector.paste_with_ydotool("standard", "en")
+        self.assertTrue(ok)
+        self.assertEqual(ran[0][0], str(bundled))
+
+    def test_without_any_copy_the_paste_says_so_and_types_nothing(self):
+        with mock.patch.object(injector.shutil, "which", return_value=None), \
+             mock.patch.object(injector, "_run") as run:
+            ok, message = injector.paste_with_ydotool("standard", "en")
+        self.assertFalse(ok)
+        self.assertTrue(message)
+        self.assertFalse(run.called)
+
+
 class InjectTests(unittest.TestCase):
     """The three paste modes, with the clipboard step faked away."""
 
@@ -253,8 +321,12 @@ class InjectTests(unittest.TestCase):
             mock.patch.object(injector, "_run", side_effect=record),
         ):
             injector.inject("текст", {"paste_mode": "terminal"})
+        # The program that runs is the resolved path, not the bare name: that is
+        # what lets the bundled copy be used at all on a system whose PATH has
+        # no ydotool in it.
+        self.assertEqual(seen["cmd"][0], "/usr/bin/ydotool")
         # 29:x are the bracket-key codes: the terminal profile sends ESC [ once.
-        self.assertEqual(seen["cmd"][:3], ["ydotool", "key", "29:1"])
+        self.assertEqual(seen["cmd"][1:3], ["key", "29:1"])
         self.assertIn("47:1", seen["cmd"])
 
 

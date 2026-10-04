@@ -16,10 +16,12 @@ telling the user to install the package by hand.
 
 from __future__ import annotations
 
+import os
 import shutil
 from dataclasses import dataclass, field
 
 from .i18n import tr
+from .paths import bundled_dir
 
 # Package-name keys used in ``Dependency.packages``.  They match the manager
 # keys of wayvoice.pkgsys, so the two tables can be joined directly.
@@ -152,8 +154,28 @@ def get(dep_id: str) -> Dependency | None:
     return None
 
 
+def find_command(name: str) -> str | None:
+    """Where a dependency's command is, if it is anywhere at all.
+
+    ``PATH`` first, then a copy bundled with the application. The order matters:
+    a distribution's own package is updated by its own security fixes and should
+    win over the one we build, and a bundled copy that is never preferred is dead
+    weight rather than a fallback.
+    """
+    found = shutil.which(name)
+    if found:
+        return found
+    bundled = bundled_dir("ydotool") / name
+    try:
+        if bundled.is_file() and os.access(bundled, os.X_OK):
+            return str(bundled)
+    except OSError:
+        pass
+    return None
+
+
 def status_of(dep: Dependency) -> dict:
-    """Probe ``PATH`` for every binary of ``dep``.
+    """Probe for every binary of ``dep``, on ``PATH`` and bundled.
 
     Returns a dict with ``found`` (at least one binary present), ``missing``
     (the binaries that are absent), ``binary_path`` (the first binary found,
@@ -162,7 +184,7 @@ def status_of(dep: Dependency) -> dict:
     missing: list[str] = []
     binary_path: str | None = None
     for name in dep.binaries:
-        found = shutil.which(name)
+        found = find_command(name)
         if found:
             if binary_path is None:
                 binary_path = found

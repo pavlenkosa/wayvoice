@@ -6,11 +6,18 @@ PartOf=graphical-session.target
 [Service]
 Type=simple
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
-# Skip (do not fail) when ydotoold is not installed: ydotool may be added
-# later, and auto-paste degrades to the clipboard. A PATH lookup keeps this
-# independent of the installation prefix, unlike ConditionPathExists.
-ExecCondition=/bin/sh -c 'command -v ydotoold >/dev/null'
-ExecStart=/bin/sh -c 'exec ydotoold --socket-path=%t/wayvoice-ydotool.sock --socket-perm=0600'
+# Both candidates are looked up by name, so the unit says nothing about where the
+# package was installed - and the second one is a wrapper that finds the bundled
+# copy relative to itself.
+#
+# Skip (do not fail) when neither exists: a package built without a compiler has
+# no bundled copy, and auto-paste degrades to the clipboard. A PATH lookup keeps
+# this independent of the installation prefix, unlike ConditionPathExists.
+ExecCondition=/bin/sh -c 'command -v ydotoold >/dev/null || command -v wayvoice-ydotoold >/dev/null'
+# A distribution's own ydotoold wins over the bundled one: it is the copy that
+# gets security updates, and two daemons fighting over /dev/uinput would be a
+# miserable thing to debug.
+ExecStart=/bin/sh -c 'exec "$(command -v ydotoold || command -v wayvoice-ydotoold)" --socket-path=%t/wayvoice-ydotool.sock --socket-perm=0600'
 Restart=on-failure
 RestartSec=2
 

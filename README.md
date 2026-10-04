@@ -102,7 +102,7 @@ A model that is not on disk is fetched when you choose it, not when you first us
 
 ## Missing dependencies
 
-WayVoice needs `pw-record`, `wl-copy` and `notify-send` at runtime, and `ydotool` for automatic pasting. The settings list what is missing and can install it through the system package manager — nothing is installed unless you ask, and nothing is attempted for a package your repositories do not carry: on Debian 13 there is no `ydotool` package at all, and the settings say so instead of running a command that cannot succeed. It has been in Debian's `main` since the package was rewritten (1.0.4); where it is missing it can be built from source — upstream is a single C program, and it needs `libevdev-dev` and a compiler, nothing more.
+WayVoice needs `pw-record`, `wl-copy` and `notify-send` at runtime. Automatic pasting additionally needs `ydotool`, the program that presses `Ctrl+V` — Wayland gives an application no supported way to do that itself. The settings list what is missing and can install it through the system package manager — nothing is installed unless you ask, and nothing is attempted for a package your repositories do not carry: on Debian 13 there is no `ydotool` package at all, and the settings say so instead of running a command that cannot succeed. It has been in Debian's `main` since the package was rewritten (1.0.4), and in `trixie-backports`; where a system has neither, the Debian package builds its own copy from the vendored sources and ships it in `/usr/lib/wayvoice/ydotool/`. A system's own `ydotool` always wins over that copy, so the packaged one only runs where there is no other.
 
 Without `ydotool`, dictation still works: the recognized text goes to the Wayland clipboard and you paste it yourself.
 

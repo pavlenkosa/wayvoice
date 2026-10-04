@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .deps import describe_missing
+from .deps import describe_missing, find_command
 from .i18n import tr
 
 
@@ -141,6 +141,17 @@ def _terminate_clipboard() -> None:
             pass
 
 
+def ydotool_command() -> str | None:
+    """The ydotool client to run, or ``None`` when there is none anywhere.
+
+    A distribution's own copy wins over the one bundled with WayVoice, for the
+    same reason the daemon does: it is the one that gets security updates, and a
+    bundled fallback that took precedence would be a second, unmaintained copy
+    of a program that talks to the kernel's input layer.
+    """
+    return find_command("ydotool")
+
+
 def _ydotool_env() -> dict[str, str]:
     env = os.environ.copy()
     runtime = env.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
@@ -156,7 +167,8 @@ def _ydotool_env() -> dict[str, str]:
 
 
 def paste_with_ydotool(mode: str, language: str | None = None) -> tuple[bool, str]:
-    if not shutil.which("ydotool"):
+    command = ydotool_command()
+    if not command:
         detail = describe_missing("ydotool", language)
         return False, tr("injector.ydotool_missing", language, detail=detail)
 
@@ -168,7 +180,7 @@ def paste_with_ydotool(mode: str, language: str | None = None) -> tuple[bool, st
 
     time.sleep(0.08)
     try:
-        cp = _run(["ydotool", "key", *seq], env=env, timeout=1.2)
+        cp = _run([command, "key", *seq], env=env, timeout=1.2)
     except subprocess.TimeoutExpired:
         return False, tr("injector.ydotool_timeout", language)
     if cp.returncode != 0:

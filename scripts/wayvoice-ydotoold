@@ -1,0 +1,25 @@
+#!/bin/sh
+# Start the ydotool daemon that ships with WayVoice.
+#
+# Installed as <prefix>/bin/wayvoice-ydotoold, next to the sources it belongs to.
+# The bundled copy lives in ../lib/wayvoice/ydotool relative to this script, which
+# is why nothing here names an installation prefix: the same file works under
+# /usr, /usr/local or anywhere else the package was unpacked.
+#
+# The daemon that actually runs is chosen by wayvoice-ydotool.service, and it
+# prefers a ydotoold from PATH over this one. This wrapper exists for the other
+# two callers: the settings window asking whether automatic paste is available,
+# and a user who wants to start it by hand.
+set -eu
+
+here="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+daemon="$here/../lib/wayvoice/ydotool/ydotoold"
+
+if [ ! -x "$daemon" ]; then
+    echo "wayvoice-ydotoold: this package was built without a compiler, so the" >&2
+    echo "bundled helper is not there. Install the distribution's ydotool, or" >&2
+    echo "paste from the clipboard - both work." >&2
+    exit 1
+fi
+
+exec "$daemon" "$@"
