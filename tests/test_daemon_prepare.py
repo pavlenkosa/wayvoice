@@ -100,12 +100,14 @@ class PrepareDaemon:
     #: What the daemon under test believes the user chose.
     CONFIG = {"model": "small", "engine_worker": True, "notify": False}
 
-    def __init__(self, test: DaemonCase, engine, calls):
+    def __init__(self, test: DaemonCase, engine, calls, config=None):
         self.test = test
+        self.config = dict(self.CONFIG)
+        self.config.update(config or {})
         test.patch("wayvoice.daemon.engine_from_config", return_value=engine)
         # Warming is the worker's business; here it is only ever a return value.
         test.patch("wayvoice.engine.warm_worker", return_value=True)
-        test.patch("wayvoice.daemon.load_config", return_value=dict(self.CONFIG))
+        test.patch("wayvoice.daemon.load_config", return_value=dict(self.config))
         self.daemon = WayVoiceDaemon()
         # A Mock would answer "recording" to everything, and the daemon would
         # then take the hot key as a request to stop.
@@ -310,6 +312,63 @@ class HotKeyTests(DaemonCase):
         self.assertTrue(harness.daemon.dispatch("start")["ok"])
 
 
+class ForeignModelTests(DaemonCase):
+    """Models the daemon does not manage must still be dictatable.
+
+    A local directory is a supported model: the settings window says so, and the
+    engine passes the value straight to Faster-Whisper, which loads it from disk.
+    Nothing about it can be fetched or deleted, so the daemon has to answer "not
+    our business" rather than "missing" - otherwise it refuses every hot-key
+    press for a user who did nothing wrong.
+    """
+
+    def _daemon(self, model_value):
+        eng, calls = make_engine(present=False, progress=True)
+        harness = PrepareDaemon(self, eng, calls, config={"model": model_value})
+        return harness, calls
+
+    def test_a_local_directory_is_not_reported_as_missing(self):
+        harness, calls = self._daemon("/home/u/models/my-model")
+        report = harness.daemon.status()["model"]
+        self.assertFalse(report["supported"])
+        self.assertTrue(report["present"])
+        self.assertEqual(calls["n"], 0, "a local directory must not be downloaded")
+
+    def test_the_hot_key_still_records_with_a_local_directory(self):
+        harness, calls = self._daemon("/home/u/models/my-model")
+        reply = harness.daemon.dispatch("start")
+        self.assertTrue(reply["ok"], reply)
+        self.assertEqual(reply.get("state"), "recording")
+        harness.daemon.recorder.start.assert_called_once()
+
+    def test_a_nested_path_is_not_reported_as_missing_either(self):
+        # Three components is a path as far as the hub cache is concerned; a
+        # repository id is exactly org/name.
+        harness, calls = self._daemon("org/name/subfolder")
+        self.assertFalse(harness.daemon.status()["model"]["supported"])
+        self.assertTrue(harness.daemon.dispatch("start")["ok"])
+
+    def test_a_catalogue_model_is_still_managed(self):
+        harness, calls = self._daemon("small")
+        report = harness.daemon.status()["model"]
+        self.assertTrue(report["supported"])
+
+    def test_a_repository_id_typed_by_hand_is_still_managed(self):
+        harness, calls = self._daemon("Systran/faster-whisper-base")
+        self.assertTrue(harness.daemon.status()["model"]["supported"])
+
+    def test_preparing_a_local_directory_reports_nothing_to_fetch(self):
+        harness, calls = self._daemon("/home/u/models/my-model")
+        reply = harness.daemon.dispatch("prepare-model")
+        # Not an error: there is nothing to download and nothing to warm, and the
+        # caller is told so rather than being handed a failure.  The wording is
+        # the user's language, so what is asserted is the answer's shape.
+        self.assertFalse(reply["ok"])
+        self.assertEqual(reply["state"], "not_applicable")
+        self.assertTrue(reply["error"])
+        self.assertEqual(calls["n"], 0)
+
+
 class CommandTests(DaemonCase):
     """``prepare-model`` and ``cancel-download`` from the window."""
 
@@ -336,7 +395,7 @@ class CommandTests(DaemonCase):
         harness = PrepareDaemon(self, replace(eng, model_present=None, model_download=None), calls)
         reply = harness.daemon.dispatch("prepare-model")
         self.assertFalse(reply["ok"])
-        self.assertIn("no models", reply["error"])
+        self.assertEqual(reply["state"], "not_applicable")
 
     def test_prepare_model_while_one_is_running_reports_the_reason_it_is_running(self):
         eng, calls = make_engine(present=False, states=["error"], delay=0.05)

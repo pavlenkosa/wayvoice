@@ -1199,16 +1199,33 @@ def engine_from_config(cfg: dict[str, Any]) -> Engine | None:
 
 
 def model_state(engine: Engine | None, cfg: dict[str, Any]) -> dict[str, Any]:
-    """What is known about the weights of the selected engine.
+    """What is known about the weights the config names.
 
-    ``{"supported": bool, "present": bool, "model": str}``.  ``supported`` is
-    false for an engine whose weights are not ours to check - a local folder or
-    an external command - and the answer there is "not our business", not
-    "missing": the daemon must not offer to download those.
+    ``{"supported": bool, "present": bool, "model": str}``.  ``supported`` asks
+    whether *this* value is a model WayVoice manages, and that is two questions
+    answered in turn: does the engine have hub models at all, and is the value
+    one of them.
+
+    Both matter, and confusing them breaks dictation for people who did nothing
+    wrong.  A local directory is a perfectly good model - the settings window
+    asks for exactly that, and the engine hands the path straight to
+    Faster-Whisper, which loads it from disk - but nothing about it can be
+    fetched, counted or deleted.  Answering "missing" for it makes the daemon
+    refuse every hot-key press, and answering with an error when asked to
+    prepare it makes a working setup look broken.  So for a value that is not a
+    hub repository the answer is "not ours": not missing, not downloadable.
     """
     model_id = str(cfg.get("model", ""))
+    foreign = {"supported": False, "present": True, "model": model_id}
     if engine is None or engine.model_present is None:
-        return {"supported": False, "present": True, "model": model_id}
+        return foreign
+    from . import model_store
+
+    if model_store.repo_id_for(model_id) is None:
+        # Not a hub repository: a local path, a nested path, or a free-form
+        # value.  ``repo_id_for`` is the same answer the cache layout is built
+        # from, so "not downloadable" and "not in our cache" cannot disagree.
+        return foreign
     try:
         present = bool(engine.model_present(cfg))
     except Exception:

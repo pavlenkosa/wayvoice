@@ -469,7 +469,14 @@ class WayVoiceDaemon:
                 return {"ok": True, "state": "downloading"}
             state = self._model_report(cfg)
             if not state["supported"]:
-                return {"ok": False, "error": "This engine has no models to download."}
+                # A local directory or an engine without hub models. There is
+                # nothing to fetch and nothing is wrong, so this says which of
+                # the two it is rather than reporting a failure to prepare.
+                return {
+                    "ok": False,
+                    "error": tr("daemon.model_not_downloadable", cfg.get("ui_language")),
+                    "state": "not_applicable",
+                }
             if state["present"]:
                 return {"ok": True, "state": "ready"}
             # Not started: a download is already running, or one just failed.

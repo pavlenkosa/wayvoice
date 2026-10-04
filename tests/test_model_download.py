@@ -93,6 +93,70 @@ class PresenceTests(unittest.TestCase):
         self.assertFalse(model_store.repo_id_for("~/models/foo"))
 
 
+class ModelStateTests(unittest.TestCase):
+    """``model_state`` decides two things at once, and conflating them breaks dictation.
+
+    Whether WayVoice can fetch a model depends on the *value* in the config, not
+    only on the engine: a local directory is a model the engine loads from disk,
+    and calling it "missing" made the daemon refuse every hot-key press. These
+    tests pin the answer for every shape of value the settings window accepts.
+    """
+
+    def _state(self, model_id: str, engine_id: str = "faster-whisper"):
+        engine_ = engine.get_engine(engine_id)
+        return engine.model_state(engine_, {"model": model_id})
+
+    def test_a_catalogue_model_is_ours(self):
+        self.assertEqual(
+            self._state("small"),
+            {"supported": True, "present": True, "model": "small"},
+        )
+
+    def test_a_repository_id_typed_by_hand_is_ours(self):
+        state = self._state("Systran/faster-whisper-base")
+        self.assertTrue(state["supported"])
+
+    def test_a_local_directory_is_neither_ours_nor_missing(self):
+        for value in ("/home/u/models/foo", "~/models/foo", "./relative",
+                      "C:\\models\\foo"):
+            state = self._state(value)
+            self.assertFalse(state["supported"], value)
+            self.assertTrue(state["present"], value)
+
+    def test_a_nested_path_is_not_treated_as_a_repository(self):
+        # A repository id is exactly org/name; three components are a path as far
+        # as the cache layout is concerned, so we must not claim to manage it.
+        state = self._state("org/name/subfolder")
+        self.assertFalse(state["supported"])
+        self.assertTrue(state["present"])
+
+    def test_an_engine_without_models_is_never_ours(self):
+        for engine_id in ("whisper-cpp", "custom"):
+            state = self._state("small", engine_id)
+            self.assertFalse(state["supported"], engine_id)
+            self.assertTrue(state["present"], engine_id)
+
+    def test_an_unknown_engine_is_not_ours(self):
+        self.assertFalse(engine.model_state(None, {"model": "small"})["supported"])
+
+    def test_a_missing_hub_model_is_reported_as_missing(self):
+        # The one case that is genuinely "not there": a repository we manage
+        # whose weights are not in the cache.
+        with mock.patch.object(engine, "model_is_present", return_value=False):
+            state = self._state("Systran/faster-whisper-large-v3")
+        self.assertEqual(
+            state,
+            {"supported": True, "present": False,
+             "model": "Systran/faster-whisper-large-v3"},
+        )
+
+    def test_an_unreadable_cache_does_not_start_a_download_of_what_is_there(self):
+        with mock.patch.object(engine, "model_is_present", side_effect=OSError("nope")):
+            state = self._state("small")
+        self.assertTrue(state["supported"])
+        self.assertTrue(state["present"])
+
+
 class DownloadTests(unittest.TestCase):
     """The download itself: progress, failure, cancellation, and no surprises."""
 
