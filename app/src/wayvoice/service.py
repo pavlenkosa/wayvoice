@@ -183,6 +183,19 @@ def _systemctl(*args: str) -> bool:
     return True
 
 
+def start_user_unit(unit: str) -> bool:
+    """Start a packaged user unit without blocking; ``True`` when launched.
+
+    Used for the ydotoold unit, which the daemon raises by itself when it turns
+    out not to be running: enabling it at package installation time is not enough,
+    because a session that was already open when the package arrived does not
+    start a newly enabled unit until the next login.
+    """
+    if not systemd_available():
+        return False
+    return _systemctl("start", unit)
+
+
 def _wait_for_daemon(wait: float) -> bool:
     deadline = time.monotonic() + max(0.0, wait)
     while True:

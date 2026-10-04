@@ -13,6 +13,10 @@ The process is faked throughout: what is under test is this module's own logic,
 not wl-copy.
 """
 
+import contextlib
+import io
+import os
+import socket
 import subprocess
 import tempfile
 import unittest
@@ -197,6 +201,11 @@ class WhichYdotoolTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.bundled = Path(self.tmp.name)
+        injector._helper_started_at = None
+        self.addCleanup(setattr, injector, "_helper_started_at", None)
+        answering = mock.patch.object(injector, "helper_answering", return_value=True)
+        answering.start()
+        self.addCleanup(answering.stop)
         patcher = mock.patch.object(
             injector, "find_command", side_effect=injector.find_command
         )
@@ -251,12 +260,293 @@ class WhichYdotoolTests(unittest.TestCase):
         self.assertFalse(run.called)
 
 
+class HelperSocketTests(unittest.TestCase):
+    """Whether the ydotoold helper is there, asked of the socket and not of the file.
+
+    A real socket in a temporary directory is used on purpose: the difference
+    between "the socket file exists" and "something answers on the socket" is
+    the whole point, and a mock could not tell a lying filesystem from a
+    working one.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = Path(self.tmp.name) / "ydotool.sock"
+
+    def _bind(self) -> socket.socket:
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        self.addCleanup(listener.close)
+        listener.bind(str(self.path))
+        return listener
+
+    def test_a_socket_nobody_answers_is_not_a_running_helper(self):
+        # The regression, in one line: ydotoold is killed without removing its
+        # socket, so a file that is there says nothing. Treating its presence as
+        # a live helper is what let dictation stop pasting with nothing wrong
+        # visible anywhere. The listener is closed on purpose - leaving it open
+        # would test the case where the helper is alive.
+        listener = self._bind()
+        listener.close()
+        self.assertTrue(self.path.exists(), "the stale socket should be left behind")
+        self.assertFalse(injector.helper_answering(self.path))
+
+    def test_a_bound_socket_answers(self):
+        self._bind()
+        self.assertTrue(injector.helper_answering(self.path))
+
+    def test_a_missing_socket_does_not_raise(self):
+        self.assertFalse(injector.helper_answering(Path(self.tmp.name) / "absent.sock"))
+
+    def test_the_socket_of_the_packaged_helper_is_the_one_used(self):
+        runtime = Path(self.tmp.name) / "run"
+        runtime.mkdir()
+        socket_path = runtime / "wayvoice-ydotool.sock"
+        socket_path.touch()
+        with mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(runtime)}):
+            self.assertEqual(injector.ydotool_socket(), socket_path)
+            self.assertEqual(injector._ydotool_env()["YDOTOOL_SOCKET"], str(socket_path))
+
+    def test_the_legacy_default_is_used_when_the_helper_uses_it(self):
+        # ydotool 0.1.8 puts its socket in /tmp and ignores XDG_RUNTIME_DIR.
+        # The path is redirected into the temporary directory rather than
+        # created for real: a test that leaves a socket behind in /tmp is a test
+        # that can confuse the next ydotoold on the machine.
+        runtime = Path(self.tmp.name) / "run"
+        runtime.mkdir()
+        legacy = Path(self.tmp.name) / "legacy.sock"
+        legacy.touch()
+        with mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(runtime)}), \
+             mock.patch.object(injector, "LEGACY_SOCKET", str(legacy)):
+            self.assertEqual(injector.ydotool_socket(), legacy)
+            self.assertEqual(injector._ydotool_env()["YDOTOOL_SOCKET"], str(legacy))
+
+    def test_the_packaged_socket_wins_over_the_legacy_one(self):
+        runtime = Path(self.tmp.name) / "run"
+        runtime.mkdir()
+        packaged = runtime / "wayvoice-ydotool.sock"
+        packaged.touch()
+        legacy = Path(self.tmp.name) / "legacy.sock"
+        legacy.touch()
+        with mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(runtime)}), \
+             mock.patch.object(injector, "LEGACY_SOCKET", str(legacy)):
+            self.assertEqual(injector.ydotool_socket(), packaged)
+
+    def test_no_socket_anywhere_means_no_socket_is_configured(self):
+        runtime = Path(self.tmp.name) / "run"
+        runtime.mkdir()
+        with mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(runtime)}), \
+             mock.patch.object(injector, "ydotool_socket", return_value=None):
+            self.assertIsNone(injector.ydotool_socket())
+            self.assertNotIn("YDOTOOL_SOCKET", injector._ydotool_env())
+
+
+class HelperStartTests(unittest.TestCase):
+    """The daemon raises ydotoold itself when it is not answering.
+
+    The unit is enabled at package installation time, which does nothing for a
+    session that was already open when the package arrived: the unit is enabled,
+    nobody starts it, and every dictation is recognized and then not pasted
+    until the next login. This is the failure that was reported as "it cannot
+    paste anything", and the fix is one systemctl call that the daemon can make
+    by itself.
+    """
+
+    def setUp(self):
+        injector._helper_started_at = None
+        self.addCleanup(setattr, injector, "_helper_started_at", None)
+        patcher = mock.patch.object(injector, "_helper_start_lock",
+                                    injector.threading.Lock())
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _not_answering(self):
+        return mock.patch.object(injector, "helper_answering", return_value=False)
+
+    def _answering(self):
+        return mock.patch.object(injector, "helper_answering", return_value=True)
+
+    def test_a_dead_helper_is_started(self):
+        with self._not_answering() as answering, mock.patch(
+            "wayvoice.service.start_user_unit", return_value=True
+        ) as start:
+            injector.ensure_helper_running(wait=0)
+        start.assert_called_once_with("wayvoice-ydotool.service")
+
+    def test_a_live_helper_is_left_alone(self):
+        with self._answering(), mock.patch(
+            "wayvoice.service.start_user_unit"
+        ) as start:
+            self.assertTrue(injector.ensure_helper_running(wait=0))
+        self.assertFalse(start.called, "a working helper was restarted anyway")
+
+    def test_a_helper_that_answers_after_the_start_is_reported_as_up(self):
+        answers = iter([False, False, True])
+        with mock.patch.object(injector, "helper_answering",
+                               side_effect=lambda *a, **k: next(answers)), \
+             mock.patch("wayvoice.service.start_user_unit", return_value=True):
+            self.assertTrue(injector.ensure_helper_running(wait=5))
+
+    def test_a_helper_that_never_comes_up_is_reported_as_down(self):
+        # Bounded, so a paste cannot hang on a systemctl that is stuck: the text
+        # is already in the clipboard and the user is waiting for it.
+        now = [0.0]
+        slept = []
+
+        def fake_sleep(seconds):
+            now[0] += seconds
+            slept.append(seconds)
+
+        with mock.patch.object(injector, "helper_answering", return_value=False), \
+             mock.patch("wayvoice.service.start_user_unit", return_value=True), \
+             mock.patch.object(injector.time, "sleep", side_effect=fake_sleep), \
+             mock.patch.object(injector.time, "monotonic", side_effect=lambda: now[0]):
+            self.assertFalse(injector.ensure_helper_running(wait=1.0))
+        self.assertTrue(slept, "the wait gave up without ever trying")
+        self.assertLessEqual(sum(slept), 1.0 + 0.05,
+                             "the wait ran past its deadline")
+
+    def test_a_second_dictation_does_not_spawn_systemctl_again(self):
+        with self._not_answering(), mock.patch(
+            "wayvoice.service.start_user_unit", return_value=False
+        ) as start:
+            injector.ensure_helper_running(wait=0)
+            injector.ensure_helper_running(wait=0)
+            injector.ensure_helper_running(wait=0)
+        self.assertEqual(start.call_count, 1,
+                         "a helper that cannot start was asked for on every dictation")
+
+    def test_the_start_is_tried_again_after_the_cooldown(self):
+        later = injector.time.monotonic() + injector.HELPER_RETRY_INTERVAL + 1
+        with self._not_answering(), mock.patch(
+            "wayvoice.service.start_user_unit", return_value=False
+        ) as start:
+            injector.ensure_helper_running(wait=0)
+            with mock.patch.object(injector.time, "monotonic", return_value=later):
+                injector.ensure_helper_running(wait=0)
+        self.assertEqual(start.call_count, 2)
+
+    def test_a_system_without_a_user_manager_is_not_asked_to_start_anything(self):
+        # A Flatpak sandbox has systemctl nowhere near it; the check is what keeps
+        # the daemon from trying there on every dictation.
+        with self._not_answering(), mock.patch(
+            "wayvoice.service.systemd_available", return_value=False
+        ), mock.patch("wayvoice.service._systemctl") as systemctl:
+            self.assertFalse(injector.ensure_helper_running(wait=0))
+        self.assertFalse(systemctl.called)
+
+
+class PasteDiagnosticsTests(unittest.TestCase):
+    """What the user is told when the paste fails, and what lands in the log."""
+
+    def setUp(self):
+        injector._helper_started_at = None
+        self.addCleanup(setattr, injector, "_helper_started_at", None)
+        # The failure line for the service log is asserted on its own below;
+        # letting it reach the test output in the other cases would make a
+        # passing run look like a failing one.
+        self.enterContext(contextlib.redirect_stderr(io.StringIO()))
+
+    def _ydotool(self, returncode=1, stdout="", stderr=""):
+        cp = subprocess.CompletedProcess(["ydotool"], returncode, stdout, stderr)
+        return mock.patch.object(injector, "_run", return_value=cp)
+
+    def _present(self):
+        return mock.patch.object(injector.shutil, "which", return_value="/usr/bin/ydotool")
+
+    def test_ydotools_own_explanation_is_not_thrown_away(self):
+        # The regression: ydotool prints its failures on stdout, and stdout went
+        # to /dev/null, so the user got "ydotool exited with an error" and the
+        # only line naming the cause - "failed to connect socket ..." - was
+        # discarded. The whole diagnosis was written where nobody looks.
+        with self._present(), self._ydotool(
+            stdout="failed to connect socket `/run/user/1000/wayvoice-ydotool.sock': "
+                   "No such file or directory\nPlease check if ydotoold is running.\n"
+        ), mock.patch.object(injector, "helper_answering", return_value=True), \
+             mock.patch("wayvoice.service.start_user_unit", return_value=True):
+            ok, message = injector.paste_with_ydotool("standard", "en")
+        self.assertFalse(ok)
+        self.assertIn("ydotoold is running", message)
+
+    def test_stdout_is_captured_for_the_ydotool_call(self):
+        seen = {}
+
+        def record(cmd, **kwargs):
+            seen.update(kwargs)
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        with self._present(), mock.patch.object(
+            injector, "_run", side_effect=record
+        ), mock.patch.object(injector, "helper_answering", return_value=True):
+            injector.paste_with_ydotool("standard", "en")
+        self.assertTrue(seen.get("capture_stdout"),
+                        "the reason would be discarded again")
+
+    def test_stderr_still_wins_when_ydotool_writes_there(self):
+        with self._present(), self._ydotool(
+            stdout="noise from stdout", stderr="ydotool: cannot open /dev/uinput"
+        ), mock.patch.object(injector, "helper_answering", return_value=True):
+            ok, message = injector.paste_with_ydotool("standard", "en")
+        self.assertIn("/dev/uinput", message)
+        self.assertNotIn("noise from stdout", message)
+
+    def test_a_failure_that_leaves_nothing_to_say_is_still_reported(self):
+        with self._present(), self._ydotool(returncode=1), \
+             mock.patch.object(injector, "helper_answering", return_value=True):
+            ok, message = injector.paste_with_ydotool("standard", "en")
+        self.assertFalse(ok)
+        self.assertTrue(message)
+
+    def test_a_failure_is_written_to_the_service_log(self):
+        # "It does not paste" has to be a line in journalctl, or the only way to
+        # find out is to ask the user to describe what they see.
+        stderr = io.StringIO()
+        with self._present(), self._ydotool(stdout="Please check if ydotoold is running."), \
+             mock.patch.object(injector, "helper_answering", return_value=True), \
+             contextlib.redirect_stderr(stderr):
+            injector.paste_with_ydotool("standard", "en")
+        self.assertIn("auto-paste failed", stderr.getvalue())
+
+    def test_a_helper_that_will_not_start_names_the_unit_to_start(self):
+        with self._present(), self._ydotool(stdout="Please check if ydotoold is running."), \
+             mock.patch.object(injector, "helper_answering", return_value=False), \
+             mock.patch("wayvoice.service.systemd_available", return_value=False):
+            ok, message = injector.paste_with_ydotool("standard", "en")
+        self.assertFalse(ok)
+        self.assertIn("wayvoice-ydotool.service", message)
+
+    def test_the_helper_is_raised_before_typing_into_the_void(self):
+        order = []
+
+        def probe(*_a, **_k):
+            order.append("probe")
+            return True
+
+        def run(cmd, **_k):
+            order.append("type")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        with self._present(), mock.patch.object(injector, "helper_answering", side_effect=probe), \
+             mock.patch.object(injector, "_run", side_effect=run):
+            injector.paste_with_ydotool("standard", "en")
+        self.assertEqual(order[0], "probe", "the helper was checked after typing")
+
+
 class InjectTests(unittest.TestCase):
     """The three paste modes, with the clipboard step faked away."""
 
     def setUp(self):
         injector._clipboard_proc = None
         self.addCleanup(setattr, injector, "_clipboard_proc", None)
+        injector._helper_started_at = None
+        self.addCleanup(setattr, injector, "_helper_started_at", None)
+        # The helper probe talks to a real socket and, when nothing answers,
+        # to a real systemd. A test that depends on whether the machine running
+        # it happens to have ydotoold up is a test that fails on the wrong
+        # computer, so the answer is fixed here.
+        answering = mock.patch.object(injector, "helper_answering", return_value=True)
+        answering.start()
+        self.addCleanup(answering.stop)
 
     def _no_clipboard(self):
         return mock.patch.object(injector, "copy_to_clipboard")
