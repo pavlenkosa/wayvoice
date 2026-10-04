@@ -1,3 +1,4 @@
+import subprocess
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -209,6 +210,139 @@ class InstallGuardTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("pkexec", message)
         run.assert_not_called()
+
+
+class AvailabilityTests(unittest.TestCase):
+    """Knowing a package name is not knowing that the package exists.
+
+    Debian 13 ships no ``ydotool`` at all, and a manager asked to install one
+    says so in four words the user has to decode - after an authorization dialog
+    and a password prompt. So the question is asked first, and these tests check
+    both answers and the moment the answer arrives.
+    """
+
+    #: What ``apt-cache policy`` prints in the C locale.
+    PRESENT = "Package: wl-clipboard\n  Installed: (none)\n  Candidate: 2.1-2\n"
+    #: What apt prints for a name it knows but has no version for - the shape a
+    #: Debian 13 machine gives for ydotool.
+    NO_VERSION = "ydotool:\n  Installed: (none)\n  Candidate: (none)\n  Version table:\n"
+    #: And for a name it has never heard of: nothing at all.
+    UNKNOWN_NAME = ""
+
+    @staticmethod
+    def _policy(output: str, returncode: int = 0):
+        """A stand-in for the availability query, recording what it was asked."""
+        calls = []
+
+        def run(argv, **kwargs):
+            calls.append((argv, kwargs))
+            return subprocess.CompletedProcess(argv, returncode, output, "")
+
+        return calls, mock.patch.object(pkgsys.subprocess, "run", side_effect=run)
+
+    class _Child:
+        """The part of the install that these tests must never really run."""
+
+        def __init__(self, returncode: int = 0, stdout: str = "", stderr: str = ""):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+            self.killed = False
+
+        def communicate(self, timeout=None):
+            return self.stdout, self.stderr
+
+        def kill(self):
+            self.killed = True
+
+        def terminate(self):
+            self.killed = True
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+        def poll(self):
+            return self.returncode
+
+    def _install(self, output: str, returncode: int = 0):
+        """Run one install against a policy answer, and report what was started."""
+        lookups, patched_lookup = self._policy(output, returncode)
+        started = []
+
+        def popen(argv, **kwargs):
+            started.append((argv, kwargs))
+            return self._Child()
+
+        with mock.patch("os.geteuid", return_value=0), \
+             mock.patch("shutil.which", _which_returning({
+                 "apt-get": "/usr/bin/apt-get", "apt-cache": "/usr/bin/apt-cache",
+             })), patched_lookup, \
+             mock.patch.object(pkgsys.subprocess, "Popen", side_effect=popen):
+            ok, message = pkgsys.install_packages(
+                ["ydotool"], timeout=0.1, language="en"
+            )
+        return ok, message, lookups, started
+
+    def test_a_package_the_system_lacks_is_refused_before_anything_runs(self):
+        # The install must not start: no authorization dialog, no password
+        # prompt, no five seconds of apt failing to find what is not there.
+        ok, message, lookups, started = self._install(self.NO_VERSION)
+        self.assertFalse(ok)
+        self.assertIn("ydotool", message)
+        self.assertEqual(len(lookups), 1, "the policy was not asked exactly once")
+        self.assertIn("apt-cache", lookups[0][0][0])
+        self.assertEqual(started, [], "the install ran anyway")
+
+    def test_a_package_the_system_has_is_installed(self):
+        ok, _message, _lookups, started = self._install(self.PRESENT)
+        self.assertTrue(ok)
+        self.assertEqual(len(started), 1, "the install never ran")
+        self.assertIn("apt-get", started[0][0][0])
+
+    def test_a_name_the_manager_has_never_heard_of_is_also_refused(self):
+        # The other shape of "not there": apt prints nothing at all, which is an
+        # answer rather than a shrug - and treating it as a shrug would send the
+        # user to a command that cannot work.
+        ok, message, lookups, started = self._install(self.UNKNOWN_NAME)
+        self.assertFalse(ok)
+        self.assertIn("ydotool", message)
+        self.assertEqual(started, [])
+
+    def test_output_nobody_can_read_is_not_an_answer(self):
+        # Something answered, but not with something we understand. That is "don't
+        # know", and refusing an install on it would be worse than the failure it
+        # prevents.
+        _lookups, patched = self._policy("W: apt-cache is having a bad day\n")
+        with mock.patch("shutil.which", _which_returning({
+            "apt-cache": "/usr/bin/apt-cache",
+        })), patched:
+            self.assertIsNone(pkgsys.package_available("wl-clipboard", manager="apt"))
+
+    def test_a_lookup_that_fails_does_not_refuse(self):
+        # "Don't know" must not be read as "not there": refusing an install
+        # because the question could not be asked would be worse than the
+        # failure it prevents.
+        ok, message, _lookups, started = self._install("", returncode=1)
+        self.assertTrue(ok)
+        self.assertEqual(len(started), 1, "the install was refused on a shrug")
+        self.assertNotIn("repositories", message)
+
+    def test_the_question_is_asked_in_the_c_locale(self):
+        # apt translates its output. A parser written against "Candidate:" finds
+        # nothing on a Russian system, and answers "don't know" for every package
+        # - which is how this check once passed silently for a package that is
+        # there and for one that is not.
+        _ok, _message, lookups, _started = self._install(self.PRESENT)
+        self.assertEqual(lookups[0][1]["env"]["LC_ALL"], "C")
+
+    def test_a_missing_apt_cache_answers_dont_know(self):
+        with mock.patch("os.geteuid", return_value=0), \
+             mock.patch("shutil.which", _which_returning({"apt-get": "/usr/bin/apt-get"})), \
+             mock.patch.object(pkgsys.subprocess, "run") as run:
+            done = run.return_value
+            done.returncode = 0
+            done.stdout = self.PRESENT
+            self.assertIsNone(pkgsys.package_available("wl-clipboard"))
 
 
 if __name__ == "__main__":

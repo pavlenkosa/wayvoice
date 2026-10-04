@@ -124,6 +124,75 @@ def pkexec_path() -> str | None:
     return shutil.which("pkexec")
 
 
+#: How long to wait for the manager to be asked what it has.  This runs on the
+#: main loop of the settings window, so it is a lookup, not a download.
+AVAILABILITY_TIMEOUT = 4.0
+
+
+def package_available(name: str, manager: str | None = None) -> bool | None:
+    """Whether this system's repositories actually carry ``name``.
+
+    ``True``/``False`` when the manager answered, ``None`` when it could not be
+    asked - in which case the caller must carry on as before rather than refuse
+    an install out of caution.
+
+    Knowing the package name is not the same as the package existing: Debian 13
+    has no ``ydotool`` at all, and a manager asked to install one says so in four
+    words that the user has to decode.  Asking first turns that into an answer
+    before anything is run, and no dialog that cannot succeed.
+    """
+    key = manager or detect_manager()
+    if key is None:
+        return None
+    try:
+        if key == deps.APT:
+            return _apt_has_candidate(name)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    # Other managers: the registry only offers a name where one is known, and
+    # nothing here can answer the question cheaply and reliably enough to refuse
+    # on.  So the question is not asked, and the manager keeps the last word.
+    return None
+
+
+def _apt_has_candidate(name: str) -> bool | None:
+    """Read ``apt-cache policy`` for a version to install.
+
+    The locale is forced to C, and that is not decoration: apt translates its
+    output, so on a Russian system the line says ``Кандидат:`` and a parser
+    written against ``Candidate:`` finds nothing and answers "don't know" for
+    every package - which is how this check passed silently for a package that
+    is there and for one that is not.
+    """
+    query = shutil.which("apt-cache")
+    if not query:
+        return None
+    environment = {**os.environ, "LC_ALL": "C", "LANG": "C"}
+    try:
+        done = subprocess.run(
+            [query, "policy", name],
+            capture_output=True,
+            text=True,
+            timeout=AVAILABILITY_TIMEOUT,
+            env=environment,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if done.returncode != 0:
+        return None
+    for line in done.stdout.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("Candidate:"):
+            # The name is known and there is no version to install. Both shapes
+            # of "no" exist: a stanza with "Candidate: (none)", and no stanza at
+            # all for a name apt has never heard of.
+            value = stripped.split(":", 1)[1].strip()
+            return value not in ("", "(none)")
+    # Nothing was printed, which is what apt does for a name it does not know.
+    # That is an answer, not a shrug: the package cannot be installed.
+    return False if not done.stdout.strip() else None
+
+
 def resolve_packages(dep_or_id, manager: str | None = None) -> list[str] | None:
     """Return the package names of one dependency for ``manager``.
 
@@ -214,6 +283,12 @@ def install_packages(
         return False, tr("pkgsys.no_packages", language)
     if not packages:
         return False, tr("pkgsys.no_packages", language)
+    for name in packages:
+        if package_available(name) is False:
+            # Before anything is started, and before a password prompt: there is
+            # nothing to install, and a dialog that cannot succeed is worse than
+            # an answer.
+            return False, tr("pkgsys.package_unavailable", language, package=name)
 
     elevated: list[str] = []
     if requires_privilege():

@@ -7,7 +7,7 @@
 - Engine registry: engines are declared once and the window, the daemon and the CLI all ask it, instead of three places comparing engine ids.
 - External command engine is now reachable from the settings window.
 - Model management: size on disk, free space, the whole shared cache, and deletion that keeps files another model still uses.
-- Missing dependencies are detected, explained and can be installed from the settings.
+- Missing dependencies are detected, explained and can be installed from the settings. A package the system's repositories do not carry is reported as such before anything is started, instead of an authorization prompt and a package manager failing to find it.
 - Daemon, engine and hot key now start without systemd, so the Flatpak build works.
 - Faster-Whisper model is kept warm between dictations, and is loaded into memory when the daemon starts so the first dictation of a session is as fast as the ones after it.
 - Model downloads are a visible, cancellable step with progress in bytes, instead of a silent wait inside the first recognition.

@@ -99,12 +99,13 @@ class RunCancelableTests(unittest.TestCase):
 class InstallTimeoutTests(unittest.TestCase):
     """A timeout has to take the package manager's children with it.
 
-    The privilege question is answered here rather than inherited: these tests
-    are about what happens when the manager does not finish, and whether the
-    caller is root, and whether pkexec is installed, are three different
-    questions. On a machine where the answer was "not root and no pkexec" the
-    code returned before starting anything, and the tests failed on a missing
-    attribute instead of on the behaviour they are about.
+    Every question about the machine is answered here rather than inherited:
+    these tests are about what happens when the manager does not finish, and
+    whether the caller is root, whether pkexec is installed, and whether the
+    package is in the repositories at all are three different questions. On a
+    machine where the first two answered "no", the code returned before starting
+    anything and the tests failed on a missing attribute instead of on the
+    behaviour they are about.
     """
 
     ARGV = ["apt-get", "install", "-y", "wl-clipboard"]
@@ -124,6 +125,7 @@ class InstallTimeoutTests(unittest.TestCase):
              mock.patch.object(pkgsys, "_kill_tree", side_effect=kill_tree), \
              mock.patch.object(pkgsys, "requires_privilege", return_value=False), \
              mock.patch.object(pkgsys, "pkexec_path", return_value=None) as pkexec, \
+             mock.patch.object(pkgsys, "package_available", return_value=None), \
              mock.patch.object(pkgsys, "dry_run_command", return_value=list(self.ARGV)):
             ok, message = pkgsys.install_packages(
                 ["wl-clipboard"], timeout=0.1, language="en"

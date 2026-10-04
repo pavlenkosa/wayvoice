@@ -526,7 +526,17 @@ class StartupTests(unittest.TestCase):
     Preparation happens from :meth:`prepare_on_start`, which ``serve`` calls once
     it holds the ownership lock - so these tests call it the way ``serve`` does,
     and the last one pins why the order matters.
+
+    That last one really serves, so it needs the environment redirected like the
+    rest: the ownership lock and the socket both live in the runtime directory,
+    and a test that reaches for the real one is refused by the daemon the user
+    happens to be running - which is how it came to assert against the user's own
+    socket file and report that a warm-up never happened.
     """
+
+    def setUp(self):
+        self.root = isolate_environment(self)
+        isolate_engine(self)
 
     def _start(self, engine, **config):
         cfg = {"model": "small", "engine_worker": True, "notify": False}
