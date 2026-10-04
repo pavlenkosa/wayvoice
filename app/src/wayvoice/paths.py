@@ -1,16 +1,10 @@
 """Installation-layout helpers.
 
-The project is shipped in two shapes:
-
-* a Debian package, where the Python sources live in
-  ``<prefix>/lib/wayvoice/app/src/wayvoice`` and the helpers in ``<prefix>/bin``;
-* a plain source checkout, where the sources live in
-  ``<repo>/app/src/wayvoice`` and the helpers in ``<repo>/scripts``.
-
-Everything here is derived from the location of this very module, so both
-shapes (and prefixes other than ``/usr``, e.g. ``/usr/local`` or ``/opt``)
-work without any hardcoded absolute path.  Only the standard library is used
-and no ``sys.path`` manipulation happens here.
+The project ships as a Debian package, with the sources in
+``<prefix>/lib/wayvoice/app/src/wayvoice`` and the helpers in ``<prefix>/bin``,
+and as a plain checkout, with the sources in ``<repo>/app/src/wayvoice`` and the
+helpers in ``<repo>/scripts``. Everything here is derived from the location of this
+module, so any prefix works and no absolute path is hardcoded.
 """
 
 from __future__ import annotations
@@ -22,11 +16,8 @@ from pathlib import Path
 
 
 def app_dir() -> Path:
-    """Return the root of the ``app`` directory that holds the sources.
-
-    ``<root>/app`` in a source checkout, ``<prefix>/lib/wayvoice/app`` in the
-    Debian package.
-    """
+    """Root of the ``app`` directory holding the sources: ``<root>/app`` in a
+    checkout, ``<prefix>/lib/wayvoice/app`` in the Debian package."""
     return Path(__file__).resolve().parents[2]
 
 
@@ -36,13 +27,12 @@ def app_src_dir() -> Path:
 
 
 def bundled_dir(name: str) -> Path:
-    """Return where a program bundled with the application is installed.
+    """Where a program bundled with the application is installed.
 
-    ``<root>/<name>`` in a source checkout, ``<prefix>/lib/wayvoice/<name>`` in
-    the Debian package, which is the same place the engine runtime goes.  A
-    directory that does not exist is the normal case: a source checkout has no
-    bundled programs unless it was built, and a package built without a compiler
-    has none. Callers therefore have to look before they assume.
+    ``<root>/<name>`` in a checkout, ``<prefix>/lib/wayvoice/<name>`` in the Debian
+    package. A missing directory is the normal case - a checkout has no bundled
+    programs unless it was built, and a package built without a compiler has none - so
+    callers have to look before they assume.
     """
     return app_dir().parent / name
 
@@ -53,24 +43,17 @@ def package_dir() -> Path:
 
 
 def script_path(name: str) -> Path:
-    """Return the absolute path of a helper script shipped inside the package.
-
-    Used for bundled scripts such as ``fw_runner.py``, which is executed by
-    the runtime interpreter of the engine rather than by the system Python.
-    """
+    """Absolute path of a helper script shipped inside the package, such as
+    ``fw_runner.py``, which runs on the engine's interpreter rather than on the system
+    Python."""
     return package_dir() / name
 
 
 def setup_user_script() -> Path | None:
-    """Return the ``setup-user`` helper script, or ``None`` when not found.
+    """The ``setup-user`` helper script, or ``None`` when not found.
 
-    Probed locations, in order:
-
-    1. next to the ``app`` directory -- layouts that keep the helper with the
-       sources, e.g. ``<prefix>/lib/wayvoice/setup-user``;
-    2. ``<repo>/scripts/setup-user`` -- source checkout;
-    3. ``PATH`` -- the packaged location, where the helper is installed into
-       ``<prefix>/bin`` next to the other WayVoice entry points.
+    Probed in order: next to the ``app`` directory, ``<repo>/scripts/setup-user`` in a
+    checkout, and ``PATH``.
     """
     root = app_dir().parent
     for candidate in (root / "setup-user", root / "scripts" / "setup-user"):
@@ -88,16 +71,10 @@ def _is_executable_file(path: Path) -> bool:
 def command_path(name: str) -> str:
     """Resolve a WayVoice helper command to an absolute path.
 
-    Used for commands that are launched without a shell and without a
-    controlled ``PATH`` (GSettings keybindings, desktop entries), so a bare
-    name is not good enough there.
-
-    Resolution order:
-
-    1. ``WAYVOICE_BINDIR`` -- directory holding the helper scripts;
-    2. the regular ``PATH`` lookup;
-    3. the directory of the currently running script (``sys.argv[0]``);
-    4. the bare name, as a last resort for callers that do have a ``PATH``.
+    For commands launched without a shell and without a controlled ``PATH`` (GSettings
+    keybindings, desktop entries), where a bare name is not good enough. Order:
+    ``WAYVOICE_BINDIR``, ``PATH``, the directory of the running script, then the bare
+    name.
     """
     bindir = os.environ.get("WAYVOICE_BINDIR")
     if bindir:
@@ -120,11 +97,8 @@ def command_path(name: str) -> str:
 
 
 def python_executable() -> str:
-    """Return the interpreter to use for bundled Python code.
-
-    ``WAYVOICE_PYTHON`` wins, then ``python3`` from ``PATH``, and finally the
-    interpreter that is running right now.
-    """
+    """The interpreter to use for bundled Python code: ``WAYVOICE_PYTHON``, then
+    ``python3`` from ``PATH``, then the interpreter running right now."""
     override = os.environ.get("WAYVOICE_PYTHON")
     if override:
         return override

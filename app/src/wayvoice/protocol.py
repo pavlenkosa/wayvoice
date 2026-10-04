@@ -12,12 +12,10 @@ def socket_path() -> Path:
 
 
 def owner_lock_path() -> Path:
-    """Lock file that says which process owns the daemon socket.
+    """Lock file naming the process that owns the daemon socket.
 
-    The socket itself cannot answer that question reliably: a daemon that is
-    alive but wedged does not reply, and a socket file exists from the moment
-    ``bind()`` returns - half a second before the daemon can serve anything.  A
-    lock the running daemon holds for its whole life has neither problem, so it
-    is what a second instance checks first.
+    The socket cannot answer that: a daemon that is wedged does not reply, and the
+    socket file exists from the moment ``bind()`` returns. A lock held for the daemon's
+    whole life has neither problem, so a second instance checks it first.
     """
     return runtime_dir() / "wayvoice.owner.lock"

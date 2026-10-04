@@ -78,10 +78,9 @@ def apply_shortcut(binding: str) -> tuple[bool, str]:
         subprocess.run(["gsettings", "set", SCHEMA, "custom-keybindings", repr(values)], check=True, timeout=1.0)
         path_schema = f"{SCHEMA}.custom-keybinding:{KEY}"
         subprocess.run(["gsettings", "set", path_schema, "name", "WayVoice"], check=True, timeout=1.0)
-        # GSettings spawns the command directly (no shell, no login
-        # environment), so a bare "wayvoice" would be resolved against a
-        # minimal PATH that does not contain /usr/local/bin or a custom
-        # prefix.  Store an absolute path instead.
+        # GSettings spawns the command directly, with no shell and no login
+        # environment, so a bare "wayvoice" would be looked up in a minimal PATH.
+        # Store an absolute path.
         wayvoice_cmd = f"{command_path('wayvoice')} toggle"
         subprocess.run(["gsettings", "set", path_schema, "command", wayvoice_cmd], check=True, timeout=1.0)
         subprocess.run(["gsettings", "set", path_schema, "binding", binding], check=True, timeout=1.0)

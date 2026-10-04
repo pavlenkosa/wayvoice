@@ -7,9 +7,8 @@ from typing import Any
 DEFAULTS: dict[str, Any] = {
     "engine": "faster-whisper",
     "model": "small",
-    # "auto" and not a fixed language: a pinned default does not fail loudly,
-    # it silently transcribes foreign speech with the wrong grammar and
-    # spelling rules.  The recognizer detects the language per utterance.
+    # "auto" rather than a pinned default: a wrong fixed language does not fail
+    # loudly, it transcribes foreign speech with the wrong grammar and spelling.
     "language": "auto",
     "device": "auto",
     "compute_type_cpu": "int8",
@@ -47,19 +46,14 @@ def config_path() -> Path:
     return config_dir() / "config.json"
 
 
-#: Set when the last :func:`load_config` found a file it could not use.  The
-#: daemon has to keep working with the defaults in that case, but "silently
-#: pretending the user configured nothing" is how a broken file turns into a
-#: mystery, so the reason is kept and reported.
+#: Set when the last :func:`load_config` found a file it could not use. The daemon
+#: keeps working on the defaults, but a broken config is reported rather than
+#: silently replaced by defaults nobody chose.
 _LAST_ERROR = ""
 
 
 def config_error() -> str:
-    """Why the last :func:`load_config` fell back to defaults, or ``""``.
-
-    Named for what the reader wants to know - whether something is wrong with
-    the settings - rather than for the bookkeeping that produced the answer.
-    """
+    """Why the last :func:`load_config` fell back to defaults, or ``""``."""
     return _LAST_ERROR
 
 
@@ -86,11 +80,10 @@ def save_config(data: dict[str, Any]) -> None:
     merged = dict(DEFAULTS)
     merged.update(data)
     path = config_path()
-    # Written to a temporary file and renamed, never in place: the daemon reads
-    # this file several times a minute, and a reader that catches a half-written
-    # config would silently fall back to DEFAULTS - a different engine, model,
-    # language or recording limit, with nothing said to the user. engine_setup
-    # already does this for its status file.
+    # Written to a temporary file and renamed, never in place: the daemon reads this
+    # several times a minute, and a reader that catches a half-written config falls
+    # back to DEFAULTS - a different engine, model, language or recording limit,
+    # with nothing said. engine_setup does the same for its status file.
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(
         json.dumps(merged, ensure_ascii=False, indent=2),
