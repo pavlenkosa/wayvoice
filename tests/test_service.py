@@ -6,7 +6,9 @@ instantly.
 """
 
 import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from wayvoice import service
@@ -148,12 +150,20 @@ class EngineSetupRequestTests(unittest.TestCase):
         )
 
     def test_direct_path_spawns_the_module(self):
-        with mock.patch.object(service, "systemd_available", return_value=False):
-            with mock.patch.object(service, "_spawn") as spawn:
-                with mock.patch.object(subprocess, "Popen") as popen:
-                    self.assertIsNone(service.request_engine_setup())
-        spawn.assert_called_once_with("wayvoice.engine_setup")
-        popen.assert_not_called()
+        # The spawn is real (only Popen is mocked) so that what is checked is the
+        # command line the user would get. Mocking the spawn too made "Popen was
+        # not called" unreachable rather than true: nothing could have called it.
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "state" / "engine-setup.log"
+            with mock.patch.object(service, "systemd_available", return_value=False), \
+                 mock.patch.object(subprocess, "Popen") as popen, \
+                 mock.patch.object(service, "service_log_path", return_value=log), \
+                 mock.patch.object(service, "python_executable", return_value="/usr/bin/python3"):
+                self.assertIsNone(service.request_engine_setup())
+        self.assertEqual(
+            popen.call_args[0][0],
+            ["/usr/bin/python3", "-m", "wayvoice.engine_setup"],
+        )
 
     def test_failures_never_escape(self):
         with mock.patch.object(service, "systemd_available", return_value=False):

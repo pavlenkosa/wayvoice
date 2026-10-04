@@ -171,8 +171,12 @@ class RecorderTests(unittest.TestCase):
         self.assertFalse(self.recorder.recording)
 
     def test_cancel_is_safe_when_nothing_is_running(self):
+        # Called by the exit hook of a daemon that never recorded anything, and
+        # again from the timer of a recording that has already stopped.
         self.recorder.cancel()  # must not raise
         self.recorder.cancel()
+        self.assertFalse(self.recorder.recording, "the recorder still believes it runs")
+        self.assertIsNone(self.recorder._proc, "a process was left behind")
 
     def test_cancel_reaps_a_process_that_ignores_the_signal(self):
         proc = FakeProc(alive=True, hang=True)

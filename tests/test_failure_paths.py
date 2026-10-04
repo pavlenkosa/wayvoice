@@ -112,7 +112,9 @@ class InstallTimeoutTests(unittest.TestCase):
 
         with mock.patch.object(pkgsys.subprocess, "Popen", side_effect=fake_popen):
             with mock.patch.object(pkgsys, "_kill_tree", side_effect=kill_tree):
-                ok, message = pkgsys.install_packages(["wl-clipboard"], timeout=0.1)
+                ok, message = pkgsys.install_packages(
+                ["wl-clipboard"], timeout=0.1, language="en"
+            )
         return ok, message, child
 
     def test_the_manager_runs_in_its_own_session(self):
@@ -122,9 +124,12 @@ class InstallTimeoutTests(unittest.TestCase):
         self.assertTrue(child.kwargs.get("start_new_session"))
 
     def test_a_timed_out_install_says_so_in_seconds(self):
+        # The message has to name the deadline that was hit. "It contains a 1"
+        # - which is what this used to assert - is true of half of apt's output.
         ok, message, _child = self._run("")
         self.assertFalse(ok)
-        self.assertIn("1", message)  # never "0 s"
+        self.assertIn("1s", message)
+        self.assertNotIn("0s", message)
 
     def test_the_reason_the_manager_gave_is_kept(self):
         _ok, message, _child = self._run("E: Could not get lock /var/lib/dpkg/lock")

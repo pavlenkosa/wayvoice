@@ -188,7 +188,12 @@ def _tail(text: str) -> str:
     return joined
 
 
-def install_packages(packages: list[str], timeout: float = 300.0) -> tuple[bool, str]:
+def install_packages(
+    packages: list[str],
+    timeout: float = 300.0,
+    *,
+    language: str | None = None,
+) -> tuple[bool, str]:
     """Install ``packages`` non-interactively and report the outcome.
 
     Runs the manager directly when the process is already root, otherwise
@@ -196,20 +201,25 @@ def install_packages(packages: list[str], timeout: float = 300.0) -> tuple[bool,
     ``(ok, message)`` where ``message`` is a short tail of the manager output
     suitable for a toast or a subtitle.
 
+    ``language`` is the interface language the messages are written in.  It is
+    passed in rather than resolved here because every message below is shown in
+    the window, and a window in English with a message in the system's language
+    is a message the user cannot act on.
+
     This function is never called implicitly; it must be triggered by an
     explicit user request.
     """
     argv = dry_run_command(packages)
     if argv is None:
-        return False, tr("pkgsys.no_packages")
+        return False, tr("pkgsys.no_packages", language)
     if not packages:
-        return False, tr("pkgsys.no_packages")
+        return False, tr("pkgsys.no_packages", language)
 
     elevated: list[str] = []
     if requires_privilege():
         pkexec = pkexec_path()
         if not pkexec:
-            return False, tr("pkgsys.need_root")
+            return False, tr("pkgsys.need_root", language)
         elevated = [pkexec]
 
     command = [*elevated, *argv]
@@ -227,7 +237,7 @@ def install_packages(packages: list[str], timeout: float = 300.0) -> tuple[bool,
             start_new_session=True,
         )
     except OSError as exc:
-        return False, tr("pkgsys.failed", reason=str(exc))
+        return False, tr("pkgsys.failed", language, reason=str(exc))
     try:
         stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -235,16 +245,17 @@ def install_packages(packages: list[str], timeout: float = 300.0) -> tuple[bool,
         try:
             stdout, stderr = proc.communicate(timeout=5.0)
         except subprocess.TimeoutExpired:
-            return False, tr("pkgsys.timeout", seconds=_seconds(timeout))
+            return False, tr("pkgsys.timeout", language, seconds=_seconds(timeout))
         detail = _tail(stderr) or _tail(stdout)
         if not detail:
-            return False, tr("pkgsys.timeout", seconds=_seconds(timeout))
+            return False, tr("pkgsys.timeout", language, seconds=_seconds(timeout))
         return False, tr(
             "pkgsys.timeout_detail",
+            language,
             seconds=_seconds(timeout),
             detail=detail,
         )
-    return _result(proc.returncode, packages, stdout, stderr)
+    return _result(proc.returncode, packages, stdout, stderr, language)
 
 
 def _seconds(timeout: float) -> int:
@@ -269,8 +280,16 @@ def _kill_tree(proc) -> None:
             continue
 
 
-def _result(returncode: int, packages, stdout: str, stderr: str) -> tuple[bool, str]:
+def _result(
+    returncode: int,
+    packages,
+    stdout: str,
+    stderr: str,
+    language: str | None = None,
+) -> tuple[bool, str]:
     if returncode == 0:
-        return True, tr("pkgsys.installed", packages=", ".join(packages))
+        return True, tr("pkgsys.installed", language, packages=", ".join(packages))
     output = _tail(stderr) or _tail(stdout)
-    return False, tr("pkgsys.failed", reason=output or f"exit code {returncode}")
+    return False, tr(
+        "pkgsys.failed", language, reason=output or f"exit code {returncode}"
+    )

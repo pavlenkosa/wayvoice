@@ -79,16 +79,59 @@ class ClipboardTests(unittest.TestCase):
         self.assertGreaterEqual(proc._polls, 1)
 
     def test_the_wait_for_the_selection_is_bounded(self):
+        # The loop must be able to end on its deadline, not only on the exit of a
+        # clipboard tool that has stopped making progress. The clock here steps
+        # forward by exactly what the loop sleeps, so the number of iterations is
+        # the deadline: a loop that ignored it would either spin until the clock
+        # ran out or wait forever.
         proc = FakeProc(exit_after=None)
+        slept = []
+        now = [0.0]
+
+        def monotonic():
+            return now[0]
+
+        budget = 20 * round(injector.CLIPBOARD_SETTLE_TIMEOUT / 0.005)
+
+        def sleep(seconds):
+            now[0] += seconds
+            slept.append(seconds)
+            # The guard is here and not only on the clock because a loop without
+            # a deadline never reads the clock at all: without this the failure
+            # would be a hung test, and a hung test is a test nobody waits for.
+            if len(slept) > budget:
+                raise AssertionError(
+                    "the settle loop kept going long past its deadline"
+                )
+
+        with self._which(), self._popen(proc), mock.patch.object(
+            injector.time, "sleep", side_effect=sleep
+        ), mock.patch.object(injector.time, "monotonic", side_effect=monotonic):
+            injector.copy_to_clipboard("текст")
+        self.assertEqual(
+            len(slept), round(injector.CLIPBOARD_SETTLE_TIMEOUT / 0.005),
+            "the settle loop did not end on its deadline",
+        )
+        # And the process it was waiting for is deliberately left alone: that is
+        # the process holding the selection.
+        self.assertIs(injector._clipboard_proc, proc)
+        self.assertFalse(proc.terminated)
+
+    def test_a_tool_that_exits_is_waited_for_only_until_it_does(self):
+        # The other end of the loop: a tool that exits on its own ends the wait
+        # early, and its exit is a failure with the reason it gave - the text did
+        # not make it into the clipboard, and saying otherwise would send the
+        # user to paste an empty selection.
+        proc = FakeProc(exit_after=10, stderr="wl-copy: no Wayland display")
         slept = []
         with self._which(), self._popen(proc), mock.patch.object(
             injector.time, "sleep", side_effect=lambda s: slept.append(s)
-        ), mock.patch.object(
-            injector.time, "monotonic", side_effect=[0.0, 0.0, 99.0]
         ):
-            injector.copy_to_clipboard("текст")
-        # The loop must be able to end on the deadline, not only on the exit.
-        self.assertTrue(slept, "the settle loop never yielded")
+            with self.assertRaises(injector.InjectionError) as caught:
+                injector.copy_to_clipboard("текст")
+        self.assertEqual(len(slept), 9, "the loop did not follow the process")
+        self.assertIn("no Wayland display", str(caught.exception))
+        self.assertIsNone(injector._clipboard_proc, "an exited tool was kept")
 
     def test_a_failed_write_does_not_leak_the_process(self):
         # The regression: proc was assigned to the module global only after the
@@ -127,6 +170,17 @@ class ClipboardTests(unittest.TestCase):
     def test_cleanup_does_not_raise_without_a_process(self):
         injector._clipboard_proc = None
         injector._cleanup_clipboard()  # must not raise
+        self.assertIsNone(injector._clipboard_proc)
+
+    def test_cleanup_stops_a_process_that_is_still_holding_the_selection(self):
+        # The exit hook runs at interpreter shutdown, when the process that owns
+        # the Wayland clipboard has to be released: wl-copy would otherwise keep
+        # owning it for the rest of the session with nobody to paste from.
+        proc = FakeProc(exit_after=None)
+        injector._clipboard_proc = proc
+        injector._cleanup_clipboard()
+        self.assertTrue(proc.terminated or proc.killed, "the clipboard tool survived")
+        self.assertIsNone(injector._clipboard_proc, "a dead process was kept")
 
 
 class InjectTests(unittest.TestCase):

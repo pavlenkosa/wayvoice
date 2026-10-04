@@ -760,7 +760,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
 
     def _install_dependency_worker(self, dep_id: str, packages: list[str]):
         try:
-            ok, message = pkgsys.install_packages(packages)
+            ok, message = pkgsys.install_packages(packages, language=self.ui_lang)
         except Exception as exc:  # never let a worker kill the process
             ok, message = False, str(exc)
         GLib.idle_add(self._install_dependency_done, dep_id, ok, message)

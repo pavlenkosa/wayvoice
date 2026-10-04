@@ -167,8 +167,14 @@ class PrivilegeTests(unittest.TestCase):
         with mock.patch("os.geteuid", return_value=1000):
             self.assertTrue(pkgsys.requires_privilege())
 
-    def test_requires_privilege_works_unpatched(self):
-        self.assertIsInstance(pkgsys.requires_privilege(), bool)
+    def test_requires_privilege_assumes_privilege_where_it_cannot_ask(self):
+        # A platform without geteuid - or one that removed it - must not be read
+        # as "no privileges needed", or an installer would be started without
+        # pkexec and fail in a way the user cannot act on.  Asserting the type of
+        # the answer, which is what this test did, passes for an implementation
+        # that returns a constant.
+        with mock.patch("os.geteuid", side_effect=AttributeError):
+            self.assertTrue(pkgsys.requires_privilege())
 
     def test_pkexec_path_uses_which(self):
         with mock.patch("shutil.which", _which_returning({"pkexec": "/usr/bin/pkexec"})):

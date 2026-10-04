@@ -234,7 +234,7 @@ def _install_deps(args: list[str]) -> None:
         raise SystemExit(1)
 
     print(tr("cli.deps_running", lang, command=" ".join(dry_run_command(packages, manager) or [])))
-    ok, message = install_packages(packages)
+    ok, message = install_packages(packages, language=_language())
     print(message, file=sys.stdout if ok else sys.stderr)
     if not ok:
         raise SystemExit(1)

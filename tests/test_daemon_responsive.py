@@ -294,22 +294,45 @@ class NotifyTests(unittest.TestCase):
         self.assertEqual(len(self.procs), 1, "the notification was never started")
 
     def test_a_notification_that_never_returns_is_abandoned_not_waited_for(self):
+        # Three in a row, because one would also pass if the wait were merely
+        # short: the point is that the caller is not held at all. The programs
+        # are still running, which is the "abandoned" part - and nothing may have
+        # released them, or the test would be measuring its own cleanup.
         self.addCleanup(self._release_all)
+        began = time.monotonic()
         for _ in range(3):
             notify_mod.notify("WayVoice", "text")  # must not raise
-        # The programs are still running; nothing is waiting on them and nothing
-        # holds the caller.
+        self.assertLess(
+            time.monotonic() - began, 2.0, "three notifications took too long"
+        )
         self.assertEqual(len(self.procs), 3)
-        self.assertTrue(all(p.poll() is None for p in self.procs))
+        self.assertTrue(
+            all(not p.released.is_set() for p in self.procs),
+            "the programs were given up on before the test let them go",
+        )
 
     def test_a_notification_that_cannot_start_is_not_an_error(self):
+        # which() said yes and the program is gone: the race that used to abort a
+        # recording that had already started. Nothing may be started, and nothing
+        # may be raised.
         self.addCleanup(self._release_all)
         with mock.patch.object(notify_mod.subprocess, "Popen", side_effect=OSError):
             notify_mod.notify("WayVoice", "text")  # must not raise
+        self.assertEqual(self.procs, [], "a program was left half-started")
 
     def test_a_missing_binary_is_still_not_an_error(self):
         with mock.patch.object(notify_mod.shutil, "which", return_value=None):
             notify_mod.notify("WayVoice", "text")  # must not raise
+        self.assertEqual(self.procs, [], "a program was started without a binary")
+
+    def test_a_lookup_that_fails_is_still_not_an_error(self):
+        # shutil.which is a filesystem lookup and can raise on its own; the two
+        # steps being separate is what makes this reachable at all.
+        with mock.patch.object(
+            notify_mod.shutil, "which", side_effect=OSError("no PATH")
+        ):
+            notify_mod.notify("WayVoice", "text")  # must not raise
+        self.assertEqual(self.procs, [])
 
     def test_notifications_can_be_switched_off(self):
         with mock.patch.object(notify_mod.shutil, "which", return_value=None):

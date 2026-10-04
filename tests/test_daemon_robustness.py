@@ -252,42 +252,18 @@ class ShutdownTests(unittest.TestCase):
 
 
 class NotifyTests(unittest.TestCase):
-    """A notification is decoration and must never become an error."""
+    """The notification must not be able to stop a recording.
+
+    The contract of notify() itself - not waiting for it, tolerating a missing
+    binary, tolerating one that cannot be started - is tested in
+    test_daemon_responsive.py, against the real function. What is tested here is
+    the caller: a notification that fails must not turn a recording that has
+    already started into an error the user sees.
+    """
 
     def setUp(self):
         isolate_engine(self)
         isolate_environment(self)
-        from wayvoice import notify as notify_mod
-
-        self.notify_mod = notify_mod
-
-    def test_a_missing_binary_is_not_an_error(self):
-        with mock.patch.object(self.notify_mod.shutil, "which", return_value=None):
-            self.notify_mod.notify("t", "b")  # must not raise
-
-    def test_a_binary_that_vanished_between_lookup_and_run_is_not_an_error(self):
-        # which() said yes, run() says no: this is the race that used to abort
-        # a recording that had already started.
-        with mock.patch.object(
-            self.notify_mod.shutil, "which", return_value="/usr/bin/notify-send"
-        ):
-            with mock.patch.object(
-                self.notify_mod.subprocess,
-                "run",
-                side_effect=FileNotFoundError("notify-send"),
-            ):
-                self.notify_mod.notify("t", "b")  # must not raise
-
-    def test_a_hanging_notification_is_given_up_on(self):
-        with mock.patch.object(
-            self.notify_mod.shutil, "which", return_value="/usr/bin/notify-send"
-        ):
-            with mock.patch.object(
-                self.notify_mod.subprocess,
-                "run",
-                side_effect=__import__("subprocess").TimeoutExpired("notify-send", 5),
-            ):
-                self.notify_mod.notify("t", "b")  # must not raise
 
     def test_a_failing_notification_does_not_break_a_recording(self):
         # The regression: notify() sat inside the try block of start_recording,

@@ -36,8 +36,13 @@ class FasterRuntimeLocationTests(unittest.TestCase):
             with mock.patch.object(engine, "app_dir", return_value=self.app):
                 self.assertEqual(engine.faster_runtime(), self.bundled)
 
-    def test_empty_bundled_directory_is_ignored(self):
-        self.bundled.mkdir(parents=True)
+    def test_a_directory_that_holds_no_runtime_is_ignored(self):
+        # Not merely an empty one: a leftover directory from a previous
+        # installation, with something in it that is not an interpreter, must
+        # not win over the per-user runtime. An empty directory made the two
+        # indistinguishable.
+        (self.bundled / "bin").mkdir(parents=True)
+        (self.bundled / "bin" / "not-python").write_text("#!/bin/sh\n")
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("WAYVOICE_RUNTIME", None)
             with mock.patch.object(engine, "app_dir", return_value=self.app):

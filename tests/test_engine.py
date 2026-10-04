@@ -54,8 +54,6 @@ class WorkerVersionTests(unittest.TestCase):
     """
 
     def test_a_worker_from_another_version_does_not_match(self):
-        from unittest import mock
-
         from wayvoice import __version__
 
         reply = {
@@ -63,12 +61,10 @@ class WorkerVersionTests(unittest.TestCase):
             "version": "0.0.1-old",
             "config": {"model": "small", "device": "auto", "beam_size": 5, "vad": True},
         }
-        with mock.patch("wayvoice.engine._worker_ping", return_value=reply):
-            self.assertFalse(_worker_settings_match(reply, {"model": "small"}))
+        self.assertNotEqual(__version__, "0.0.1-old")
+        self.assertFalse(_worker_settings_match(reply, {"model": "small"}))
 
     def test_a_worker_of_this_version_matches(self):
-        from unittest import mock
-
         from wayvoice import __version__
 
         reply = {
@@ -76,14 +72,25 @@ class WorkerVersionTests(unittest.TestCase):
             "version": __version__,
             "config": {"model": "small", "device": "auto", "beam_size": 5, "vad": True},
         }
-        with mock.patch("wayvoice.engine._worker_ping", return_value=reply):
-            self.assertTrue(_worker_settings_match(reply, {"model": "small"}))
+        self.assertTrue(_worker_settings_match(reply, {"model": "small"}))
+
+    def test_a_worker_started_with_another_model_is_not_used(self):
+        # The version is only half of the match: a worker left over from a
+        # changed setting decodes with the wrong model, which sounds like
+        # recognition being broken rather than like a stale worker.
+        reply = {
+            "ok": True,
+            "version": __import__("wayvoice").__version__,
+            "config": {"model": "large-v3", "device": "auto", "beam_size": 5, "vad": True},
+        }
+        self.assertFalse(_worker_settings_match(reply, {"model": "small"}))
 
     def test_a_worker_that_reports_no_version_is_still_trusted(self):
         # An older worker has no version field at all. Refusing it would mean
         # never using a warm worker again after one restart.
         reply = {"ok": True, "config": {"model": "small", "device": "auto", "beam_size": 5, "vad": True}}
         self.assertTrue(_worker_settings_match(reply, {"model": "small"}))
+
 
 class EngineProcessTests(unittest.TestCase):
     def test_timeout_kills_process(self):

@@ -497,6 +497,10 @@ class WarmTests(unittest.TestCase):
         self.assertEqual(len(self.factory.calls), 1)
 
     def test_the_duration_is_reported_so_a_slow_load_is_visible(self):
+        # The daemon shows this to say "already loading for a while".  It has to
+        # be the measured time and not a constant: the assertion this replaces
+        # was "at least zero", which every implementation satisfies, including
+        # one that never started a clock.
         class SlowFactory(RecordingFactory):
             def __call__(self, model_id, device, compute_type):
                 time.sleep(0.05)
@@ -504,7 +508,19 @@ class WarmTests(unittest.TestCase):
 
         cache = ModelCache(SlowFactory())
         reply = handle_request({"cmd": "warm"}, cache, self.config)
-        self.assertGreaterEqual(reply["seconds"], 0.0)
+        self.assertGreaterEqual(
+            reply["seconds"], 0.04,
+            f"a 50 ms load was reported as {reply['seconds']} s",
+        )
+
+    def test_a_model_that_was_already_loaded_reports_no_wait(self):
+        # The other end: after the first load there is nothing left to wait for,
+        # and saying "0.0 s" every time is what lets the daemon tell the two
+        # apart.
+        cache = ModelCache(RecordingFactory())
+        handle_request({"cmd": "warm"}, cache, self.config)
+        reply = handle_request({"cmd": "warm"}, cache, self.config)
+        self.assertEqual(reply["seconds"], 0.0)
 
 
 class WarmHoldsTheWorkerTests(unittest.TestCase):

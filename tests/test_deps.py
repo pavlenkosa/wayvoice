@@ -23,8 +23,13 @@ def _which_returning(mapping):
 
 
 class RegistryTests(unittest.TestCase):
-    def test_registry_is_not_empty(self):
-        self.assertTrue(deps.dependencies())
+    def test_the_registry_is_exactly_what_wayvoice_needs(self):
+        # The four dependencies, named: "the list is not empty" is true of any
+        # list, including one that lost an entry and gained nothing.
+        self.assertEqual(
+            [dep.id for dep in deps.dependencies()],
+            ["pipewire", "wl-clipboard", "notify", "ydotool"],
+        )
 
     def test_ids_are_unique_and_non_empty(self):
         ids = [dep.id for dep in deps.dependencies()]
