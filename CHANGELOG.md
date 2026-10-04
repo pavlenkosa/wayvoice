@@ -2,6 +2,7 @@
 
 ## 0.6.0 — 2026-10-04
 
+- The release workflow publishes from a tag you pushed, and refuses to do anything when the tag is missing or points elsewhere. It used to create and push the tag itself, which silently disabled its own automatic path: GitHub does not start workflows from pushes made with `GITHUB_TOKEN`, so the tag appeared on the remote with nothing having run, and a later `git push` of the same tag answered “Everything up-to-date”.
 - The Debian package now ships its own `ydotool`, built from vendored sources, so automatic pasting works on distributions that do not package it — Debian 13 has none, in any component. A system's own copy is always preferred, the bundled one is a fallback, and a package built without a compiler simply has none.
 - Licence changed from GPL-3.0-only to **AGPL-3.0-or-later**, which is what allows the automatic-paste helper to be shipped with the application: `ydotool` is AGPL-3.0-or-later, and its source cannot be combined with GPL-3.0-only code. Updated accordingly: LICENSE, packaging metadata, AppStream data, the About dialog, and a machine-readable `copyright` file in the package (Debian policy 12.5).
 - Recognition languages: all 100 that Whisper supports, each under its own name, with automatic detection as the default instead of a pinned language.

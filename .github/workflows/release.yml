@@ -41,24 +41,68 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             shellcheck desktop-file-utils libxml2-utils
 
-      - name: Resolve and verify release version
+      - name: Resolve and verify the release
         id: version
         shell: bash
         env:
           MANUAL_VERSION: ${{ inputs.version }}
         run: |
+          set -euo pipefail
+
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
             VERSION="${MANUAL_VERSION#v}"
           else
             VERSION="${GITHUB_REF_NAME#v}"
           fi
+          if [ -z "$VERSION" ]; then
+            echo "No version given: run this from the tag, or fill in the version input." >&2
+            exit 1
+          fi
 
-          test -n "$VERSION"
           PROJECT_VERSION="$(python scripts/check-version.py "$VERSION")"
           test "$PROJECT_VERSION" = "$VERSION"
+          TAG="v$VERSION"
 
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          # The tag has to exist already and point at this commit.
+          #
+          # It used to be created here, and that quietly disabled the automatic
+          # path: the workflow pushes with GITHUB_TOKEN, and GitHub never starts
+          # workflow runs from a push made with GITHUB_TOKEN. So the tag would
+          # appear on the remote with nothing having run, and the human's own
+          # "git push origin v0.6.0" afterwards would answer "Everything
+          # up-to-date" and start nothing either - which is exactly what it looks
+          # like from the outside: the release that never happens on its own.
+          git fetch --force --tags
+          if ! git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
+            echo "Tag $TAG does not exist yet. Publish it with:" >&2
+            echo "    git tag -a $TAG -m 'WayVoice $VERSION' && git push origin $TAG" >&2
+            exit 1
+          fi
+          TAG_SHA="$(git rev-list -n 1 "$TAG")"
+          if [ "$TAG_SHA" != "$GITHUB_SHA" ]; then
+            echo "Tag $TAG points at ${TAG_SHA:0:7}, this run is at ${GITHUB_SHA:0:7}." >&2
+            echo "Move the tag to the commit you mean to release, or run the workflow from that tag." >&2
+            exit 1
+          fi
+
+          # An explicit output rather than an expression at the place of use. A
+          # boolean interpolated into YAML arrives as the string "false", and how
+          # the publishing action reads that is not something to leave to
+          # chance: 0.6.0 was published as a prerelease although its version
+          # carries no dash.
+          if [[ "$VERSION" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          {
+            echo "version=$VERSION"
+            echo "tag=$TAG"
+            echo "tag_sha=$TAG_SHA"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Releasing $VERSION from $TAG at ${GITHUB_SHA:0:7}"
 
       - name: Python syntax
         run: python -m compileall -q app/src tests scripts/check-version.py
@@ -114,20 +158,6 @@ jobs:
             sha256sum *.deb wayvoice-${VERSION}-source.zip > SHA256SUMS
           )
 
-      - name: Create tag for manual release
-        if: github.event_name == 'workflow_dispatch'
-        shell: bash
-        run: |
-          TAG="${{ steps.version.outputs.tag }}"
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
-            test "$(git rev-list -n 1 "$TAG")" = "$GITHUB_SHA"
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git tag -a "$TAG" -m "WayVoice ${{ steps.version.outputs.version }}"
-            git push origin "$TAG"
-          fi
-
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
         with:
@@ -146,7 +176,7 @@ jobs:
           tag_name: ${{ steps.version.outputs.tag }}
           name: WayVoice ${{ steps.version.outputs.version }}
           generate_release_notes: true
-          prerelease: ${{ contains(steps.version.outputs.version, '-') }}
+          prerelease: ${{ steps.version.outputs.prerelease }}
           files: |
             dist/*.deb
             dist/*.deb.sha256
