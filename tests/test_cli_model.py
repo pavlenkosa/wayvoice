@@ -78,6 +78,21 @@ class ModelCommandTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("--download", err)
 
+    def test_a_model_name_is_refused_rather_than_ignored(self):
+        # It looks like the natural spelling, and it used to be accepted and
+        # silently ignored: the daemon downloaded the model the settings named
+        # and the command reported success.  A quiet wrong answer is worse than
+        # a refusal, so the name is rejected and the user is told where the
+        # model is chosen.
+        # The message is the user's language, so the test asks for one.
+        with mock.patch.object(cli, "request") as ask, \
+             mock.patch.object(cli, "_language", return_value="en"):
+            code, out, err = run_cli(["model", "--download", "medium"])
+        self.assertEqual(code, 2)
+        self.assertFalse(ask.called, "the command was sent anyway")
+        self.assertEqual(out, "")
+        self.assertIn("settings", err.lower())
+
     def test_the_command_is_listed_in_the_usage_line(self):
         code, _out, err = run_cli(["nonsense"])
         self.assertEqual(code, 2)

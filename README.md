@@ -68,7 +68,7 @@ WayVoice transcribes the recording and inserts the text into the active applicat
 
 The default option. Supports multilingual Whisper models, English-only models and compatible CTranslate2 community models.
 
-The model is kept in memory between dictations, so the second recording starts without loading it again. Turn the warm worker off in the settings to free that memory between recordings.
+The model is kept in memory between dictations, and is loaded as soon as the daemon starts, so the first dictation of a session costs the same as the ones after it. That is memory spent for the whole session: measured on one machine, the resident size of the worker was about 0.6 GB for `small` and 1.6 GB for `medium`, and a large model costs more in proportion. Turn the warm worker off in the settings to free it; recognition then loads the model for each dictation instead, which is slower but leaves nothing behind between recordings.
 
 ### whisper.cpp
 
@@ -94,6 +94,8 @@ Model weights live in the Hugging Face cache, which is shared with other program
 
 Deleting a model never removes files another model is using: the weights are shared between models, and only what nothing points at any more is freed. A model provided as a local path is yours and is never deleted.
 
+The model can be a name from the catalogue, a full Hugging Face repository id such as `Systran/faster-whisper-large-v3`, or a path to a directory on disk. A local model is loaded straight from that directory and never reported as missing: WayVoice cannot fetch it, count it or delete it, so it neither offers to download it nor refuses to record because of it.
+
 A model that is not on disk is fetched when you choose it, not when you first use it. The download shows its progress and can be cancelled, and pressing the hot key while it runs says so instead of recording something that cannot be recognised yet. Starting WayVoice never downloads anything by itself — the model it already has is loaded into memory so that the first dictation is as fast as the rest.
 
 ## Missing dependencies
@@ -112,6 +114,14 @@ wayvoice engine-status
 wayvoice settings
 ```
 
+Models, from the command line — the same thing the settings window does, for a machine without a display:
+
+```bash
+wayvoice model                          # what is selected, and whether it is ready
+wayvoice model --download               # fetch the selected model, with progress
+wayvoice model --cancel                 # stop a download that is running
+```
+
 Service log:
 
 ```bash
@@ -120,7 +130,7 @@ journalctl --user -u wayvoice -f
 
 ## Privacy
 
-WayVoice does not send recordings to a cloud service when a local recognition engine is selected. Network access is used to download runtime dependencies and model files when required.
+WayVoice does not send recordings to a cloud service when a local recognition engine is selected. Network access is used for two things and nothing else: downloading the recognition runtime, and downloading model files. The Flatpak build grants network access for exactly this reason — recognition itself never touches the network.
 
 ## License
 

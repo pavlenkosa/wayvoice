@@ -26,10 +26,18 @@ from .protocol import socket_path
 from .shortcut import apply_shortcut
 
 
+#: The command list in the usage line, so that the message and the parser below
+#: cannot drift apart: both are built from this one string.
+_COMMANDS = (
+    "toggle|start|stop|cancel|status|model [--download|--cancel]"
+    "|deps [--install ID|--install-all]|settings|engine-setup|engine-status"
+)
+
+
 def request(command: str, timeout: float = 1.5) -> dict:
     path = socket_path()
     if not path.exists():
-        return {"ok": False, "error": "Фоновый сервис WayVoice ещё не запущен."}
+        return {"ok": False, "error": tr("cli.service_not_running")}
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.settimeout(timeout)
     try:
@@ -43,7 +51,7 @@ def request(command: str, timeout: float = 1.5) -> dict:
             data += chunk
         return json.loads(data.decode("utf-8"))
     except (OSError, TimeoutError, json.JSONDecodeError) as exc:
-        return {"ok": False, "error": f"Сервис WayVoice не ответил: {exc}"}
+        return {"ok": False, "error": tr("cli.service_no_answer", reason=exc)}
     finally:
         sock.close()
 
@@ -59,6 +67,14 @@ def _model_command(args: list[str]) -> None:
     read.
     """
     lang = _language()
+    if args not in ([], ["--download"], ["--cancel"]):
+        # A model name is not accepted here, and that has to be said rather than
+        # ignored: ``wayvoice model --download medium`` would otherwise download
+        # whatever the settings name and report success, which is exactly the
+        # kind of quiet wrong answer this command exists to avoid.
+        print(tr("cli.model_usage", lang), file=sys.stderr)
+        print(tr("cli.model_choose_in_settings", lang), file=sys.stderr)
+        raise SystemExit(2)
     if "--download" in args:
         reply = request("prepare-model", timeout=10.0)
         if reply.get("ok"):
@@ -82,9 +98,6 @@ def _model_command(args: list[str]) -> None:
         print(str(reply.get("error") or tr("cli.model_nothing_running", lang)),
               file=sys.stderr)
         raise SystemExit(1)
-    if args:
-        print(tr("cli.model_usage", lang), file=sys.stderr)
-        raise SystemExit(2)
     reply = request("status", timeout=5.0)
     if not reply.get("ok"):
         print(str(reply.get("error") or ""), file=sys.stderr)
@@ -257,14 +270,14 @@ def main() -> None:
         if engine is None:
             # A broken config, not an engine without setup: saying the latter
             # would hide the actual problem.
-            print(f"Неизвестный движок распознавания: {cfg.get('engine')}", file=sys.stderr)
+            print(tr("cli.unknown_engine", engine=cfg.get("engine")), file=sys.stderr)
             raise SystemExit(1)
         if request_engine_setup(engine):
-            print(f"Запуск подготовки {engine.label} запрошен.")
+            print(tr("cli.setup_started", engine=engine.label))
             return
         # The registry says this engine has nothing to prepare. Say so instead
         # of starting a runtime for a recognizer that is not in use.
-        print(f"{engine.label} не требует подготовки.", file=sys.stderr)
+        print(tr("cli.engine_needs_no_setup", engine=engine.label), file=sys.stderr)
         raise SystemExit(1)
     if command == "engine-status":
         print(json.dumps(engine_status(load_config()), ensure_ascii=False, indent=2))
@@ -273,7 +286,7 @@ def main() -> None:
         _model_command(args[1:])
         return
     if command not in {"toggle", "start", "stop", "cancel", "status", "ping", "quit"}:
-        print("Использование: wayvoice {toggle|start|stop|cancel|status|model [--download|--cancel]|deps [--install ID|--install-all]|settings|engine-setup|engine-status}", file=sys.stderr)
+        print(tr("cli.usage", commands=_COMMANDS), file=sys.stderr)
         raise SystemExit(2)
 
     reply = request(command)
