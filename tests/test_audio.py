@@ -1,11 +1,10 @@
 """The recorder is where a failure turns into "it did not work".
 
-The microphone is opened by an external program (``pw-record``) whose failure
-modes the daemon only learns about afterwards.  Every one of those paths used to
-be untested, and they are the paths a user hits when PipeWire is not ready yet:
-a missing binary, a program that dies immediately with a message, a program that
-dies later leaving a half-written file, and a cancel that has to clean up both
-the process and the temporary recording.
+The microphone is opened by an external program (``pw-record``) whose failure modes the
+daemon only learns about afterwards, and they are the paths a user hits when PipeWire is
+not ready yet: a missing binary, a program that dies immediately with a message, one
+that dies later leaving a half-written file, and a cancel that has to clean up both the
+process and the temporary recording.
 """
 
 import os
@@ -187,9 +186,9 @@ class RecorderTests(unittest.TestCase):
         self.assertGreaterEqual(proc.waited, 2, "the killed process was never reaped")
 
     def test_a_recorder_that_died_on_its_own_still_has_its_file_cleaned(self):
-        # pw-record can die mid-recording (PipeWire restarted, device unplugged).
-        # The daemon then sees "not recording" while a half-written file is
-        # still on disk, and cancel() is the only thing that will remove it.
+        # pw-record can die mid-recording (PipeWire restarted, device unplugged). The
+        # daemon then sees "not recording" while a half-written file is still on disk,
+        # and cancel() is the only thing that will remove it.
         proc = FakeProc(alive=True, hang_first=True)
         with self._patch_which(), self._patch_popen(proc):
             self.recorder.start()

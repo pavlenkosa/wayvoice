@@ -1,9 +1,9 @@
 """``wayvoice model`` from a terminal.
 
-The download is the daemon's child process, so the command line can only ask
-the daemon to start or stop it.  These tests pin that routing down, including
-the case where nothing is running to ask - which has to be said out loud,
-because a download started here would land in a cache no daemon reads.
+The download is the daemon's child process, so the command line can only ask the daemon
+to start or stop it. These tests pin that routing down, including the case where nothing
+is running to ask - which has to be said out loud, because a download started here would
+land in a cache no daemon reads.
 """
 
 import io
@@ -63,8 +63,8 @@ class ModelCommandTests(unittest.TestCase):
         self.assertIn("the model is downloading", err)
 
     def test_nothing_running_is_reported_rather_than_downloaded_here(self):
-        # Downloading into a cache the daemon does not read would look like it
-        # worked and change nothing.
+        # Downloading into a cache the daemon does not read would look like it worked
+        # and change nothing.
         with mock.patch.object(
             cli, "request", return_value={"ok": False, "error": "not running"}
         ):
@@ -79,12 +79,9 @@ class ModelCommandTests(unittest.TestCase):
         self.assertIn("--download", err)
 
     def test_a_model_name_is_refused_rather_than_ignored(self):
-        # It looks like the natural spelling, and it used to be accepted and
-        # silently ignored: the daemon downloaded the model the settings named
-        # and the command reported success.  A quiet wrong answer is worse than
-        # a refusal, so the name is rejected and the user is told where the
-        # model is chosen.
-        # The message is the user's language, so the test asks for one.
+        # It looks like the natural spelling, and it used to be accepted and silently
+        # ignored: the daemon downloaded the model the settings named and the command
+        # reported success. A quiet wrong answer is worse than a refusal.
         with mock.patch.object(cli, "request") as ask, \
              mock.patch.object(cli, "_language", return_value="en"):
             code, out, err = run_cli(["model", "--download", "medium"])

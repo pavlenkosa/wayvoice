@@ -107,9 +107,9 @@ class ServeResilienceTests(unittest.TestCase):
         self.thread = threading.Thread(target=self.daemon.serve, daemon=True)
         self.addCleanup(self._stop)
         self.thread.start()
-        # Wait until the daemon actually answers, not until the file appears:
-        # bind() creates it before listen(), and a connect() in between is
-        # refused, which made this flaky rather than wrong.
+        # Wait until the daemon actually answers, not until the file appears: bind()
+        # creates it before listen(), and a connect() in between is refused, which made
+        # this flaky rather than wrong.
         deadline = time.monotonic() + 10.0
         while time.monotonic() < deadline:
             try:
@@ -141,8 +141,8 @@ class ServeResilienceTests(unittest.TestCase):
             client.close()
 
     def test_connection_without_a_request_is_ignored(self):
-        # Connecting and hanging up used to make the reply raise EPIPE, which
-        # propagated out of the accept loop and killed the whole daemon.
+        # Connecting and hanging up used to make the reply raise EPIPE, which propagated
+        # out of the accept loop and killed the whole daemon.
         for _ in range(3):
             client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             client.settimeout(2.0)

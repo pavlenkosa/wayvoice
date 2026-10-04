@@ -1,14 +1,10 @@
 """The daemon must survive the clients and the exits it did not plan for.
 
-Each test here guards a specific way this daemon used to become unusable while
-still looking alive:
-
-* a client that connects and says nothing took the whole accept loop with it,
-  because the accepted socket is blocking again after ``accept()``;
-* a second daemon then judged the wedged one dead, unlinked its socket and left
-  it running with the microphone;
-* a daemon that exited mid-dictation left ``pw-record`` holding the device;
-* a notification that failed turned a finished recording into an error.
+A client that connects and says nothing took the whole accept loop with it, since the
+accepted socket is blocking again after ``accept()``. A second daemon then judged the
+wedged one dead, unlinked its socket and left it running with the microphone. A daemon
+that exited mid-dictation left ``pw-record`` holding the device. A notification that
+failed turned a finished recording into an error.
 
 No microphone, no notification daemon and no real hot key are needed.
 """
@@ -57,8 +53,8 @@ class _ServerFixture:
         patch = mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(runtime)})
         patch.start()
         test.addCleanup(patch.stop)
-        # The deadline is what is being tested, not its length; a real five
-        # seconds would make every one of these tests wait for it.
+        # The deadline is what is being tested, not its length; a real five seconds
+        # would make every one of these tests wait for it.
         short = mock.patch.object(daemon_mod, "CLIENT_TIMEOUT", 0.3)
         short.start()
         test.addCleanup(short.stop)
@@ -105,9 +101,9 @@ class ServeRobustnessTests(unittest.TestCase):
             return False
 
     def test_client_that_never_sends_anything_does_not_take_the_daemon_down(self):
-        # The regression this guards: server.settimeout() covers accept() only,
-        # so recv() on the accepted socket blocked until the client felt like
-        # finishing. One such client disabled the hot key for good.
+        # server.settimeout() covers accept() only, so recv() on the accepted socket
+        # blocked until the client felt like finishing. One such client disabled the hot
+        # key for good.
         quiet = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         quiet.settimeout(2.0)
         self.addCleanup(quiet.close)
@@ -254,11 +250,9 @@ class ShutdownTests(unittest.TestCase):
 class NotifyTests(unittest.TestCase):
     """The notification must not be able to stop a recording.
 
-    The contract of notify() itself - not waiting for it, tolerating a missing
-    binary, tolerating one that cannot be started - is tested in
-    test_daemon_responsive.py, against the real function. What is tested here is
-    the caller: a notification that fails must not turn a recording that has
-    already started into an error the user sees.
+    The contract of notify() itself is tested in test_daemon_responsive.py against the real
+    function; what is tested here is the caller: a notification that fails must not turn a
+    recording that already started into an error the user sees.
     """
 
     def setUp(self):
@@ -266,9 +260,9 @@ class NotifyTests(unittest.TestCase):
         isolate_environment(self)
 
     def test_a_failing_notification_does_not_break_a_recording(self):
-        # The regression: notify() sat inside the try block of start_recording,
-        # so its failure reported "could not start recording" while the
-        # microphone was in fact open and the timer running.
+        # notify() sat inside the try block of start_recording, so its failure reported
+        # "could not start recording" while the microphone was in fact open and the
+        # timer running.
         daemon = WayVoiceDaemon()
         daemon._prepare_engine = mock.Mock()
         daemon.recorder = mock.Mock()

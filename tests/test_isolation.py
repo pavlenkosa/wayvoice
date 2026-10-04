@@ -54,20 +54,18 @@ class EnvironmentIsolationTests(_Case):
             self.assertEqual(os.environ.get(name), value, f"{name} was not restored")
 
     def test_the_runtime_directory_is_where_the_daemon_socket_goes(self):
-        # Two spellings of the same directory are how a test ends up talking to
-        # an empty configuration: the child reads one path and the parent wrote
-        # the file into another.
+        # Two spellings of the same directory are how a test ends up talking to an empty
+        # configuration: the child reads one path and the parent wrote the file into
+        # another.
         root = support.isolate_environment(self)
         self.assertEqual(os.environ["XDG_RUNTIME_DIR"], str(root / "XDG_RUNTIME_DIR"))
 
     def test_the_data_home_is_redirected(self):
-        # It holds the engine runtime, and leaving it real made every
-        # engine-dependent test depend on what this machine has installed: on a
-        # machine without the runtime, six of them failed on CI - which is a
-        # machine without it by definition. The engine's readiness is stated by
-        # isolate_engine instead, which is the honest arrangement: a test about
-        # model logic says what it assumes about the engine rather than
-        # inheriting the answer.
+        # It holds the engine runtime, and leaving it real made every engine-dependent
+        # test depend on what this machine has installed: six of them failed on CI,
+        # which has no runtime by definition. isolate_engine states the readiness
+        # instead, which is the honest arrangement - a test about model logic says what
+        # it assumes about the engine.
         root = support.isolate_environment(self)
         self.assertIn("XDG_DATA_HOME", support._XDG_VARS)
         self.assertTrue(os.environ["XDG_DATA_HOME"].startswith(str(root)))
@@ -95,9 +93,9 @@ class EngineIsolationTests(_Case):
         self.assertTrue(engine.model_is_present({"model": "no-such-model"}))
 
     def test_the_worker_backoff_does_not_outlive_the_test(self):
-        # The failure this prevents is silent: a worker that could not be started
-        # leaves a deadline in the future, and every test after it skips starting
-        # one without trying - in whichever module the order puts next.
+        # The failure this prevents is silent: a worker that could not be started leaves
+        # a deadline in the future, and every test after it skips starting one without
+        # trying.
         moved = engine.time.monotonic() + 3600.0
         engine._worker_retry_after = moved
         self.addCleanup(setattr, engine, "_worker_retry_after", moved)

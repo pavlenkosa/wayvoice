@@ -25,8 +25,8 @@ def _which_returning(mapping):
 
 class RegistryTests(unittest.TestCase):
     def test_the_registry_is_exactly_what_wayvoice_needs(self):
-        # The four dependencies, named: "the list is not empty" is true of any
-        # list, including one that lost an entry and gained nothing.
+        # The four dependencies, named: "the list is not empty" is true of any list,
+        # including one that lost an entry and gained nothing.
         self.assertEqual(
             [dep.id for dep in deps.dependencies()],
             ["pipewire", "wl-clipboard", "notify", "ydotool"],
@@ -178,8 +178,8 @@ class DescribeMissingTests(unittest.TestCase):
             self.assertEqual(deps.describe_missing("pipewire", "en"), "")
 
     def test_describe_missing_does_not_name_a_package(self):
-        # The whole point of the module: the text depends on what is absent,
-        # never on a distribution specific package name.
+        # The text depends on what is absent, never on a distribution specific package
+        # name.
         with mock.patch("shutil.which", _fake_which(set())):
             text = deps.describe_missing("pipewire", "en")
         for name in ("pipewire-bin", "pipewire-utils", "apt", "dnf"):
@@ -196,10 +196,9 @@ if __name__ == "__main__":
 class BundledCommandTests(unittest.TestCase):
     """Where a command is looked for: ``PATH`` first, then a bundled copy.
 
-    The bundled one is a fallback, never a preference. A distribution's package is
-    the copy that receives security updates, and a bundled fallback that won would
-    be a second, unmaintained copy of a program that writes to the kernel's input
-    layer - which is a worse thing than either copy alone.
+    The bundled one is a fallback, never a preference. A distribution's package is the copy
+    that receives security updates, and a bundled fallback that won would be a second,
+    unmaintained copy of a program that writes to the kernel's input layer.
     """
 
     def setUp(self):

@@ -1,14 +1,13 @@
 """The engine registry is the one place that knows which engines exist.
 
-Everything else -- the daemon, the CLI, the settings window -- asks the
-registry instead of comparing engine ids, so these tests guard the registry
-itself: every registered engine reports a usable status, the ids and labels
-are unique, no two engines claim the same config key, the flags match what the
-settings window does with them, and an id nobody claims fails loudly instead
-of falling back to another engine.
+Everything else - the daemon, the CLI, the settings window - asks the registry instead
+of comparing engine ids, so these tests guard the registry itself: every registered
+engine reports a usable status, the ids and labels are unique, no two engines claim the
+same config key, the flags match what the settings window does with them, and an id
+nobody claims fails loudly instead of falling back to another engine.
 
-No test here needs a downloaded model or a network.  The settings-window tests
-need a display and step aside without one.
+No downloaded model and no network. The settings-window tests need a display and step
+aside without one.
 """
 
 import io
@@ -45,11 +44,10 @@ _APPLICATION = None
 def _gtk_available() -> bool:
     """Whether this process can really open a GTK window.
 
-    ``Gtk.init_check()`` is not the question, and asking it is how a whole test
-    run used to die: on a machine with the bindings installed but no display - a
-    build server, a plain ssh session - it still answers true, the tests below go
-    on to build widgets, and GTK takes the process down with it. A segfault is
-    worse than a failure, because it takes the other four hundred tests with it.
+    Not ``Gtk.init_check()``: on a machine with the bindings but no display - a build
+    server, a plain ssh session - that still answers true, the tests go on to build widgets,
+    and GTK takes the process down. A segfault is worse than a failure, because it takes the
+    other four hundred tests with it.
     """
     if not (os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY")):
         return False
@@ -68,9 +66,8 @@ def _gtk_available() -> bool:
 def _test_application():
     """One application for the whole run.
 
-    Registering emits ``GApplication::startup``, which GTK wants to have seen
-    before a window is created, and a second registration of the same id in one
-    process is refused.
+    Registering emits ``GApplication::startup``, which GTK wants to have seen before a
+    window is created, and a second registration of the same id in one process is refused.
     """
     from gi.repository import Adw
 
@@ -93,8 +90,8 @@ def _registered(engine: Engine):
 
 class RegistryShapeTests(unittest.TestCase):
     def test_every_shipped_engine_is_registered(self):
-        # The three engines engine.py can actually run. A fourth one added
-        # later must be added here on purpose, not by accident.
+        # The three engines engine.py can actually run. A fourth one added later must be
+        # added here on purpose, not by accident.
         self.assertEqual(engine_ids(), ["faster-whisper", "whisper-cpp", "custom"])
 
     def test_ids_and_labels_are_unique(self):
@@ -259,8 +256,8 @@ class CustomEngineTests(unittest.TestCase):
             transcribe(Path("/nonexistent.wav"), {"engine": "custom"})
 
     def test_audio_placeholder_is_substituted(self):
-        # shlex.quote is what protects the space, so the template itself must
-        # leave the placeholder unquoted for it to do its job.
+        # shlex.quote is what protects the space, so the template must leave the
+        # placeholder unquoted for it to do its job.
         with tempfile.TemporaryDirectory() as tmp:
             audio = Path(tmp) / "take 1.wav"
             audio.write_bytes(b"RIFF")
@@ -401,9 +398,9 @@ class SettingsWindowRegistryTests(unittest.TestCase):
 
     def _build_window(self):
         app = _test_application()
-        # The window arms timers and an idle callback on construction; without
-        # a running main loop they never fire, but replacing them keeps a test
-        # run from touching the real daemon or the real user's config.
+        # The window arms timers and an idle callback on construction; they never fire
+        # without a main loop, but replacing them keeps a run from touching the real
+        # daemon or the real user's config.
         with (
             mock.patch.object(self.ui.WayVoiceWindow, "_background_start", lambda self: 0),
             mock.patch.object(self.ui.WayVoiceWindow, "_poll_status", lambda self: 0),
@@ -518,8 +515,8 @@ class DaemonSetupTests(unittest.TestCase):
 class CliSetupTests(unittest.TestCase):
     """``wayvoice engine-setup`` asks the registry, not the runtime directly.
 
-    It used to prepare Faster-Whisper whatever the config said, so asking it to
-    set up whisper.cpp installed a Python runtime nothing would ever use.
+    It used to prepare Faster-Whisper whatever the config said, so asking it to set up
+    whisper.cpp installed a Python runtime nothing would ever use.
     """
 
     def _run(self, cfg, prepared):

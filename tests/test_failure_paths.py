@@ -1,17 +1,13 @@
 """Failure paths that used to end in "nothing happened".
 
-Four of them, one per layer:
+One per layer: a cancelled or timed-out recognition could block forever on the pipes of
+a child that ignored both signals; a package manager that hung was killed but its apt
+kept running and kept the dpkg lock, so the user's own retry failed with a message about
+a lock; ``setup-user`` reported success whatever it did, so a hotkey that was never
+applied looked like a working installation; and the engine setup waited on its lock
+forever and ran pip without a deadline.
 
-* a cancelled or timed-out recognition could block forever on the pipes of a
-  child that ignored both signals;
-* a package manager that hung was killed but its ``apt`` kept running and kept
-  the dpkg lock, so the user's own retry failed with a message about a lock;
-* ``setup-user`` reported success whatever it did, so a hotkey that was never
-  applied looked like a working installation;
-* the engine setup waited on its lock forever and ran pip without a deadline.
-
-The processes here are fakes: what is under test is the reaction to a failure,
-not the failing program.
+The processes here are fakes: what is under test is the reaction to a failure.
 """
 
 import subprocess
@@ -58,10 +54,9 @@ class RunCancelableTests(unittest.TestCase):
     """The reason the user gets "timed out" has to be the actual reason."""
 
     def test_a_child_that_ignores_everything_does_not_block_forever(self):
-        # The regression: after terminating, the old code called communicate()
-        # with no timeout. A child that survived both signals left the daemon
-        # busy for the rest of the session - it refused recording and only a
-        # restart cleared it.
+        # After terminating, the old code called communicate() with no timeout. A child
+        # that survived both signals left the daemon busy for the rest of the session:
+        # it refused recording and only a restart cleared it.
         child = FakeChild()
         with mock.patch.object(engine.subprocess, "Popen", return_value=child):
             with mock.patch.object(engine.os, "killpg", side_effect=OSError("no such process")):
@@ -78,9 +73,9 @@ class RunCancelableTests(unittest.TestCase):
                     engine._run_cancelable(["x"], timeout=30.0, cancel_event=cancel)
 
     def test_a_child_that_floods_its_pipes_still_returns(self):
-        # ctranslate2 is not quiet about a model it dislikes. Nothing drained the
-        # pipes while the loop polled the child, so a full pipe buffer stopped it
-        # from exiting and the user was told the recognition had timed out.
+        # ctranslate2 is not quiet about a model it dislikes. Nothing drained the pipes
+        # while the loop polled the child, so a full pipe buffer stopped it from exiting
+        # and the user was told the recognition had timed out.
         script = (
             "import sys\n"
             "sys.stdout.write('x' * 400000)\n"
@@ -99,13 +94,11 @@ class RunCancelableTests(unittest.TestCase):
 class InstallTimeoutTests(unittest.TestCase):
     """A timeout has to take the package manager's children with it.
 
-    Every question about the machine is answered here rather than inherited:
-    these tests are about what happens when the manager does not finish, and
-    whether the caller is root, whether pkexec is installed, and whether the
-    package is in the repositories at all are three different questions. On a
-    machine where the first two answered "no", the code returned before starting
-    anything and the tests failed on a missing attribute instead of on the
-    behaviour they are about.
+    Every question about the machine is answered here rather than inherited: whether the
+    caller is root, whether pkexec is installed and whether the package is in the
+    repositories are three different questions, and on a machine where the first two
+    answered "no" the code returned before starting anything, so these tests failed on a
+    missing attribute instead of on the behaviour they are about.
     """
 
     ARGV = ["apt-get", "install", "-y", "wl-clipboard"]
@@ -130,10 +123,10 @@ class InstallTimeoutTests(unittest.TestCase):
             ok, message = pkgsys.install_packages(
                 ["wl-clipboard"], timeout=0.1, language="en"
             )
-        # Proof that the path under test is the one these tests are about: had
-        # the code asked for pkexec, the answer above would have turned the run
-        # into "needs root privileges", and the tests would have been reporting
-        # whatever this machine happens to have installed.
+        # Proof that the path under test is the one these tests are about: had the code
+        # asked for pkexec, the answer above would have turned the run into "needs root
+        # privileges" and the tests would have reported what this machine has
+        # installed.
         self.assertFalse(pkexec.called, "the privileged path was taken")
         return ok, message, child
 
@@ -145,8 +138,8 @@ class InstallTimeoutTests(unittest.TestCase):
         self.assertTrue(child.kwargs.get("start_new_session"))
 
     def test_a_timed_out_install_says_so_in_seconds(self):
-        # The message has to name the deadline that was hit. "It contains a 1"
-        # - which is what this used to assert - is true of half of apt's output.
+        # The message has to name the deadline that was hit. "It contains a 1" - what
+        # this used to assert - is true of half of apt's output.
         ok, message, _child = self._run("")
         self.assertFalse(ok)
         self.assertIn("1s", message)
@@ -229,10 +222,9 @@ class EngineSetupLockTests(unittest.TestCase):
             self.addCleanup(holder.close)
             fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             with lock_path.open("w") as taken:
-                # The handle the code under test is handed is closed here, not
-                # left to the garbage collector: an unclosed file is a warning
-                # in every run, and a warning nobody reads hides the ones that
-                # are about production code.
+                # The handle the code under test is handed is closed here rather than
+                # left to the collector: an unclosed file is a warning in every run, and
+                # a warning nobody reads hides the ones about production code.
                 with mock.patch.object(engine_setup, "LOCK_TIMEOUT", 0.1):
                     self.assertFalse(engine_setup._take_lock(taken))
 
@@ -249,9 +241,9 @@ class EngineSetupLockTests(unittest.TestCase):
             self.assertTrue(engine_setup._take_lock(handle))
 
     def test_pip_has_a_deadline(self):
-        # A network that stops delivering used to leave the status at
-        # "installing" forever: the window spun with no cancel button and every
-        # dictation attempt spawned another setup process waiting on the lock.
+        # A network that stops delivering used to leave the status at "installing"
+        # forever: the window spun with no cancel button and every dictation attempt
+        # spawned another setup process waiting on the lock.
         from wayvoice import engine_setup
 
         self.assertGreater(engine_setup.PIP_TIMEOUT, 0)
