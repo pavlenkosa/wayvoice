@@ -1,13 +1,11 @@
 """What the hot key does while a model is still being fetched.
 
-The change these tests cover: pressing the key used to start a dictation that
-could not finish, because the weights were being downloaded inside the
-transcription - silently, for minutes, ending in a timeout.  Now the daemon
-refuses with an explanation, fetches the model in the background, and reports
-what that fetch is doing.
+Pressing the key used to start a dictation that could not finish, because the weights
+were downloaded inside the transcription - silently, for minutes, ending in a timeout.
+The daemon now refuses with an explanation, fetches in the background, and reports what
+that fetch is doing.
 
-The engine is faked: what is under test is the daemon's own behaviour, not the
-hub.
+The engine is faked: what is under test is the daemon's own behaviour, not the hub.
 """
 
 import contextlib
@@ -84,8 +82,8 @@ class DaemonCase(unittest.TestCase):
     def setUp(self):
         self.patches = contextlib.ExitStack()
         self.addCleanup(self.patches.close)
-        # A daemon reads the user's config, walks the user's model cache and
-        # starts a warm worker for it; none of that belongs in a test run.
+        # A daemon reads the user's config, walks the user's model cache and starts a
+        # warm worker for it; none of that belongs in a test run.
         self.root = isolate_environment(self)
         isolate_engine(self)
 
@@ -102,8 +100,8 @@ class PrepareDaemon:
 
     #: What the daemon under test believes the user chose.
     #:
-    #: The language is pinned because replies are translated: a test that asserts
-    #: on a message must not depend on the locale of the machine it runs on.
+    #: The language is pinned because replies are translated: a test that asserts on a
+    #: message must not depend on the locale of the machine it runs on.
     CONFIG = {
         "model": "small", "engine_worker": True, "notify": False,
         "ui_language": "en",
@@ -118,13 +116,13 @@ class PrepareDaemon:
         test.patch("wayvoice.engine.warm_worker", return_value=True)
         test.patch("wayvoice.daemon.load_config", return_value=dict(self.config))
         self.daemon = WayVoiceDaemon()
-        # A Mock would answer "recording" to everything, and the daemon would
-        # then take the hot key as a request to stop.
+        # A Mock would answer "recording" to everything, and the daemon would take the
+        # hot key as a request to stop.
         self.daemon.recorder = mock.Mock(recording=False)
         self.daemon._prepare_engine = mock.Mock()
-        # The daemon prepares its model as soon as it is constructed, which is
-        # the behaviour under test elsewhere; here it only has to finish and be
-        # forgotten, so that each test counts the downloads it asked for.
+        # The daemon prepares its model as soon as it is constructed, which is the
+        # behaviour under test elsewhere; here it only has to finish and be forgotten,
+        # so each test can count the downloads it asked for.
         self.settle()
         calls["reset"]()
         self.calls = calls
@@ -181,12 +179,11 @@ class PrepareTests(DaemonCase):
         self.assertEqual(report["download"]["state"], "downloading")
 
     def test_a_model_that_is_there_is_never_downloaded(self):
-        # The daemon asks on every start; a download of something already
-        # present would fight with the recognizer over the same files. Asking to
-        # prepare such a model warms it instead - so what is checked here is that
-        # nothing was fetched, and what phase was reported: "downloading" for a
-        # model with its weights already on disk would be a promise of a progress
-        # bar that never moves.
+        # The daemon asks on every start, and a download of something already present
+        # would fight the recognizer over the same files. Preparing such a model warms
+        # it instead, so what is checked here is that nothing was fetched and that the
+        # phase is not "downloading" - which would promise a progress bar that never
+        # moves.
         eng, calls = make_engine(present=True)
         harness = PrepareDaemon(self, eng, calls)
         self.assertTrue(harness.daemon._start_model_prepare({}))
@@ -277,9 +274,9 @@ class PrepareTests(DaemonCase):
         self.assertTrue(report["present"])
 
     def test_warming_is_reported_while_it_happens(self):
-        # Warming is the second half of the job, and from the user's side it is
-        # the same wait: the model is not in memory yet. Reported only in the
-        # final answer, the window would sit at 100% for the whole load.
+        # Warming is the second half of the job and from the user's side the same wait:
+        # the model is not in memory yet. Reported only in the final answer, the window
+        # would sit at 100% for the whole load.
         started = threading.Event()
         finish = threading.Event()
 
@@ -317,10 +314,9 @@ class HotKeyTests(DaemonCase):
         harness.daemon.recorder.start.assert_not_called()
 
     def test_pressing_the_key_does_not_start_a_download(self):
-        # Pressing the key is not agreeing to spend the bandwidth: the settings
-        # window asks before a download and the user may have said no. A daemon
-        # that starts one here has turned that answer into a lie, and the
-        # surprise arrives without a question attached to it.
+        # Pressing the key is not agreeing to spend the bandwidth: the window asks
+        # before a download and the user may have said no. A daemon that starts one here
+        # has turned that answer into a lie.
         eng, calls = make_engine(present=False, progress=True, delay=0.05)
         harness = PrepareDaemon(self, eng, calls)
         reply = harness.daemon.dispatch("start")
@@ -416,11 +412,10 @@ class CommandTests(DaemonCase):
         harness.wait_for("ready")
 
     def test_prepare_model_on_a_model_that_is_there_loads_it(self):
-        # Nothing is fetched, and the reply says what was started rather than
-        # what the background thread had reached by the time it was read: the
-        # warm worker here is instant, so a reply that reported the state instead
-        # of the phase would say "ready" for a load that had just begun - and say
-        # so or not at all depending on how the scheduler felt.
+        # Nothing is fetched, and the reply says what was started rather than what the
+        # background thread had reached by the time it was read. The warm worker here is
+        # instant, so a reply reporting the state would say "ready" for a load that had
+        # just begun - or not, depending on how the scheduler felt.
         eng, calls = make_engine(present=True)
         harness = PrepareDaemon(self, eng, calls)
         reply = harness.daemon.dispatch("prepare-model")
@@ -446,10 +441,9 @@ class CommandTests(DaemonCase):
         harness.wait_for("error")
 
     def test_two_callers_in_the_starting_window_start_one_download(self):
-        # The window between "the thread exists" and "the thread runs" is real:
-        # the guard has to be set before start(), not inferred from is_alive()
-        # afterwards.  Two callers in that window used to both fetch the same
-        # file at the same time, from two threads, into one cache directory.
+        # The window between "the thread exists" and "the thread runs" is real: the
+        # guard has to be set before start(), not inferred from is_alive() afterwards.
+        # Two callers in that window used to fetch the same file at the same time.
         eng, calls = make_engine(present=False, states=["ready"], delay=0.05)
         harness = PrepareDaemon(self, eng, calls)
         window = threading.Event()
@@ -561,9 +555,8 @@ class StartupTests(unittest.TestCase):
             time.sleep(0.02)
 
     def test_starting_the_daemon_fetches_nothing(self):
-        # Several gigabytes over the network the moment WayVoice starts is a
-        # decision nobody asked for - and on a tethered laptop it is somebody
-        # else's bandwidth.
+        # Several gigabytes over the network the moment WayVoice starts is a decision
+        # nobody asked for, and on a tethered laptop it is somebody else's bandwidth.
         eng, calls = make_engine(present=False, progress=True)
         with mock.patch("wayvoice.engine.warm_worker", return_value=True) as warm:
             daemon = self._start(eng)
@@ -599,12 +592,11 @@ class StartupTests(unittest.TestCase):
         self.assertEqual(calls["n"], 1)
 
     def test_a_daemon_that_is_refused_changes_nothing(self):
-        # Ownership is decided before anything is prepared, and that order is
-        # the point: preparing means warming the worker, which stops the running
-        # daemon's worker because the two disagree about the model, and then
-        # starts one of its own. A duplicate that did that first would leave the
-        # real daemon paying a cold model load and a pid file owned by a process
-        # that is already gone.
+        # Ownership is decided before anything is prepared, and that order is the point:
+        # preparing warms the worker, which stops the running daemon's worker because the
+        # two disagree about the model, and then starts its own. A duplicate that did
+        # that first would leave the real daemon paying a cold model load and a pid file
+        # owned by a process that is already gone.
         holder_warmed = threading.Event()
 
         def warm_first(cfg):
@@ -625,11 +617,9 @@ class StartupTests(unittest.TestCase):
             while time.monotonic() < deadline and not socket_path().exists():
                 time.sleep(0.02)
             self.assertTrue(socket_path().exists(), "the first daemon never served")
-            # Wait for the holder's own warm-up to have happened, rather than for
-            # a flag that is still false because the thread has not started yet:
-            # a late call of the holder's would land in the mock below and look
-            # like the duplicate's doing. This test passed or failed depending on
-            # how the scheduler felt before that was noticed.
+            # Wait for the holder's own warm-up rather than for a flag that is still
+            # false because its thread has not started: a late call of the holder's would
+            # land in the mock below and look like the duplicate's doing.
             self.assertTrue(
                 holder_warmed.wait(20.0), "the first daemon never warmed its worker"
             )
