@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 — 2026-10-04
 
 - Recognition languages: all 100 that Whisper supports, each under its own name, with automatic detection as the default instead of a pinned language.
 - Spoken punctuation commands in English as well as Russian, applied per language.
@@ -17,7 +17,7 @@
 - The hot key no longer starts a model download on its own. Pressing it is not agreeing to spend the bandwidth, so it now says which model is missing and where it can be fetched.
 - The warm-up message no longer promises a time: a large model on a slow disk takes minutes to load, and the row says it is waiting instead of guessing.
 - Installation paths are prefix-independent.
-- New application icon.
+- New application icon, and the desktop entry declares one main category, so the app appears once in the menu.
 - A model given as a local path is dictatable again: it was being reported as "missing", which made the daemon refuse every hot key press and offer a download that cannot succeed.
 - Downloading a model no longer raises errors from inside `huggingface_hub` on the xet-served path, and the download progress is still exact.
 - Stopping the daemon now stops the recording with it. Only a signal used to end the process outright, skipping the cleanup, so the recorder - which runs in a session of its own - stayed behind holding the microphone with nobody left to stop it. That is what systemd sends on stop, and what a forced stop sends to a daemon that ignored `quit`.

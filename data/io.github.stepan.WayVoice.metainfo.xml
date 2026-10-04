@@ -15,6 +15,9 @@
   <supports><control>pointing</control><control>keyboard</control></supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.6.0" date="2026-10-04">
+      <description><p>Model management with a visible, cancellable download, all 100 recognition languages, an engine registry, a warm worker that loads the model when the daemon starts, and a daemon that starts with or without systemd.</p></description>
+    </release>
     <release version="0.5.1" date="2026-10-02">
       <description><p>License metadata aligned to GPL-3.0-only across the About dialog, packaging metadata and AppStream data.</p></description>
     </release>
