@@ -12,6 +12,7 @@ aside without one.
 
 import io
 import os
+import subprocess
 import sys
 import tempfile
 import threading
@@ -20,6 +21,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest import mock
 
+from wayvoice import engine
 from wayvoice.config import DEFAULTS
 from wayvoice.engine import (
     DEFAULT_ENGINE,
@@ -27,6 +29,7 @@ from wayvoice.engine import (
     Engine,
     TranscriptionCancelled,
     _transcribe_custom,
+    _transcribe_whisper_cpp,
     engine_from_config,
     engine_ids,
     engine_label,
@@ -237,6 +240,62 @@ class EngineStatusTests(unittest.TestCase):
             })
         self.assertEqual(status["state"], "missing")
         self.assertIn("model", status["message"].lower())
+
+
+class WhisperCppThreadTests(unittest.TestCase):
+    """The engine has to tell whisper.cpp how many threads it may use.
+
+    whisper.cpp defaults to four. On a sixteen-thread laptop the same medium model
+    took 21.8 s for twelve seconds of speech with that default and 12.5 s with
+    ``-t 16`` - measured, same machine, same audio, nothing else changed.
+    """
+
+    def _transcribed(self, cfg_extra=None):
+        cfg = {
+            "engine": "whisper-cpp",
+            "whisper_cpp_binary": "/bin/echo",
+            "whisper_cpp_model": "/bin/sh",
+            "whisper_cpp_gpu": False,
+        }
+        cfg.update(cfg_extra or {})
+        seen: list[list[str]] = []
+
+        def record(args, **kwargs):
+            seen.append(list(args))
+            return subprocess.CompletedProcess(args, 0, "текст", "")
+
+        with mock.patch.object(engine, "_find_whisper_cpp", return_value="/bin/echo"), \
+             mock.patch.object(engine, "_run_cancelable", side_effect=record):
+            text = _transcribe_whisper_cpp(Path("/nonexistent.wav"), cfg, None)
+        self.assertEqual(text, "текст")
+        return seen[0]
+
+    def test_the_thread_count_is_passed_explicitly(self):
+        args = self._transcribed()
+        self.assertIn("-t", args, "whisper.cpp would fall back to its default of four")
+        threads = args[args.index("-t") + 1]
+        self.assertEqual(threads, str(engine._thread_count()))
+
+    def test_the_thread_count_is_the_number_of_cpus(self):
+        with mock.patch.object(engine.os, "cpu_count", return_value=16):
+            self.assertEqual(engine._thread_count(), 16)
+
+    def test_a_missing_cpu_count_still_gives_a_usable_number(self):
+        for reported in (None, 0, -3):
+            with mock.patch.object(engine.os, "cpu_count", return_value=reported):
+                self.assertEqual(engine._thread_count(), 1)
+        with mock.patch.object(engine.os, "cpu_count", return_value="many"):
+            self.assertEqual(engine._thread_count(), 1)
+
+    def test_an_absurd_cpu_count_is_bounded(self):
+        # A container reporting hundreds of CPUs is not a laptop, and the number
+        # goes straight to the program.
+        with mock.patch.object(engine.os, "cpu_count", return_value=4096):
+            self.assertEqual(engine._thread_count(), 64)
+
+    def test_gpu_is_still_switched_off_when_asked(self):
+        args = self._transcribed({"whisper_cpp_gpu": False})
+        self.assertIn("-ng", args)
 
 
 class CustomEngineTests(unittest.TestCase):
