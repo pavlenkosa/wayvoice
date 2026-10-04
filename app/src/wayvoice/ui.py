@@ -225,6 +225,10 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         # can be in flight while the user changes the selection.
         self._model_refresh_busy = False
         self._model_refresh_pending = False
+        #: The model whose download is waiting for the user's answer. Set when a
+        #: model is selected and cleared by the first state report that speaks
+        #: about it, so a decision can never be asked for twice.
+        self._download_confirmation_for: str | None = None
         self._model_deleting = False
         self._install_css()
         self._install_actions()
@@ -811,11 +815,78 @@ class WayVoiceWindow(Adw.ApplicationWindow):
 
     def _on_model_selected(self, *_args):
         self._sync_model_ui()
+        model_id = self._selected_model_id()
+        # Choosing a model is choosing weights, and weights are the one thing here
+        # that costs gigabytes of somebody's bandwidth. A model that is already
+        # on disk needs no permission - it is only loaded - so the answer comes
+        # from the state report, which knows what is on disk, and the download is
+        # only started after the user has said yes. Without the question, a
+        # single click in a dropdown started a download the user never asked for.
+        self._download_confirmation_for = model_id
         self._refresh_model_state()
-        # Choosing a model is choosing weights. If the new one is not on disk,
-        # start fetching it now: the daemon would otherwise wait for the first
-        # dictation, and that wait is the invisible one this row exists to
-        # remove.
+
+    def _decide_what_to_do_about_the_selected_model(self, entry: dict) -> None:
+        """Warm what is on disk; ask before fetching what is not.
+
+        Called from the state report, on the main loop, once per selection.
+        """
+        model_id = str(entry.get("id") or "")
+        if not self._download_confirmation_for or model_id != self._download_confirmation_for:
+            return
+        self._download_confirmation_for = None
+        if entry.get("downloaded"):
+            # Free, and invisible otherwise: the first dictation would pay for
+            # loading the model, and nothing would have said so.
+            self._ask_daemon_to_prepare_model()
+            return
+        if str(entry.get("kind") or "") != "hub":
+            # A local path or a name nothing can fetch: there is nothing to ask
+            # about, and the daemon says so for itself.
+            self._ask_daemon_to_prepare_model()
+            return
+        self._ask_about_download(model_id, int(entry.get("size_bytes") or 0))
+
+    def _ask_about_download(self, model_id: str, size_bytes: int) -> None:
+        """The question, before the gigabytes."""
+        if size_bytes <= 0:
+            # The size is what the catalogue says; a model whose files are not on
+            # disk has none to count, and a question without a number is a guess.
+            size = self.t("store.download_unknown_size")
+        else:
+            size = model_store.human_size(size_bytes, self.ui_lang)
+        name = display_name(model_id)
+        # Built by hand like the delete confirmation: a confirmation has to open
+        # on the GTK 4 versions WayVoice supports.
+        win = Gtk.Window(
+            title=self.t("store.download_title"), transient_for=self, modal=True
+        )
+        win.set_default_size(460, 190)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        for side in ("top", "bottom", "start", "end"):
+            getattr(box, f"set_margin_{side}")(24)
+        title = self._label(name, "section-title", xalign=0.5)
+        title.set_halign(Gtk.Align.CENTER)
+        box.append(title)
+        body = self._label(
+            self.t("store.download_body", name=name, size=size), "muted", wrap=True, xalign=0.5
+        )
+        body.set_halign(Gtk.Align.CENTER)
+        box.append(body)
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        buttons.set_halign(Gtk.Align.CENTER)
+        later = Gtk.Button(label=self.t("store.download_later"))
+        later.connect("clicked", lambda *_: win.close())
+        go = Gtk.Button(label=self.t("store.download_now"))
+        go.add_css_class("suggested-action")
+        go.connect("clicked", self._download_confirmed, win)
+        buttons.append(later)
+        buttons.append(go)
+        box.append(buttons)
+        win.set_child(box)
+        win.present()
+
+    def _download_confirmed(self, _button, win) -> None:
+        win.close()
         self._ask_daemon_to_prepare_model()
 
     def _ask_daemon_to_prepare_model(self) -> None:
@@ -906,6 +977,15 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         download = report.get("download") if isinstance(report.get("download"), dict) else {}
         state = str(download.get("state") or "idle")
         model_id = str(report.get("model") or "")
+        if str(download.get("model") or "") != model_id:
+            # Work on a different model than the selected one - the user changed
+            # the row while the old model was still coming down, or was being
+            # loaded into the worker. Painting its bytes, or its warm-up, next to
+            # the new model would be a lie: the model row already says that this
+            # one is not downloaded. This has to come before the warm-up below,
+            # which is where a stale one used to slip through.
+            self.model_download_row.set_visible(False)
+            return
         if state == "warming":
             # No download: the model is on disk and is being read into memory so
             # that the first dictation is as fast as the rest.
@@ -916,13 +996,6 @@ class WayVoiceWindow(Adw.ApplicationWindow):
             )
             self.model_download_row.set_subtitle(self.t("store.warming_sub"))
             self.model_download_row.set_visible(True)
-            return
-        if str(download.get("model") or "") != model_id:
-            # A download of a different model than the selected one - the user
-            # changed the row while the old model was still coming down.
-            # Painting its bytes next to the new model would be a lie, and the
-            # model row already says that this one is not downloaded.
-            self.model_download_row.set_visible(False)
             return
         if state == "downloading":
             done = int(download.get("done_bytes") or 0)
@@ -1020,6 +1093,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
     def _model_state_ready(self, entry, free_bytes, total_bytes, held):
         self._model_refresh_busy = False
         self._apply_model_state(entry, free_bytes, total_bytes, held)
+        self._decide_what_to_do_about_the_selected_model(entry)
         if self._model_refresh_pending:
             self._refresh_model_state()
         return GLib.SOURCE_REMOVE

@@ -182,13 +182,30 @@ class PrepareTests(DaemonCase):
 
     def test_a_model_that_is_there_is_never_downloaded(self):
         # The daemon asks on every start; a download of something already
-        # present would fight with the recognizer over the same files.
+        # present would fight with the recognizer over the same files. Asking to
+        # prepare such a model warms it instead - so what is checked here is that
+        # nothing was fetched, and what phase was reported: "downloading" for a
+        # model with its weights already on disk would be a promise of a progress
+        # bar that never moves.
         eng, calls = make_engine(present=True)
         harness = PrepareDaemon(self, eng, calls)
-        self.assertFalse(harness.daemon._start_model_prepare({}))
-        self.assertEqual(calls["n"], 0)
+        self.assertTrue(harness.daemon._start_model_prepare({}))
+        harness.wait_for("ready")
+        self.assertEqual(calls["n"], 0, "a model that was there was fetched")
         report = harness.daemon.status()["model"]
         self.assertTrue(report["present"])
+        self.assertEqual(report["download"]["state"], "ready")
+
+    def test_a_model_that_is_there_with_the_worker_off_starts_nothing(self):
+        # Nothing to fetch and nobody to load it into: there is no work here, and
+        # saying otherwise would put a progress bar on the screen for a job that
+        # does not exist.
+        eng, calls = make_engine(present=True)
+        harness = PrepareDaemon(self, eng, calls, config={"engine_worker": False})
+        self.assertFalse(harness.daemon._start_model_prepare({}))
+        reply = harness.daemon.dispatch("prepare-model")
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["state"], "ready")
 
     def test_two_downloads_are_not_started_at_once(self):
         eng, calls = make_engine(present=False, progress=True, delay=0.05)
@@ -389,12 +406,17 @@ class CommandTests(DaemonCase):
         self.assertEqual(reply["state"], "downloading")
         harness.wait_for("ready")
 
-    def test_prepare_model_on_a_model_that_is_there_is_already_done(self):
+    def test_prepare_model_on_a_model_that_is_there_loads_it(self):
+        # Nothing is fetched, and the reply says what was started rather than
+        # what the background thread had reached by the time it was read: the
+        # warm worker here is instant, so a reply that reported the state instead
+        # of the phase would say "ready" for a load that had just begun - and say
+        # so or not at all depending on how the scheduler felt.
         eng, calls = make_engine(present=True)
         harness = PrepareDaemon(self, eng, calls)
         reply = harness.daemon.dispatch("prepare-model")
         self.assertTrue(reply["ok"])
-        self.assertEqual(reply["state"], "ready")
+        self.assertEqual(reply["state"], "warming")
         self.assertEqual(calls["n"], 0)
 
     def test_prepare_model_on_an_engine_without_models_says_why(self):

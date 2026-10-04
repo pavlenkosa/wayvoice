@@ -162,39 +162,49 @@ class WayVoiceDaemon:
     # ------------------------------------------------------------------
     # Getting the model ready before it is needed
     # ------------------------------------------------------------------
-    def _start_model_prepare(self, cfg: dict | None = None, download: bool = True) -> bool:
+    def _start_model_prepare(self, cfg: dict | None = None, download: bool = True) -> str:
         """Get the selected model ready: fetch it if asked to, then warm it.
 
-        Returns whether work was started.  Only ever one run at a time: two
+        Returns the phase that was started - ``"downloading"`` or ``"warming"`` -
+        or ``""`` when nothing was started.  The phase is what was *started*,
+        read before the thread has had a chance to finish: a reply that reported
+        the state the background work had reached by then would be a race, and a
+        race that answers "ready" for a load that has just begun.  Only ever one run at a time: two
         downloads of the same 3 GB file would fight over the same cache, and the
         second one's progress would be the first one's failure.
 
-        A model that is already there is not downloaded - the daemon asks this on
+        A model that is already there is never fetched - the daemon asks this on
         every start, and the answer must not involve the network - so
         ``download=False`` is what startup uses: warm what is on disk, fetch
         nothing.
+
+        Asking to prepare a model that *is* on disk warms it. That used to be
+        reported as "already done", which left the user who had just picked a
+        different model looking at a first dictation that paid for loading it
+        with nothing having told them that was coming.
         """
         settings = cfg or load_config()
         engine = engine_from_config(settings)
         state = model_state(engine, settings)
         if not state["supported"]:
-            return False
-        if download:
-            if state["present"]:
-                # Already on disk: nothing to fetch, and the caller only asks
-                # for a download when it believes something is missing.
-                return False
-        else:
-            if not state["present"] or not settings.get("engine_worker", True):
-                # Nothing on disk to warm up, or the user turned the worker off.
-                return False
+            return ""
+        if state["present"]:
+            # Nothing to fetch. Warming it is still the point of being asked, and
+            # needs a worker to warm into - the user may have turned it off.
+            if not settings.get("engine_worker", True):
+                return ""
+            download = False
+        elif not download:
+            # Asked to warm up a model that is not there.
+            return ""
         with self._lock:
             if self._prepare_running:
-                return False
+                return ""
             self._prepare_running = True
             self._prepare_cancel.clear()
+            phase = "downloading" if download else "warming"
             self._download = {
-                "state": "downloading" if download else "warming",
+                "state": phase,
                 "model": state["model"],
                 "done_bytes": 0,
                 "total_bytes": 0,
@@ -216,8 +226,8 @@ class WayVoiceDaemon:
                 self._download = {"state": "error", "model": state["model"],
                                   "done_bytes": 0, "total_bytes": 0,
                                   "error": str(exc), "warming": False}
-            return False
-        return True
+            return ""
+        return phase
 
     def _prepare_model_worker(self, cfg: dict, reported: dict, download: bool) -> None:
         """Fetch the model when asked to, then let the warm worker hold it.
@@ -541,8 +551,13 @@ class WayVoiceDaemon:
             return {"ok": True}
         if command == "prepare-model":
             cfg = load_config()
-            if self._start_model_prepare(cfg):
-                return {"ok": True, "state": "downloading"}
+            phase = self._start_model_prepare(cfg)
+            if phase:
+                # What was started, not what was hoped for: a model that was on
+                # disk is warmed rather than fetched, and a caller that says
+                # "downloading" for both would promise the user a progress bar
+                # that never moves.
+                return {"ok": True, "state": phase}
             state = self._model_report(cfg)
             if not state["supported"]:
                 # A local directory or an engine without hub models. There is

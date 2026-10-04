@@ -159,6 +159,101 @@ class DownloadRowTests(unittest.TestCase):
                      "warming": False})
         self.assertFalse(self.row.visible)
 
+    def test_another_models_warm_up_is_not_reported_as_this_row_either(self):
+        # The same lie in the other direction: the user picked another model while
+        # the old one was still being read into the worker, and the warm-up bar
+        # was painted next to the new model - which has nothing loaded and
+        # nothing coming. The warm-up is a branch of its own, so it needed the
+        # same guard as the download, and in the same place: before it.
+        self._apply({"supported": True, "present": False, "model": "small",
+                     "download": {"state": "warming", "model": "medium",
+                                  "done_bytes": 0, "total_bytes": 0,
+                                  "error": "", "warming": True},
+                     "warming": True})
+        self.assertFalse(self.row.visible)
+        self.assertEqual(self.row.title, "")
+
+    def test_this_models_own_warm_up_is_still_shown(self):
+        # The guard must not swallow the case it was written for.
+        self._apply({"supported": True, "present": True, "model": "medium",
+                     "download": {"state": "warming", "model": "medium",
+                                  "done_bytes": 0, "total_bytes": 0,
+                                  "error": "", "warming": True},
+                     "warming": True})
+        self.assertTrue(self.row.visible)
+        self.assertIn("Medium", self.row.title)
+
+
+class ChoosingAModelTests(unittest.TestCase):
+    """What happens between picking a model and the daemon fetching it.
+
+    The widgets are the same stubs as above; the confirmation is a GTK window,
+    so what is checked here is the decision: which of the three answers - warm
+    it, ask about it, or leave it alone - a selection leads to.
+    """
+
+    def setUp(self):
+        self.window = ui.WayVoiceWindow.__new__(ui.WayVoiceWindow)
+        self.window.ui_lang = "en"
+        self.window.t = lambda key, **kwargs: tr(key, "en", **kwargs)
+        self.window._download_confirmation_for = None
+        self.prepared = []
+        self.asked = []
+        self.window._ask_daemon_to_prepare_model = lambda: self.prepared.append(True)
+        self.window._ask_about_download = lambda model_id, size: self.asked.append(
+            (model_id, size)
+        )
+
+    def _decide(self, **entry):
+        base = {"id": "medium", "kind": "hub", "downloaded": False, "size_bytes": 1500}
+        base.update(entry)
+        self.window._decide_what_to_do_about_the_selected_model(base)
+
+    def test_a_model_on_disk_is_warmed_without_a_question(self):
+        # Loading it is free, and the first dictation would otherwise pay for it
+        # with nothing having said so.
+        self.window._download_confirmation_for = "medium"
+        self._decide(downloaded=True)
+        self.assertEqual(self.prepared, [True])
+        self.assertEqual(self.asked, [])
+
+    def test_a_model_that_is_not_there_is_asked_about_first(self):
+        self.window._download_confirmation_for = "medium"
+        self._decide()
+        self.assertEqual(self.asked, [("medium", 1500)])
+        self.assertEqual(self.prepared, [], "the download started without an answer")
+
+    def test_a_local_path_is_neither_asked_about_nor_fetched(self):
+        # Nothing can fetch it, so there is nothing to ask; the daemon reports
+        # that for itself.
+        self.window._download_confirmation_for = "/home/u/models/foo"
+        self._decide(id="/home/u/models/foo", kind="local", downloaded=False)
+        self.assertEqual(self.asked, [])
+        self.assertEqual(self.prepared, [True])
+
+    def test_the_question_is_asked_once(self):
+        self.window._download_confirmation_for = "medium"
+        self._decide()
+        self._decide()
+        self.assertEqual(len(self.asked), 1, "the same download was asked about twice")
+
+    def test_a_report_about_another_model_answers_nothing(self):
+        # The state report is refreshed for the model that is selected now; one
+        # that arrives late, from before the change, must not trigger anything.
+        self.window._download_confirmation_for = "large-v3"
+        self._decide(id="small")
+        self.assertEqual(self.asked, [])
+        self.assertEqual(self.prepared, [])
+
+    def test_an_answer_only_counts_for_the_model_it_was_asked_about(self):
+        self.window._download_confirmation_for = "medium"
+        self._decide(id="large-v3")
+        self.assertEqual(self.asked, [])
+        self.assertIsNotNone(
+            self.window._download_confirmation_for,
+            "the pending answer was dropped by an unrelated report",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

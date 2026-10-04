@@ -78,7 +78,14 @@ def _model_command(args: list[str]) -> None:
     if "--download" in args:
         reply = request("prepare-model", timeout=10.0)
         if reply.get("ok"):
-            print(tr("cli.model_download_started", lang))
+            # "The download has started" is only true when it has. Preparing a
+            # model that is already on disk loads it into the worker instead, and
+            # saying otherwise would report a download that will never happen.
+            print(tr(
+                "cli.model_warming" if str(reply.get("state") or "") == "warming"
+                else "cli.model_download_started",
+                lang,
+            ))
             return
         print(str(reply.get("error") or tr("cli.model_download_failed", lang)),
               file=sys.stderr)
