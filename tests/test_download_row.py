@@ -11,8 +11,18 @@ without its constructor, because that one starts threads and talks to a daemon.
 
 import unittest
 
-from wayvoice import ui
 from wayvoice.i18n import tr
+
+try:
+    from wayvoice import ui
+except Exception as _exc:  # no GTK bindings for this interpreter
+    ui = None
+    _why = f"{type(_exc).__name__}: {_exc}"
+else:
+    _why = ""
+
+#: Applied to every class below: they all need ``ui.WayVoiceWindow``.
+needs_window = unittest.skipIf(ui is None, f"the settings window is unavailable ({_why})")
 
 
 class FakeRow:
@@ -58,6 +68,7 @@ class FakeBar:
         self.paused = True
 
 
+@needs_window
 class DownloadRowTests(unittest.TestCase):
     def setUp(self):
         self.window = ui.WayVoiceWindow.__new__(ui.WayVoiceWindow)
@@ -188,6 +199,7 @@ class DownloadRowTests(unittest.TestCase):
         self.assertIn("Medium", self.row.title)
 
 
+@needs_window
 class FetchButtonTests(unittest.TestCase):
     """The row's own way to fetch a model it does not have."""
 
@@ -260,6 +272,7 @@ class FetchButtonTests(unittest.TestCase):
         self.assertEqual(self.asked, [("medium", 1500)])
 
 
+@needs_window
 class ChoosingAModelTests(unittest.TestCase):
     """What happens between picking a model and the daemon fetching it.
 
