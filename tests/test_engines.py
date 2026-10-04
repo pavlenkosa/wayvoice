@@ -43,6 +43,16 @@ _APPLICATION = None
 
 
 def _gtk_available() -> bool:
+    """Whether this process can really open a GTK window.
+
+    ``Gtk.init_check()`` is not the question, and asking it is how a whole test
+    run used to die: on a machine with the bindings installed but no display - a
+    build server, a plain ssh session - it still answers true, the tests below go
+    on to build widgets, and GTK takes the process down with it. A segfault is
+    worse than a failure, because it takes the other four hundred tests with it.
+    """
+    if not (os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY")):
+        return False
     try:
         import gi
 
