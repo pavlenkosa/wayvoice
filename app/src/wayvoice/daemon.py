@@ -30,7 +30,7 @@ from .engine import (
 )
 from .injector import InjectionError, inject
 from .i18n import tr
-from .notify import notify
+from .notify import notify, reset_notification_id
 from .protocol import owner_lock_path, socket_path
 from .shortcut import label_for
 
@@ -396,7 +396,12 @@ class WayVoiceDaemon:
                 self._record_timer = threading.Timer(max_seconds, self._auto_stop_recording)
                 self._record_timer.daemon = True
                 self._record_timer.start()
-                notify("WayVoice", tr("daemon.recording_started", cfg.get("ui_language")), enabled=cfg.get("notify", True))
+                # A dictation gets its own notification, and the states inside it
+                # update that one. Forgetting the previous id here is what starts
+                # a new entry: without it the next recording would overwrite the
+                # transcript of the last one.
+                reset_notification_id()
+                notify("WayVoice", tr("daemon.recording_started", cfg.get("ui_language")), enabled=cfg.get("notify", True), replace=False)
                 return {"ok": True, "state": "recording"}
             except Exception as exc:
                 self.last_error = str(exc)
@@ -414,6 +419,7 @@ class WayVoiceDaemon:
                 self.recorder.cancel()
                 self._record_started = 0.0
                 notify("WayVoice", tr("daemon.recording_cancelled", cfg.get("ui_language")), enabled=cfg.get("notify", True))
+                reset_notification_id()
                 return {"ok": True, "state": "idle"}
             if self.busy:
                 self._transcribe_cancel.set()
@@ -535,6 +541,10 @@ class WayVoiceDaemon:
             notify("WayVoice", str(exc), enabled=cfg.get("notify", True))
         finally:
             wav.unlink(missing_ok=True)
+            # The result is the last thing this notification says. It stays in the
+            # history, and the next dictation starts a new entry instead of
+            # overwriting a transcript the user may still be reading.
+            reset_notification_id()
             with self._lock:
                 self.busy = False
                 self._busy_started = 0.0
