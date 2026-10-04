@@ -2,8 +2,13 @@ name: Release
 
 on:
   push:
+    # A tag publishes that tag. A push to main publishes when - and only when -
+    # the version in the tree changed, so "bump the version, commit, push" is the
+    # whole procedure and there is no second ref to remember.
     tags:
       - 'v*'
+    branches:
+      - 'main'
   workflow_dispatch:
     inputs:
       version:
@@ -35,13 +40,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install validation tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            shellcheck desktop-file-utils libxml2-utils
-
-      - name: Resolve and verify the release
+      - name: Decide what to release
         id: version
         shell: bash
         env:
@@ -49,70 +48,105 @@ jobs:
         run: |
           set -euo pipefail
 
+          # The version is read out of the tree rather than out of the ref, so a
+          # push to main and a push of the tag cannot disagree about what is
+          # being released.
+          version_at() {
+            git show "$1:app/src/wayvoice/__init__.py" |
+              sed -n 's/^__version__ = "\(.*\)"$/\1/p'
+          }
+
+          FROM_TAG=false
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
             VERSION="${MANUAL_VERSION#v}"
-          else
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
-          fi
-          if [ -z "$VERSION" ]; then
-            echo "No version given: run this from the tag, or fill in the version input." >&2
-            exit 1
+            FROM_TAG=true
+          else
+            VERSION="$(version_at HEAD)"
           fi
 
+          if [ -z "$VERSION" ]; then
+            echo "No version to release: run this from a tag, or fill in the version input." >&2
+            exit 1
+          fi
           PROJECT_VERSION="$(python scripts/check-version.py "$VERSION")"
-          test "$PROJECT_VERSION" = "$VERSION"
+          if [ "$PROJECT_VERSION" != "$VERSION" ]; then
+            echo "The tree says $PROJECT_VERSION, the ref says $VERSION." >&2
+            exit 1
+          fi
           TAG="v$VERSION"
 
-          # The tag has to exist already and point at this commit.
-          #
-          # It used to be created here, and that quietly disabled the automatic
-          # path: the workflow pushes with GITHUB_TOKEN, and GitHub never starts
-          # workflow runs from a push made with GITHUB_TOKEN. So the tag would
-          # appear on the remote with nothing having run, and the human's own
-          # "git push origin v0.6.0" afterwards would answer "Everything
-          # up-to-date" and start nothing either - which is exactly what it looks
-          # like from the outside: the release that never happens on its own.
-          git fetch --force --tags
-          if ! git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
-            echo "Tag $TAG does not exist yet. Publish it with:" >&2
-            echo "    git tag -a $TAG -m 'WayVoice $VERSION' && git push origin $TAG" >&2
-            exit 1
+          # "Is there anything to release?" comes before every check about tags.
+          # The order matters more than it looks: main keeps receiving commits
+          # after a release, and the tag of the version just published points at
+          # the commit before them. Asking about the tag first would turn every
+          # one of those commits into a failed run, which is how a workflow that
+          # should be quiet most of the time ends up permanently red.
+          if ! $FROM_TAG && [[ "${GITHUB_EVENT_NAME}" != "workflow_dispatch" ]]; then
+            PREVIOUS="$(version_at HEAD^ 2>/dev/null || true)"
+            if [ "$PREVIOUS" = "$VERSION" ]; then
+              echo "Version is still $VERSION: nothing to release."
+              echo "release=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "Version ${PREVIOUS:-none} -> $VERSION"
           fi
-          TAG_SHA="$(git rev-list -n 1 "$TAG")"
-          if [ "$TAG_SHA" != "$GITHUB_SHA" ]; then
-            echo "Tag $TAG points at ${TAG_SHA:0:7}, this run is at ${GITHUB_SHA:0:7}." >&2
-            echo "Move the tag to the commit you mean to release, or run the workflow from that tag." >&2
+
+          # From here on something is being released, so the tag has to agree.
+          git fetch --force --tags
+          TAG_SHA=""
+          if git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
+            TAG_SHA="$(git rev-list -n 1 "$TAG")"
+            if [ "$TAG_SHA" != "$GITHUB_SHA" ]; then
+              echo "Tag $TAG points at ${TAG_SHA:0:7}, this run is at ${GITHUB_SHA:0:7}." >&2
+              echo "A version already released from another commit is not this" >&2
+              echo "commit's to publish. Move the tag, or cut a new version." >&2
+              exit 1
+            fi
+          elif $FROM_TAG; then
+            echo "Running from $TAG, but that tag is not in the checkout." >&2
             exit 1
           fi
 
-          # An explicit output rather than an expression at the place of use. A
+          # An explicit output rather than an expression at the place of use: a
           # boolean interpolated into YAML arrives as the string "false", and how
-          # the publishing action reads that is not something to leave to
-          # chance: 0.6.0 was published as a prerelease although its version
-          # carries no dash.
+          # the publishing action reads that is not something to leave to chance.
+          # 0.6.0 was published as a prerelease although its version has no dash.
           if [[ "$VERSION" == *-* ]]; then
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
           else
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
-
           {
+            echo "release=true"
             echo "version=$VERSION"
             echo "tag=$TAG"
             echo "tag_sha=$TAG_SHA"
           } >> "$GITHUB_OUTPUT"
 
-          echo "Releasing $VERSION from $TAG at ${GITHUB_SHA:0:7}"
+          echo "Releasing $VERSION as $TAG from ${GITHUB_SHA:0:7}"
+
+
+      - name: Install validation tools
+        if: steps.version.outputs.release == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            shellcheck desktop-file-utils libxml2-utils
 
       - name: Python syntax
+        if: steps.version.outputs.release == 'true'
         run: python -m compileall -q app/src tests scripts/check-version.py
 
       - name: Unit tests
+        if: steps.version.outputs.release == 'true'
         env:
           PYTHONPATH: app/src
         run: python -m unittest discover -s tests -v
 
       - name: Shellcheck
+        if: steps.version.outputs.release == 'true'
         run: |
           shellcheck \
             scripts/wayvoice \
@@ -128,15 +162,18 @@ jobs:
             packaging/DEBIAN/prerm
 
       - name: Validate desktop metadata
+        if: steps.version.outputs.release == 'true'
         run: |
           desktop-file-validate data/io.github.stepan.WayVoice.desktop
           xmllint --noout data/io.github.stepan.WayVoice.metainfo.xml
           xmllint --noout packaging/io.github.stepan.WayVoice.manage-deps.policy
 
       - name: Build Debian package
+        if: steps.version.outputs.release == 'true'
         run: ./scripts/build-deb.sh
 
       - name: Verify Debian package
+        if: steps.version.outputs.release == 'true'
         shell: bash
         run: |
           DEB="$(find dist -maxdepth 1 -name '*.deb' -print -quit)"
@@ -147,6 +184,7 @@ jobs:
           dpkg-deb --contents "$DEB" > /dev/null
 
       - name: Create source archive and checksums
+        if: steps.version.outputs.release == 'true'
         shell: bash
         run: |
           VERSION="${{ steps.version.outputs.version }}"
@@ -162,6 +200,7 @@ jobs:
           )
 
       - name: Upload release artifact
+        if: steps.version.outputs.release == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: wayvoice-${{ steps.version.outputs.version }}-release
@@ -174,9 +213,14 @@ jobs:
           retention-days: 30
 
       - name: Publish GitHub Release
+        if: steps.version.outputs.release == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
+          # The tag does not exist yet when the release came from a push to main,
+          # and this action creates it. commitish says which commit it must
+          # point at, rather than leaving it to the default branch's head.
+          commitish: ${{ github.sha }}
           name: WayVoice ${{ steps.version.outputs.version }}
           generate_release_notes: true
           prerelease: ${{ steps.version.outputs.prerelease }}
