@@ -1,15 +1,13 @@
 """Recognition languages.
 
-Single source of truth for what can be dictated and how it is named.  The
-codes and their English names are the ones Whisper itself uses, so anything
-listed here can be handed to faster-whisper or to whisper.cpp unchanged.  The
-native names come from ISO 639 and are what the settings window shows: a user
-looking for their language finds it under the name they know it by, not under
-an English translation.
+The codes and their English names are the ones Whisper itself uses, so anything
+listed here can be handed to faster-whisper or whisper.cpp unchanged. The native
+names come from ISO 639 and are what the settings window shows, so a user finds
+their language under the name they know it by.
 
-``AUTO`` is not a language of its own.  Whisper detects the language per
-utterance, which is why it is the default - a fixed default silently
-transcribed Polish speech as Russian.
+``AUTO`` is not a language of its own: Whisper detects the language per utterance,
+which is why it is the default - a fixed default silently transcribed Polish speech
+as Russian.
 """
 
 from __future__ import annotations
@@ -126,8 +124,8 @@ CODES: tuple[str, ...] = tuple(NAMES)
 def normalize(value: str | None) -> str:
     """Return a usable language code.
 
-    Anything unknown, empty or missing becomes :data:`AUTO`, because guessing a
-    language for the model is worse than letting it detect one.
+    Anything unknown, empty or missing becomes :data:`AUTO`: guessing a language for the
+    model is worse than letting it detect one.
     """
     code = (value or "").strip().lower().replace("_", "-")
     if not code or code == AUTO:
@@ -154,9 +152,9 @@ def english_name(code: str) -> str:
 def display_name(code: str, ui_language: str = "en") -> str:
     """Name to show in the settings window.
 
-    The native name always comes first.  The English name is appended only for
-    an English interface, where it is the one that helps; in any other
-    interface it would just be noise next to a name the user already reads.
+    The native name comes first, and the English name is appended only for an English
+    interface, where it helps rather than sitting as noise next to a name the user
+    already reads.
     """
     entry = NAMES.get(normalize(code))
     if entry is None:
@@ -170,9 +168,8 @@ def display_name(code: str, ui_language: str = "en") -> str:
 def detect_from_locale(locales: "list[str] | tuple[str, ...] | None" = None) -> str:
     """Best Whisper code for a set of locale names such as ``["de_DE.UTF-8"]``.
 
-    Used for the default of the recognition language.  Returns :data:`AUTO` when
-    nothing matches, since the locale describes the interface, not necessarily
-    the speech.
+    Used as the default of the recognition language, and :data:`AUTO` when nothing
+    matches: the locale describes the interface, not necessarily the speech.
     """
     if locales is None:
         return AUTO

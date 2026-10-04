@@ -3,14 +3,12 @@ import re
 
 from . import languages
 
-# Spoken punctuation, one table per language.  A command only exists for the
-# language it was actually spoken in, so a table that belongs to another
-# language can only ever fire on text the user meant literally - which is why
-# "auto" can afford to apply all of them at once.
+# Spoken punctuation, one table per language. A command only exists for the language
+# it was spoken in, so a table belonging to another language can only fire on text
+# the user meant literally - which is why "auto" can apply all of them at once.
 #
-# The patterns carry no word boundaries: _compile() adds guards that treat a
-# hyphen as part of the word, so "comma-separated" stays a word and does not
-# become ",-separated".
+# The patterns carry no word boundaries: _compile() adds guards that treat a hyphen
+# as part of the word, so "comma-separated" does not become ",-separated".
 RU_COMMANDS = [
     (r"нов(?:ая|ую)\s+строк(?:а|у)", "\n"),
     (r"нов(?:ый|ого)\s+абзац", "\n\n"),
@@ -38,8 +36,8 @@ COMMANDS_BY_LANGUAGE: dict[str, list[tuple[str, str]]] = {
     "en": EN_COMMANDS,
 }
 
-# Kept for callers that imported it: this used to be the only table and it is
-# still the Russian one.  Use COMMANDS_BY_LANGUAGE for anything language-aware.
+# Kept for callers that imported it: it is still the Russian table. Use
+# COMMANDS_BY_LANGUAGE for anything language-aware.
 COMMANDS = RU_COMMANDS
 
 def _compile(table: list[tuple[str, str]]) -> list[tuple[re.Pattern[str], str]]:
@@ -57,12 +55,10 @@ _COMPILED: dict[str, list[tuple[re.Pattern[str], str]]] = {
 def _tables_for(language: str | None) -> list[tuple[re.Pattern[str], str]]:
     """Command tables to apply for a recognition language.
 
-    ``auto`` means nobody told us what was spoken, so we do not know which
-    table fits and apply all of them.  That is deliberate: a spoken-punctuation
-    command needs a whole phrase to fire, so an extra table costs nothing,
-    whereas guessing one table would leave the other's commands in the text
-    verbatim.  A language we have no table for is treated the same way - the
-    alternative is silently keeping "comma," in the middle of the sentence.
+    ``auto`` means nobody said what was spoken, so all tables are applied: a spoken
+    command needs a whole phrase to fire, so an extra table costs nothing, while
+    guessing one would leave the other languages' commands in the text verbatim. A
+    language with no table is treated the same way.
     """
     code = languages.normalize(language)
     if code in _COMPILED:

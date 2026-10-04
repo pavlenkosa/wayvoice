@@ -18,11 +18,10 @@ class AudioRecorder:
         self._path: Path | None = None
         #: Recording handed to the caller and not yet deleted by it.
         self._finished: Path | None = None
-        # A recorder that outlives the process that started it keeps the
-        # microphone open and keeps writing to /tmp, and nothing else in the
-        # system knows it is there.  The daemon stops it on the way out, and
-        # this hook covers the paths that bypass that - an interpreter shutdown
-        # after a crash in another thread, for instance.
+        # A recorder that outlives the process that started it keeps the microphone
+        # open and keeps writing to /tmp, and nothing else knows it is there. The
+        # daemon stops it on the way out; this hook covers the paths that bypass
+        # that, an interpreter shutdown after a crash in another thread say.
         atexit.register(self.cancel)
 
     @property
@@ -52,12 +51,10 @@ class AudioRecorder:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
-            # Its own session: pw-record holds the microphone, and a daemon that
-            # is killed must not leave a recorder behind still holding it and
-            # still writing to /tmp.  In its own session it does not inherit
-            # the daemon's terminal signals either, so the recorder is stopped
-            # deliberately - through stop_to_wav()/cancel() - instead of by an
-            # accidental Ctrl+C in the daemon's terminal.
+            # Its own session: pw-record holds the microphone, and a daemon that is
+            # killed must not leave a recorder behind still holding it. Being in its
+            # own session it also ignores the daemon's terminal signals, so it is
+            # stopped deliberately - through stop_to_wav()/cancel().
             start_new_session=True,
         )
         self._path = path
@@ -78,11 +75,10 @@ class AudioRecorder:
 
     def cancel(self) -> None:
         proc, path = self._proc, self._path
-        # A recording handed out by stop_to_wav() is still ours until the
-        # caller deletes it.  Its caller is the transcription thread, which
-        # unlinks it in a finally - and if this daemon is killed before that
-        # runs, nothing else ever would, so the file stays in /tmp for good.
-        # Keeping the path here makes the shutdown path able to clean it up.
+        # A recording handed out by stop_to_wav() is still ours until the caller
+        # deletes it. The transcription thread unlinks it in a finally, and if this
+        # daemon dies first nothing else ever would; keeping the path lets the
+        # shutdown path clean it up.
         finished = self._finished
         self._proc = None
         self._path = None
@@ -93,9 +89,9 @@ class AudioRecorder:
                 proc.wait(timeout=1.0)
             except subprocess.TimeoutExpired:
                 proc.kill()
-                # Reap it: an unreaped child stays in the process table as a
-                # zombie for as long as this daemon lives, and a daemon that
-                # is cancelled often would accumulate one per dictation.
+                # Reap it: an unreaped child stays in the process table as a zombie
+                # for as long as this daemon lives, and a daemon that is cancelled
+                # often would accumulate one per dictation.
                 try:
                     proc.wait(timeout=0.5)
                 except subprocess.TimeoutExpired:
