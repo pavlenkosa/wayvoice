@@ -62,6 +62,8 @@ The Faster-Whisper runtime is installed into the user's WayVoice directory and m
 
 WayVoice transcribes the recording and inserts the text into the active application. If automatic paste is unavailable, the result remains in the Wayland clipboard.
 
+If the selected model is not on disk yet, the hot key says so and names the model — it does not start a download by itself. Fetch it from the settings window, where the model row offers it, or with `wayvoice model --download`.
+
 ## Recognition engines
 
 ### Faster-Whisper
@@ -96,7 +98,7 @@ Deleting a model never removes files another model is using: the weights are sha
 
 The model can be a name from the catalogue, a full Hugging Face repository id such as `Systran/faster-whisper-large-v3`, or a path to a directory on disk. A local model is loaded straight from that directory and never reported as missing: WayVoice cannot fetch it, count it or delete it, so it neither offers to download it nor refuses to record because of it.
 
-A model that is not on disk is fetched when you choose it, not when you first use it. The download shows its progress and can be cancelled, and pressing the hot key while it runs says so instead of recording something that cannot be recognised yet. Starting WayVoice never downloads anything by itself — the model it already has is loaded into memory so that the first dictation is as fast as the rest.
+A model that is not on disk is fetched when you choose it, not when you first use it — and because that costs gigabytes, choosing it asks first, naming the model and how much space it takes. A model that is already on disk is only loaded into memory, which costs nothing but time. Either way the download shows its progress and can be cancelled, and pressing the hot key while one runs says so instead of recording something that cannot be recognised yet. Starting WayVoice never downloads anything by itself — the model it already has is loaded into memory so that the first dictation is as fast as the rest.
 
 ## Missing dependencies
 

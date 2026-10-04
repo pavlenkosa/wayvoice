@@ -34,9 +34,13 @@ class FakeRow:
 class FakeButton:
     def __init__(self):
         self.sensitive = None
+        self.visible = None
 
     def set_sensitive(self, value):
         self.sensitive = bool(value)
+
+    def set_visible(self, value):
+        self.visible = bool(value)
 
 
 class FakeBar:
@@ -182,6 +186,78 @@ class DownloadRowTests(unittest.TestCase):
                      "warming": True})
         self.assertTrue(self.row.visible)
         self.assertIn("Medium", self.row.title)
+
+
+class FetchButtonTests(unittest.TestCase):
+    """The row's own way to fetch a model it does not have."""
+
+    def setUp(self):
+        self.window = ui.WayVoiceWindow.__new__(ui.WayVoiceWindow)
+        self.window.ui_lang = "en"
+        self.window.t = lambda key, **kwargs: tr(key, "en", **kwargs)
+        self.window.model_download_row = FakeRow()
+        self.window.model_download_bar = FakeBar()
+        self.window.model_download_cancel_btn = FakeButton()
+        self.window.model_fetch_btn = FakeButton()
+        self.window._model_entry = {}
+        self.window._download_report = {}
+        self.asked = []
+        self.window._ask_about_download = lambda model_id, size: self.asked.append(
+            (model_id, size)
+        )
+
+    def _download(self, **download):
+        base = {"state": "idle", "model": "", "done_bytes": 0, "total_bytes": 0,
+                "error": "", "warming": False}
+        base.update(download)
+        return {"supported": True, "present": False, "model": "medium",
+                "download": base}
+
+    def _entry(self, **entry):
+        base = {"id": "medium", "kind": "hub", "downloaded": False, "size_bytes": 1500}
+        base.update(entry)
+        self.window._model_entry = base
+
+    def test_a_missing_hub_model_offers_the_download(self):
+        # Without this button the only way to fetch a model was to pick a
+        # different one - a place a user goes to only by accident.
+        self._entry()
+        self.window._apply_download_state(self._download())
+        self.assertTrue(self.window.model_fetch_btn.visible)
+
+    def test_a_model_that_is_on_disk_does_not(self):
+        self._entry(downloaded=True)
+        self.window._apply_download_state(self._download())
+        self.assertFalse(self.window.model_fetch_btn.visible)
+
+    def test_a_download_that_is_running_does_not_offer_a_second_one(self):
+        self._entry()
+        self.window._apply_download_state(
+            self._download(state="downloading", model="medium", total_bytes=10)
+        )
+        self.assertFalse(self.window.model_fetch_btn.visible)
+
+    def test_a_failed_download_offers_it_again(self):
+        # The reason it failed may be gone - the network came back - and a user
+        # who cannot retry has to restart the program.
+        self._entry()
+        self.window._apply_download_state(
+            self._download(state="error", model="medium", error="404 Client Error")
+        )
+        self.assertTrue(self.window.model_fetch_btn.visible)
+
+    def test_a_local_path_is_never_offered_a_download(self):
+        # Nothing can fetch it: a button here would report success and change
+        # nothing.
+        self._entry(id="/home/u/models/foo", kind="local")
+        self.window._apply_download_state(self._download())
+        self.assertFalse(self.window.model_fetch_btn.visible)
+
+    def test_pressing_it_asks_the_same_question_a_choice_asks(self):
+        self._entry()
+        self.window._apply_download_state(self._download())
+        self.window._ask_to_fetch_the_model()
+        self.assertEqual(self.asked, [("medium", 1500)])
 
 
 class ChoosingAModelTests(unittest.TestCase):

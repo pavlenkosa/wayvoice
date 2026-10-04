@@ -371,12 +371,19 @@ class WayVoiceDaemon:
             if model["supported"] and not model["present"]:
                 # Recording into a dictation that cannot happen yet: the model
                 # would be fetched mid-transcription, which is a silent wait of
-                # minutes followed by a timeout. Start fetching now and say so
-                # instead - the user presses the key again once it is there.
-                self._start_model_prepare(cfg)
+                # minutes followed by a timeout.
+                #
+                # Nothing is fetched here.  Pressing the key is not the same as
+                # agreeing to spend the bandwidth: the settings window asks
+                # before a download and the user may have said no, and a daemon
+                # that starts one anyway has turned that answer into a lie. So
+                # this says what is missing and where it can be fetched.
                 return {
                     "ok": False,
-                    "error": tr("daemon.model_missing", cfg.get("ui_language"), model=model["model"]),
+                    "error": tr(
+                        "daemon.model_missing", cfg.get("ui_language"),
+                        model=model["model"],
+                    ),
                 }
             try:
                 self.last_error = ""

@@ -316,12 +316,21 @@ class HotKeyTests(DaemonCase):
         self.assertIn("small", reply["error"])
         harness.daemon.recorder.start.assert_not_called()
 
-    def test_pressing_the_key_starts_the_download_it_just_refused_for(self):
+    def test_pressing_the_key_does_not_start_a_download(self):
+        # Pressing the key is not agreeing to spend the bandwidth: the settings
+        # window asks before a download and the user may have said no. A daemon
+        # that starts one here has turned that answer into a lie, and the
+        # surprise arrives without a question attached to it.
         eng, calls = make_engine(present=False, progress=True, delay=0.05)
         harness = PrepareDaemon(self, eng, calls)
-        harness.daemon.dispatch("start")
-        harness.wait_for("ready")
-        self.assertEqual(calls["n"], 1)
+        reply = harness.daemon.dispatch("start")
+        self.assertFalse(reply["ok"])
+        self.assertIn("small", reply["error"])
+        self.assertEqual(calls["n"], 0, "the hot key fetched a model")
+        self.assertFalse(harness.daemon._prepare_running)
+        harness.daemon.recorder.start.assert_not_called()
+
+
 
     def test_pressing_the_key_records_when_the_model_is_there(self):
         eng, calls = make_engine(present=True)

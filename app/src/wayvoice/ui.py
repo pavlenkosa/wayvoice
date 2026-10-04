@@ -487,6 +487,21 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         engine_group.add(self.custom_model)
 
         self.model_state_row = Adw.ActionRow(title=self.t("store.state"), subtitle=self.t("health.checking"))
+        # The download has to be reachable without changing the model: a model
+        # that is not on disk used to be fetched as a side effect of choosing a
+        # different one, which is a place a user goes to only by accident.
+        self.model_fetch_btn = Gtk.Button(
+            label=self.t("store.download_now"),
+            valign=Gtk.Align.CENTER,
+        )
+        self.model_fetch_btn.connect("clicked", self._ask_to_fetch_the_model)
+        self.model_fetch_btn.set_visible(False)
+        self.model_state_row.add_suffix(self.model_fetch_btn)
+        #: The last state the window heard about, so the button can be shown or
+        #: hidden from either side: the cache walk says what is on disk, the
+        #: daemon says what is being done about it.
+        self._model_entry: dict = {}
+        self._download_report: dict = {}
         self.model_delete_btn = Gtk.Button(
             label=self.t("common.delete"),
             valign=Gtk.Align.CENTER,
@@ -940,6 +955,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
 
     def _apply_model_state(self, entry: dict, free_bytes: int, total_bytes: int, held: dict) -> None:
         """Paint the row from a result computed off the UI thread."""
+        self._model_entry = dict(entry) if isinstance(entry, dict) else {}
         text, deletable = self._model_state_text(entry)
         # The whole hub is shown next to our own total: the cache is shared with
         # other applications, and a number that explains the folder is worth
@@ -962,6 +978,44 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         # shown greyed out rather than hidden, so "you cannot delete this" is
         # visible instead of looking like the feature is missing.
         self.model_delete_btn.set_visible(str(entry.get("kind") or "") != "custom")
+        self._refresh_fetch_button()
+
+    def _refresh_fetch_button(self) -> None:
+        """Show the download button exactly when it is the right thing to press.
+
+        A hub model that is not on disk, and nothing being done about it yet.
+        While a download or a warm-up is running the row below already shows the
+        progress and the way to stop it, so a second button would be a third
+        answer to the same question.
+        """
+        if not hasattr(self, "model_fetch_btn"):
+            return
+        entry = self._model_entry if isinstance(self._model_entry, dict) else {}
+        report = self._download_report if isinstance(self._download_report, dict) else {}
+        download = report.get("download") if isinstance(report.get("download"), dict) else {}
+        phase = str(download.get("state") or "idle")
+        model_id = str(entry.get("id") or "")
+        wanted = (
+            str(entry.get("kind") or "") == "hub"
+            and not entry.get("downloaded")
+            and phase in {"idle", "error", "ready"}
+            and str(download.get("model") or "") in {"", model_id}
+        )
+        self.model_fetch_btn.set_visible(wanted)
+
+    def _ask_to_fetch_the_model(self, *_args) -> None:
+        """The row's own way in: the same question a new choice asks."""
+        entry = self._model_entry if isinstance(self._model_entry, dict) else {}
+        model_id = str(entry.get("id") or "")
+        if not model_id:
+            return
+        if str(entry.get("kind") or "") != "hub":
+            # A local path cannot be fetched, and the row says so in its own
+            # subtitle; a button here would be one that reports success and
+            # changes nothing.
+            self._toast(self.t("store.refuse_local"))
+            return
+        self._ask_about_download(model_id, int(entry.get("size_bytes") or 0))
 
     def _apply_download_state(self, report: dict | None) -> None:
         """Paint the download row from the daemon's model report.
@@ -974,6 +1028,11 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         if not hasattr(self, "model_download_row"):
             return
         report = report if isinstance(report, dict) else {}
+        self._download_report = report
+        # Before any branch below: every one of them returns, and the button in
+        # the model row is a question about both what is on disk and what is
+        # being done about it.
+        self._refresh_fetch_button()
         download = report.get("download") if isinstance(report.get("download"), dict) else {}
         state = str(download.get("state") or "idle")
         model_id = str(report.get("model") or "")

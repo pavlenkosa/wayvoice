@@ -11,6 +11,11 @@
 - Daemon, engine and hot key now start without systemd, so the Flatpak build works.
 - Faster-Whisper model is kept warm between dictations, and is loaded into memory when the daemon starts so the first dictation of a session is as fast as the ones after it.
 - Model downloads are a visible, cancellable step with progress in bytes, instead of a silent wait inside the first recognition.
+- Choosing a model asks before the download: a model that is already on disk is only loaded, one that is not is fetched after the user says so, and the question names the model and its size.
+- Preparing a model that is already on disk loads it into the warm worker, so the first dictation after choosing it is as fast as the ones after that, and the settings window says so instead of showing nothing.
+- A missing model can be fetched from the settings window itself: the model row grows a Download button, instead of the only way to fetch one being to pick a different model first.
+- The hot key no longer starts a model download on its own. Pressing it is not agreeing to spend the bandwidth, so it now says which model is missing and where it can be fetched.
+- The warm-up message no longer promises a time: a large model on a slow disk takes minutes to load, and the row says it is waiting instead of guessing.
 - Installation paths are prefix-independent.
 - New application icon.
 - A model given as a local path is dictatable again: it was being reported as "missing", which made the daemon refuse every hot key press and offer a download that cannot succeed.
