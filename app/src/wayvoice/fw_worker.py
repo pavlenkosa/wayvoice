@@ -1,22 +1,19 @@
 """Warm worker process for the Faster-Whisper engine.
 
-The one-shot runner loads the Whisper model on every dictation, which costs
-seconds and several gigabytes of RAM before the first word appears.  This
-module implements the alternative: a long-lived worker that keeps a single
-model instance in memory and serves requests over a unix socket, using the
-same line-delimited JSON protocol as the rest of WayVoice.
+The one-shot runner loads the model on every dictation, which costs seconds and
+several gigabytes before the first word appears. This module keeps one model instance
+in memory instead and serves requests over a unix socket, speaking the same
+line-delimited JSON as the rest of WayVoice.
 
-Design notes:
+Three things to know when reading it:
 
-* neither ``faster_whisper`` nor ``ctranslate2`` is imported at module level.
-  The worker runs on the engine runtime interpreter created by
-  ``engine_setup``, while the unit tests run on the system interpreter, so the
-  heavy imports are deferred into :func:`default_model_factory` and
-  :func:`resolve_device`;
-* the model is created lazily, on the first transcription request.  Merely
-  starting the worker must not cost gigabytes of RAM;
-* the cache holds at most one model, so switching settings can never accumulate
-  several copies of a multi-gigabyte model.
+* neither ``faster_whisper`` nor ``ctranslate2`` is imported at module level - the
+worker runs on the engine runtime interpreter while the tests run on the system one
+- so the heavy imports live in :func:`default_model_factory` and
+:func:`resolve_device`;
+* the model is created lazily on the first transcription, so merely starting the
+worker costs nothing;
+* the cache holds at most one model, so switching settings cannot accumulate copies.
 
 The daemon side lives in :mod:`wayvoice.engine`; this module never imports it.
 """
@@ -63,18 +60,15 @@ _CANCEL_GRACE = 5.0
 def default_socket_path() -> Path:
     """Return the default worker socket path.
 
-    The socket lives in a directory of our own making, mode 0700, inside
-    ``XDG_RUNTIME_DIR`` (or ``/tmp`` when there is none).  Directly in the
-    runtime directory would be simpler but not safe enough: that directory is
-    not always ours alone, and ``/tmp`` is world-writable with predictable
-    names - whoever wins the race to create the socket answers the daemon's
-    requests, so another local user could hand back the text that gets typed
-    into the victim's focused window.
+    A directory of our own making, mode 0700, inside ``XDG_RUNTIME_DIR`` (or ``/tmp`` when
+    there is none). The runtime directory itself is not safe enough - not always ours
+    alone - and ``/tmp`` is world-writable with predictable names, so whoever wins the
+    race to create the socket answers the daemon's requests: another local user could hand
+    back the text that gets typed into the victim's window.
 
-    The directory is created here rather than trusted, so a group-writable or
-    otherwise unusual ``XDG_RUNTIME_DIR`` costs nothing.  Refusing to listen
-    instead is the last resort: it silently costs every dictation the warm
-    worker, and a user would only notice as "slower than it used to be".
+    The directory is created rather than trusted, so an unusual ``XDG_RUNTIME_DIR`` costs
+    nothing. Refusing to listen is the last resort, since it silently costs every
+    dictation the warm worker.
     """
     runtime = os.environ.get("XDG_RUNTIME_DIR", "").strip()
     base = Path(runtime) if runtime else Path(tempfile.gettempdir())
@@ -116,8 +110,8 @@ class WorkerConfig:
 def default_model_factory(model_id: str, device: str, compute_type: str) -> Any:
     """Create a real ``WhisperModel``.
 
-    Imported here on purpose: importing at module level would make this module
-    unusable without the engine runtime installed.
+    Imported here rather than at module level, which would make this module unusable
+    without the engine runtime installed.
     """
     from faster_whisper import WhisperModel
 
@@ -150,9 +144,8 @@ def compute_type_for(device: str) -> str:
 class ModelCache:
     """Keeps at most one loaded model, keyed by model/device/compute type.
 
-    Loading a model is expensive, so the instance is reused for identical
-    requests.  A different request evicts the previous model *before* the new
-    one is created, which keeps at most one copy of the weights in RAM.
+    A different request evicts the previous model before the new one is created, so at
+    most one copy of the weights is ever in RAM.
     """
 
     def __init__(self, factory: Callable[[str, str, str], Any] | None = None) -> None:
@@ -214,11 +207,10 @@ def ping_reply(cache: ModelCache, config: WorkerConfig) -> dict[str, Any]:
         "ok": True,
         "pong": True,
         "pid": os.getpid(),
-        # The code that answers a request is the code that was running when the
-        # worker started.  A worker outlives the daemon - that is the whole
-        # point of keeping it warm - so after an update the new daemon would
-        # otherwise hand its requests to a process running the previous
-        # version, and nothing would say so.
+        # This code answers requests, and it is the code that was running when the worker
+        # started. A worker outlives the daemon - that is what keeping it warm means -
+        # so after an update the new daemon would otherwise hand its requests to a
+        # process running the previous version, and nothing would say so.
         "version": __version__,
         "model": config.model,
         "device": device,
@@ -232,15 +224,12 @@ def ping_reply(cache: ModelCache, config: WorkerConfig) -> dict[str, Any]:
 def warm_reply(cache: ModelCache, config: WorkerConfig) -> dict[str, Any]:
     """Load the model into memory and report how long that took.
 
-    Loading a model is the slow part of a dictation - seconds for ``small``,
-    minutes for ``large-v3`` - and it is pure waiting: the model is read from
-    disk and put in RAM, with nothing to do until the user presses the key.  The
-    daemon does this once after it starts, so the first dictation costs the same
-    as the ones after it.
+    This is the slow part of a dictation - seconds for ``small``, minutes for
+    ``large-v3`` - and it is pure waiting. The daemon does it once after starting, so the
+    first dictation costs the same as the ones after it.
 
-    A failure here is reported, not raised: the model stays unloaded and the
-    worker keeps serving, which is exactly where a lazily loaded model would
-    have been anyway.
+    A failure is reported rather than raised: the model stays unloaded and the worker
+    keeps serving, which is where a lazily loaded model would have been anyway.
     """
     if cache.loaded():
         return {"ok": True, "warm": True, "model": config.model, "seconds": 0.0}
@@ -271,10 +260,9 @@ def handle_request(
 ) -> dict[str, Any]:
     """Serve one request and return the reply object.
 
-    Supported commands are ``ping``, ``warm`` and ``transcribe``; anything else
-    is reported as an error instead of raising, so a misbehaving client cannot
-    take the worker down.  A cancelled transcription returns
-    ``{"ok": False, "cancelled": True, ...}``.
+    Commands are ``ping``, ``warm`` and ``transcribe``; anything else is reported as an
+    error rather than raised, so a misbehaving client cannot take the worker down. A
+    cancelled transcription returns ``{"ok": False, "cancelled": True, ...}``.
     """
     if not isinstance(payload, dict):
         return {"ok": False, "error": "Malformed request"}
@@ -355,10 +343,10 @@ class _Hold:
 class _WorkerState:
     """Shared server state: activity clock, serialisation and cancellations.
 
-    Cancels are matched by ``request_id``.  A cancel for a request that has not
-    registered itself yet is remembered for a short grace period and applied
-    when that request starts; it can never reach a later, unrelated request
-    because every request carries a fresh id.
+    Cancels are matched by ``request_id``. A cancel for a request that has not registered
+    itself yet is remembered for a short grace period and applied when that request
+    starts; it cannot reach a later, unrelated request, because every request carries a
+    fresh id.
     """
 
     def __init__(self, clock: Callable[[], float] = time.monotonic, grace: float = _CANCEL_GRACE) -> None:
@@ -388,10 +376,9 @@ class _WorkerState:
     def hold(self) -> "_Hold":
         """Mark the worker as working without a request to cancel.
 
-        A model load is work: it holds the same lock a transcription does and
-        can take minutes.  Counting only requests would let the idle timer decide
-        the worker is unused and exit in the middle of loading, which is the one
-        moment where exiting is worst.
+        A model load holds the lock a transcription holds and can take minutes, so counting
+        only requests would let the idle timer decide the worker is unused and exit in the
+        middle of a load.
         """
         return _Hold(self)
 
@@ -444,16 +431,13 @@ def _probe(path: Path, timeout: float = 0.5) -> bool:
 def _bind(path: Path) -> socket.socket | None:
     """Listen on ``path``; return ``None`` when the socket cannot be served.
 
-    A leftover socket file from a crashed worker is replaced.  When a live
-    worker already owns the socket nothing is touched and ``None`` is
-    returned, so two workers can never steal the socket from each other.
+    A leftover socket from a crashed worker is replaced, and a socket a live worker owns
+    is left alone, so two workers can never steal it from each other.
 
-    The parent directory has to be private to this user.  A socket in a
-    world-writable directory is reachable - and answerable - by anyone on the
-    machine, and what this worker returns is text that gets typed into the
-    user's window.  Group-writable is tolerated on purpose: the socket itself
-    is 0600, and refusing to start over it would cost every dictation the warm
-    worker, which is a much worse outcome than the one it prevents.
+    The parent directory has to be private to this user: a socket in a world-writable
+    directory is answerable by anyone on the machine, and what this worker returns is text
+    that gets typed into the user's window. Group-writable is tolerated, since the socket
+    itself is 0600 and refusing over it would cost every dictation the warm worker.
     """
     try:
         stat_result = path.parent.stat()
@@ -503,15 +487,14 @@ def _send(conn: socket.socket, reply: dict[str, Any]) -> None:
 def _dispatch(payload: Any, cache: ModelCache, config: WorkerConfig, state: _WorkerState) -> dict[str, Any]:
     command = str(payload.get("cmd") or "").strip() if isinstance(payload, dict) else ""
     if command == "ping":
-        # Never blocked and never waits for the lock: this is how the daemon
-        # checks whether a warm-up that takes minutes is finished, and a ping
-        # that waited for the model would answer exactly when it is not needed.
+        # Never blocked and never waits for the lock: this is how the daemon checks
+        # whether a warm-up that takes minutes is finished, and a ping that waited
+        # for the model would answer exactly when it is not needed.
         return handle_request(payload, cache, config)
     if command == "warm":
         # Under the same lock as a transcription: loading weights into RAM while
-        # something is being decoded would double the memory for no reason.  And
-        # marked as work, so the idle timer does not decide this worker is unused
-        # while it is reading three gigabytes from disk.
+        # something is being decoded would double the memory for nothing. Counted as
+        # work, so the idle timer does not call this worker unused mid-load.
         with state.serial, state.hold():
             return handle_request(payload, cache, config)
     if command != "transcribe":
@@ -563,9 +546,8 @@ def run_server(
 ) -> None:
     """Serve requests on ``socket_path`` until idle for ``idle_timeout``.
 
-    The model is not loaded here: it is created by the first transcription
-    request, so starting the worker is cheap and an idle worker that never
-    transcribed stays at zero megabytes.  ``clock`` is injectable so tests can
+    The model is not loaded here; the first transcription creates it, so an idle worker
+    that never transcribed stays at zero megabytes. ``clock`` is injectable so tests can
     drive the idle timer deterministically.
     """
     path = Path(socket_path)

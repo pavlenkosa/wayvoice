@@ -59,23 +59,20 @@ def request(command: str, timeout: float = 1.5) -> dict:
 def _model_command(args: list[str]) -> None:
     """Implement ``wayvoice model [--download | --cancel]``.
 
-    The download belongs to the daemon - it is the daemon's child process, and
-    only the daemon can end it without leaving a helper running - so every
-    action here is a command sent to it rather than a download started here.
-    That also means there is nothing to do when the daemon is not running, and
-    that is reported instead of quietly downloading into a cache no daemon will
-    read.
+    The download belongs to the daemon - it is the daemon's child process, and only the
+    daemon can end it without leaving a helper running - so every action here is a command
+    sent to it. That also means there is nothing to do when the daemon is not running, and
+    that is reported instead of quietly downloading into a cache no daemon will read.
 
-    Neither option takes a model name: what gets prepared is the model the
-    configuration names, and a name here would be silently ignored - see the
-    refusal below.
+    Neither option takes a model name: what gets prepared is the model the configuration
+    names, and a name here would be silently ignored.
     """
     lang = _language()
     if args not in ([], ["--download"], ["--cancel"]):
         # A model name is not accepted here, and that has to be said rather than
         # ignored: ``wayvoice model --download medium`` would otherwise download
-        # whatever the settings name and report success, which is exactly the
-        # kind of quiet wrong answer this command exists to avoid.
+        # whatever the settings name and report success - the quiet wrong answer this
+        # command exists to avoid.
         print(tr("cli.model_usage", lang), file=sys.stderr)
         print(tr("cli.model_choose_in_settings", lang), file=sys.stderr)
         raise SystemExit(2)
@@ -127,15 +124,13 @@ def _language() -> str | None:
 def _run_setup_user() -> tuple[bool, str]:
     """Re-apply the per-user desktop integration after a package install.
 
-    ``setup-user`` applies the configured global shortcut and enables the
-    ydotoold unit when ydotool is present; postinst only runs it once, at
-    package installation time.
+    ``setup-user`` applies the global shortcut and enables the ydotoold unit when ydotool
+    is present; postinst runs it once, at installation time.
 
-    The result is reported rather than discarded.  The package is installed at
-    this point, so a failure here cannot be allowed to look like one - but it
-    also must not be hidden, because what it breaks is the hotkey: a user whose
-    shortcut was not applied sees an app that ignores the key and has no way of
-    finding out why.
+    The result is reported rather than discarded. The package is installed at this point,
+    so a failure cannot be allowed to look like one - and it must not be hidden either,
+    because what it breaks is the hotkey, and a user whose shortcut was never applied sees
+    an app that ignores the key with no way to find out why.
     """
     script = setup_user_script()
     if script is None:
@@ -161,8 +156,8 @@ def _run_setup_user() -> tuple[bool, str]:
 def _install_deps(args: list[str]) -> None:
     """Implement ``wayvoice deps [--install ID | --install-all]``.
 
-    Installing only ever happens on an explicit request, and never happens as a
-    side effect of plain ``wayvoice deps``.
+    Installing only happens on an explicit request, never as a side effect of plain
+    ``wayvoice deps``.
     """
     lang = _language()
     wanted: list[str] = []
@@ -216,9 +211,9 @@ def _install_deps(args: list[str]) -> None:
     if manager is None:
         print(tr("cli.deps_no_manager", lang, programs=", ".join(d.label for d in targets)), file=sys.stderr)
         raise SystemExit(1)
-    # Resolve every target on its own: one dependency with an unknown package
-    # name (e.g. ydotool on Alpine or Void) must not block the others, it is
-    # only reported so the user can install that one by hand.
+    # Resolve every target on its own: one dependency with an unknown package name
+    # (ydotool on Alpine or Void, say) must not block the others. It is only
+    # reported, so the user can install that one by hand.
     packages: list[str] = []
     unknown: list[str] = []
     for dep in targets:
@@ -249,8 +244,8 @@ def _install_deps(args: list[str]) -> None:
     print(message, file=sys.stdout if ok else sys.stderr)
     if not ok:
         raise SystemExit(1)
-    # The desktop integration (shortcut, ydotoold unit) is applied by
-    # setup-user, so re-run it: without this an installed package stays inert.
+    # The desktop integration (shortcut, ydotoold unit) is applied by setup-user, so
+    # re-run it: without this an installed package stays inert.
     applied, detail = _run_setup_user()
     if not applied:
         # Not an install failure - the package is in - but the hotkey may be
