@@ -4,6 +4,7 @@ import contextlib
 import fcntl
 import json
 import os
+import queue
 import signal
 import socket
 import sys
@@ -40,10 +41,38 @@ from .shortcut import label_for
 #: takes the hotkey down with it.
 CLIENT_TIMEOUT = 5.0
 
+#: Commands answered on the accept loop itself, because they are questions and
+#: must never queue behind work that takes time.  ``quit`` belongs here too: it
+#: only sets a flag, and answering it before anything else is what lets the
+#: window close cleanly.
+INLINE_COMMANDS = frozenset({"ping", "status", "clear-status", "quit"})
+
+#: How many commands may be waiting for the worker at once.  A queue that grew
+#: without bound would turn a stuck command into a daemon that accepts requests
+#: and answers none of them.
+COMMAND_QUEUE = 32
+
+#: How long the shutdown waits for the command worker to finish the command it
+#: is holding.  Long enough for a recorder to flush its WAV header, short enough
+#: that ``quit`` does not feel like a hang.
+COMMAND_DRAIN_TIMEOUT = 5.0
+
 #: Longest request the daemon reads.  Real commands are tens of bytes; anything
 #: bigger is a client that is broken or hostile, and reading it into memory
 #: would be its decision, not ours.
 MAX_REQUEST_BYTES = 64 * 1024
+
+
+def _send(conn: socket.socket, reply: dict) -> None:
+    """Write one reply and nothing else; the caller closes the connection."""
+    conn.sendall((json.dumps(reply, ensure_ascii=False) + "\n").encode("utf-8"))
+
+
+def _close(conn: socket.socket) -> None:
+    try:
+        conn.close()
+    except OSError:
+        pass
 
 
 def _sweep_stale_recordings(max_age: float = 3600.0) -> int:
@@ -525,6 +554,33 @@ class WayVoiceDaemon:
             return {"ok": True}
         return {"ok": False, "error": f"Unknown command: {command}"}
 
+    def _command_loop(self, commands: "queue.Queue") -> None:
+        """Serve the commands that may take time, one at a time.
+
+        One worker, not a pool: the hot key, the microphone button and the window
+        all expect their command to be finished before the next one starts, and
+        the daemon's own lock already enforces that.  What the worker buys is
+        that the accept loop - the thread that has to answer a status poll within
+        0.12 s - is never the thread doing the waiting.
+
+        A command that raises must not take the worker with it: every client
+        waiting behind it would hang until it timed out.
+        """
+        while True:
+            item = commands.get()
+            if item is None:
+                return
+            conn, command = item
+            try:
+                reply = self.dispatch(command)
+            except Exception as exc:
+                reply = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+            try:
+                _send(conn, reply)
+            except OSError:
+                pass
+            _close(conn)
+
     def _live_daemon(self, path: Path) -> bool:
         """Return whether another daemon already owns ``path``.
 
@@ -596,44 +652,71 @@ class WayVoiceDaemon:
         os.chmod(path, 0o600)
         server.listen(8)
         server.settimeout(0.5)
+        commands: queue.Queue = queue.Queue(maxsize=COMMAND_QUEUE)
+        worker = threading.Thread(
+            target=self._command_loop, args=(commands,), daemon=True
+        )
+        worker.start()
         try:
             while not self._shutdown.is_set():
                 try:
                     conn, _ = server.accept()
                 except socket.timeout:
                     continue
-                with conn:
+                try:
+                    # The accepted socket is blocking again (CPython undoes the
+                    # listener's timeout for it), so the read has to get its own
+                    # deadline. Without it a client that connects and stays quiet
+                    # blocks this loop - and with it the hot key - until the
+                    # daemon is restarted.
+                    conn.settimeout(CLIENT_TIMEOUT)
+                    data = b""
+                    while not data.endswith(b"\n"):
+                        if len(data) > MAX_REQUEST_BYTES:
+                            data = b""
+                            break
+                        chunk = conn.recv(4096)
+                        if not chunk:
+                            break
+                        data += chunk
+                except OSError:
+                    # A client that hung up mid-request, and one whose request
+                    # took longer than CLIENT_TIMEOUT.
+                    _close(conn)
+                    continue
+                if not data:
+                    # A client that connected and left again (a probe, or a
+                    # window that was closed) must not cost us the daemon:
+                    # answering it would only raise EPIPE here and take the whole
+                    # accept loop down with it.  The same path swallows a client
+                    # that sent nothing at all within the deadline, and one that
+                    # tried to make us buffer its whole output.
+                    _close(conn)
+                    continue
+                command = data.decode("utf-8", "replace").strip()
+                if command in INLINE_COMMANDS:
+                    # The questions are answered here, on the loop, and cost a
+                    # fraction of a millisecond each.  Everything that can take
+                    # time goes to the command worker below, because the window
+                    # asks for the status every 650 ms with a 0.12 s deadline and
+                    # would otherwise call a busy daemon dead.
                     try:
-                        # The accepted socket is blocking again (CPython undoes
-                        # the listener's timeout for it), so the read has to get
-                        # its own deadline. Without it a client that connects
-                        # and stays quiet blocks this loop - and with it the hot
-                        # key - until the daemon is restarted.
-                        conn.settimeout(CLIENT_TIMEOUT)
-                        data = b""
-                        while not data.endswith(b"\n"):
-                            if len(data) > MAX_REQUEST_BYTES:
-                                data = b""
-                                break
-                            chunk = conn.recv(4096)
-                            if not chunk:
-                                break
-                            data += chunk
-                        if not data:
-                            # A client that connected and left again (a probe,
-                            # or a window that was closed) must not cost us the
-                            # daemon: answering it would only raise EPIPE here
-                            # and take the whole accept loop down with it. The
-                            # same path swallows a client that sent nothing at
-                            # all within the deadline, and one that tried to
-                            # make us buffer its whole output.
-                            continue
-                        reply = self.dispatch(data.decode("utf-8", "replace").strip())
-                        conn.sendall((json.dumps(reply, ensure_ascii=False) + "\n").encode("utf-8"))
+                        _send(conn, self.dispatch(command))
                     except OSError:
-                        # Same for a client that hung up mid-reply, and for one
-                        # whose request took longer than CLIENT_TIMEOUT.
-                        continue
+                        pass
+                    _close(conn)
+                    continue
+                try:
+                    commands.put_nowait((conn, command))
+                except queue.Full:
+                    # More work than the daemon can be doing at once, which
+                    # means something is stuck.  The client is told so rather
+                    # than left waiting for a reply that would never come.
+                    try:
+                        _send(conn, {"ok": False, "error": "The daemon is busy."})
+                    except OSError:
+                        pass
+                    _close(conn)
         finally:
             self._cancel_record_timer()
             # Leaving a recording behind is not a cleanup detail: pw-record keeps
@@ -648,6 +731,11 @@ class WayVoiceDaemon:
             # A download that outlives the daemon would keep fetching a file
             # nobody is waiting for, in a session that is going away.
             self._prepare_cancel.set()
+            # Let the command worker finish what it is holding, and close
+            # whatever is still queued: those clients would otherwise wait for a
+            # reply from a daemon that is gone.
+            commands.put_nowait(None)
+            worker.join(timeout=COMMAND_DRAIN_TIMEOUT)
             server.close()
             path.unlink(missing_ok=True)
 
