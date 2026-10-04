@@ -202,8 +202,13 @@ class EngineSetupLockTests(unittest.TestCase):
             holder = lock_path.open("w")
             self.addCleanup(holder.close)
             fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            with mock.patch.object(engine_setup, "LOCK_TIMEOUT", 0.1):
-                self.assertFalse(engine_setup._take_lock(lock_path.open("w")))
+            with lock_path.open("w") as taken:
+                # The handle the code under test is handed is closed here, not
+                # left to the garbage collector: an unclosed file is a warning
+                # in every run, and a warning nobody reads hides the ones that
+                # are about production code.
+                with mock.patch.object(engine_setup, "LOCK_TIMEOUT", 0.1):
+                    self.assertFalse(engine_setup._take_lock(taken))
 
     def test_a_free_lock_is_taken(self):
         import tempfile
@@ -213,6 +218,7 @@ class EngineSetupLockTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             handle = (Path(tmp) / "engine-setup.lock").open("w")
+            self.addCleanup(handle.close)
             self.addCleanup(handle.close)
             self.assertTrue(engine_setup._take_lock(handle))
 

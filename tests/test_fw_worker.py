@@ -70,6 +70,20 @@ class RecordingFactory:
         return model
 
 
+class SlowFactory(RecordingFactory):
+    """Factory whose load takes its time, so "working" can be observed."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    def __call__(self, model_id, device, compute_type):
+        self.started.set()
+        self.release.wait(30.0)
+        return super().__call__(model_id, device, compute_type)
+
+
 class FakeClock:
     """Clock the test advances by hand, so idle timeouts are deterministic."""
 
@@ -491,6 +505,76 @@ class WarmTests(unittest.TestCase):
         cache = ModelCache(SlowFactory())
         reply = handle_request({"cmd": "warm"}, cache, self.config)
         self.assertGreaterEqual(reply["seconds"], 0.0)
+
+
+class WarmHoldsTheWorkerTests(unittest.TestCase):
+    """A model that is loading is work, and the idle timer must know it.
+
+    ``warm`` is not a transcription: there is no request id to cancel, so nothing
+    was registered as active while the weights were read.  The idle timer looks
+    only at activity, and the default deadline is fifteen minutes - which is
+    shorter than a large model on a slow disk.  Without a hold, the worker would
+    decide it was unused and exit in the middle of the load, which is the one
+    moment where exiting is worst: the daemon would be told the model is warm,
+    and the worker holding it would be gone.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.socket_path = Path(self.tmp.name) / "worker.sock"
+        self.factory = SlowFactory([FakeSegment("привет")])
+        self.config = WorkerConfig(model="tiny", device="cpu", beam_size=3, vad=False)
+        self.clock = FakeClock()
+        self.thread = _start_worker_thread(
+            self.socket_path, self.config, self.factory, 5.0, self.clock
+        )
+        self.addCleanup(self._settle)
+        self.replies: list = []
+        self.client = threading.Thread(
+            target=lambda: self.replies.append(
+                _call(self.socket_path, {"cmd": "warm"}, timeout=30.0)
+            ),
+            daemon=True,
+        )
+        self.client.start()
+        self.assertTrue(self.factory.started.wait(10.0), "the load never started")
+
+    def _settle(self):
+        self.factory.release.set()
+        self.client.join(timeout=20.0)
+        self.clock.advance(3600.0)
+        self.thread.join(timeout=5.0)
+
+    def test_the_worker_survives_an_hour_of_loading(self):
+        self.clock.advance(3600.0)
+        try:
+            alive = _call(self.socket_path, {"cmd": "ping"}, timeout=5.0).get("ok")
+        except OSError as exc:
+            # The socket is unlinked when the server gives up, so this is what a
+            # worker that expired mid-load looks like from the outside.
+            self.fail(f"the worker exited while it was loading the model: {exc}")
+        self.assertTrue(alive, "the worker reported itself gone mid-load")
+        self.assertTrue(self.thread.is_alive())
+        self.factory.release.set()
+        self.client.join(timeout=20.0)
+        self.assertEqual(len(self.replies), 1)
+        self.assertTrue(self.replies[0]["ok"], self.replies[0])
+        self.assertTrue(self.replies[0]["warm"])
+
+    def test_the_hold_is_released_when_the_load_is_over(self):
+        # The other half: a hold that outlived its work would keep a worker
+        # alive for ever, which is the same fault with a different symptom.
+        self.factory.release.set()
+        self.client.join(timeout=20.0)
+        self.assertTrue(self.replies[0]["ok"], self.replies[0])
+        self.clock.advance(3600.0)
+        self.thread.join(timeout=5.0)
+        self.assertFalse(
+            self.thread.is_alive(),
+            "the worker stayed alive after the model was loaded and nothing else asked",
+        )
+        self.assertFalse(self.socket_path.exists(), "the socket outlived the worker")
 
 
 class ServerWarmTests(unittest.TestCase):

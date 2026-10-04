@@ -142,6 +142,15 @@ class SignalShutdownTests(unittest.TestCase):
         if proc.poll() is None:
             proc.kill()
             proc.wait(timeout=10)
+        # The pipes belong to the test, not to the daemon: a Popen that is waited
+        # for still holds its streams open, and every run would warn about two
+        # leaked files until the collector got round to them.
+        for stream in (proc.stdout, proc.stderr):
+            if stream is not None:
+                try:
+                    stream.close()
+                except OSError:
+                    pass
         for child in _children_of(proc.pid):
             try:
                 os.kill(child, signal.SIGKILL)

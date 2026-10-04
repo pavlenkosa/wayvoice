@@ -166,6 +166,13 @@ class DownloadTests(unittest.TestCase):
         self.cache = Path(self.tmp.name)
 
     def _download(self, mode: str, **kwargs):
+        """Run a download against a helper that plays back ``mode``.
+
+        The language is given so that the messages under test are the ones this
+        suite reads; without it they would follow the locale of the machine, and
+        a Russian laptop would fail every assertion about an English sentence.
+        """
+        kwargs.setdefault("language", "en")
         with mock.patch.object(
             engine, "_model_download_args", return_value=_helper_args(mode, self.cache)
         ):
@@ -375,6 +382,11 @@ class PrepareTests(unittest.TestCase):
                 self.assertIsNotNone(eng.model_download, eng.id)
 
 
+#: Long enough that the test cannot pass by accident on a loaded machine, short
+#: enough that it does not become the slowest thing in the suite.
+WARM_DEADLINE = 30.0
+
+
 class WarmWorkerTests(unittest.TestCase):
     """Asking the worker to load the model now instead of at first use."""
 
@@ -403,6 +415,48 @@ class WarmWorkerTests(unittest.TestCase):
         with mock.patch.object(engine, "ensure_worker", return_value=True):
             with mock.patch.object(engine, "_worker_call", side_effect=OSError("gone")):
                 self.assertFalse(engine.warm_worker({}))
+
+    def test_a_model_that_is_still_loading_is_watched_until_it_is_there(self):
+        # The reply to ``warm`` only comes when the load is finished, and a load
+        # of three gigabytes takes longer than any deadline worth having. Asking
+        # and then watching the ping is what keeps the answer honest in both
+        # directions: not "warm" while it loads, and not "not warm" because the
+        # clock ran out on a model that was on its way.
+        pings = [
+            {"ok": True, "warm": False},
+            {"ok": True, "warm": False},
+            {"ok": True, "warm": True},
+        ]
+        with mock.patch.object(engine, "ensure_worker", return_value=True), \
+             mock.patch.object(engine, "_worker_call", side_effect=TimeoutError("busy")), \
+             mock.patch.object(engine, "_worker_ping", side_effect=pings), \
+             mock.patch.object(engine, "WORKER_POLL_INTERVAL", 0.01):
+            self.assertTrue(engine.warm_worker({}, timeout=30.0))
+
+    def test_a_worker_that_dies_while_being_watched_is_not_waited_for(self):
+        # The clock is generous on purpose - it has to be, for large models - so
+        # the only thing that ends the waiting early is the worker being gone.
+        # Otherwise a crashed worker would hold the daemon's preparation thread
+        # for the whole deadline, and nothing would be reported the whole time.
+        began = time.monotonic()
+        with mock.patch.object(engine, "ensure_worker", return_value=True), \
+             mock.patch.object(engine, "_worker_call", side_effect=TimeoutError("busy")), \
+             mock.patch.object(engine, "_worker_ping", return_value=None):
+            self.assertFalse(engine.warm_worker({}, timeout=WARM_DEADLINE))
+        self.assertLess(
+            time.monotonic() - began, 5.0,
+            "waiting continued after the worker had gone",
+        )
+
+    def test_a_model_that_never_arrives_is_reported_as_not_warm(self):
+        # The other end of the deadline: a worker that answers but never warms.
+        # False here is the truth - recognition still works through the one-shot
+        # runner - and reporting it late would be worse than reporting it.
+        with mock.patch.object(engine, "ensure_worker", return_value=True), \
+             mock.patch.object(engine, "_worker_call", side_effect=TimeoutError("busy")), \
+             mock.patch.object(engine, "_worker_ping", return_value={"ok": True, "warm": False}), \
+             mock.patch.object(engine, "WORKER_POLL_INTERVAL", 0.01):
+            self.assertFalse(engine.warm_worker({}, timeout=0.3))
 
 
 class FetchPatternsTests(unittest.TestCase):

@@ -332,6 +332,26 @@ def handle_request(
     return {"ok": True, "text": text, "request_id": request_id}
 
 
+class _Hold:
+    """Context manager that keeps the idle timer off a worker for a while.
+
+    Re-entrant through a counter, so nested work does not release the hold early.
+    """
+
+    def __init__(self, state: "_WorkerState") -> None:
+        self._state = state
+
+    def __enter__(self) -> "_Hold":
+        with self._state._lock:
+            self._state._holding += 1
+        return self
+
+    def __exit__(self, *_exc) -> bool:
+        with self._state._lock:
+            self._state._holding = max(0, self._state._holding - 1)
+        return False
+
+
 class _WorkerState:
     """Shared server state: activity clock, serialisation and cancellations.
 
@@ -347,6 +367,8 @@ class _WorkerState:
         self._lock = threading.Lock()
         self._active: dict[str, threading.Event] = {}
         self._early: dict[str, float] = {}
+        #: Work that is not a cancellable request - a model load.
+        self._holding = 0
         #: Only one transcription at a time; the daemon drives a single one.
         self.serial = threading.Lock()
         self.last_activity = clock()
@@ -361,7 +383,17 @@ class _WorkerState:
 
     def busy(self) -> bool:
         with self._lock:
-            return bool(self._active)
+            return bool(self._active) or self._holding > 0
+
+    def hold(self) -> "_Hold":
+        """Mark the worker as working without a request to cancel.
+
+        A model load is work: it holds the same lock a transcription does and
+        can take minutes.  Counting only requests would let the idle timer decide
+        the worker is unused and exit in the middle of loading, which is the one
+        moment where exiting is worst.
+        """
+        return _Hold(self)
 
     def _expire(self) -> None:
         deadline = self._clock() - self._grace
@@ -477,8 +509,10 @@ def _dispatch(payload: Any, cache: ModelCache, config: WorkerConfig, state: _Wor
         return handle_request(payload, cache, config)
     if command == "warm":
         # Under the same lock as a transcription: loading weights into RAM while
-        # something is being decoded would double the memory for no reason.
-        with state.serial:
+        # something is being decoded would double the memory for no reason.  And
+        # marked as work, so the idle timer does not decide this worker is unused
+        # while it is reading three gigabytes from disk.
+        with state.serial, state.hold():
             return handle_request(payload, cache, config)
     if command != "transcribe":
         return handle_request(payload, cache, config)

@@ -120,7 +120,23 @@ class WayVoiceDaemon:
             "error": "", "warming": False,
         }
         self._prepare_thread: threading.Thread | None = None
+        #: Set before the thread starts and cleared when it ends.  A thread that
+        #: has been created but not started is not alive yet, so asking about the
+        #: thread alone let two callers through, and they started two downloads
+        #: of the same file.
+        self._prepare_running = False
         self._prepare_cancel = threading.Event()
+
+    def prepare_on_start(self) -> None:
+        """Get ready for the first dictation, now that this daemon owns the session.
+
+        Called from :meth:`serve` *after* the ownership lock is held, and not
+        from ``__init__``.  A second daemon that is about to be refused must not
+        change anything first: preparing the engine writes a status file, and
+        warming the worker stops the running daemon's worker - the two disagree
+        about which model the session uses - and then starts one of its own,
+        leaving the pid file owned by a process that is about to exit.
+        """
         _sweep_stale_recordings()
         cfg = load_config()
         engine = engine_from_config(cfg)
@@ -173,8 +189,9 @@ class WayVoiceDaemon:
                 # Nothing on disk to warm up, or the user turned the worker off.
                 return False
         with self._lock:
-            if self._prepare_thread is not None and self._prepare_thread.is_alive():
+            if self._prepare_running:
                 return False
+            self._prepare_running = True
             self._prepare_cancel.clear()
             self._download = {
                 "state": "downloading" if download else "warming",
@@ -194,6 +211,7 @@ class WayVoiceDaemon:
             thread.start()
         except Exception as exc:
             with self._lock:
+                self._prepare_running = False
                 self._prepare_thread = None
                 self._download = {"state": "error", "model": state["model"],
                                   "done_bytes": 0, "total_bytes": 0,
@@ -243,6 +261,7 @@ class WayVoiceDaemon:
                 # "preparing" after it finished would never stop.
                 "warming": False,
             }
+            self._prepare_running = False
             self._prepare_thread = None
 
     def _cancel_model_prepare(self) -> str:
@@ -257,7 +276,7 @@ class WayVoiceDaemon:
         """
         with self._lock:
             download = dict(self._download)
-            running = self._prepare_thread is not None and self._prepare_thread.is_alive()
+            running = self._prepare_running
             if not running:
                 phase = "nothing"
             elif download.get("warming") or download.get("state") == "warming":
@@ -325,7 +344,10 @@ class WayVoiceDaemon:
     def start_recording(self) -> dict:
         with self._lock:
             if self.busy:
-                return {"ok": False, "error": "Recognition is still running."}
+                return {
+                    "ok": False,
+                    "error": tr("daemon.busy_recognizing", self._language()),
+                }
             if self.recorder.recording:
                 return {"ok": True, "state": "recording"}
             cfg = load_config()
@@ -384,7 +406,10 @@ class WayVoiceDaemon:
     def stop_recording(self) -> dict:
         with self._lock:
             if not self.recorder.recording:
-                return {"ok": False, "error": "Recording is not active."}
+                return {
+                    "ok": False,
+                    "error": tr("daemon.not_recording", self._language()),
+                }
             self._cancel_record_timer()
             try:
                 wav = self.recorder.stop_to_wav()
@@ -411,6 +436,17 @@ class WayVoiceDaemon:
             self.last_error = str(exc)
             return {"ok": False, "error": str(exc)}
         return {"ok": True, "state": "transcribing"}
+
+    @staticmethod
+    def _language() -> str | None:
+        """The user's language, for a reply that has no config in hand.
+
+        Some replies are refusals raised before anything has read the settings -
+        an unknown command, a request for a second dictation.  They are still
+        shown to the user, so they are still translated; the cost is one small
+        file read on a path that has just refused.
+        """
+        return load_config().get("ui_language")
 
     def request_shutdown(self) -> None:
         """Ask the serving loop to stop and clean up.
@@ -541,18 +577,31 @@ class WayVoiceDaemon:
                 # A broken config, not an engine without setup: saying the
                 # latter would hide the actual problem.
                 engine_id = str(cfg.get("engine", DEFAULT_ENGINE))
-                return {"ok": False, "error": f"Unknown recognition engine: {engine_id}"}
+                return {
+                    "ok": False,
+                    "error": tr(
+                        "daemon.unknown_engine", self._language(), engine=engine_id
+                    ),
+                }
             if request_engine_setup(engine):
                 return {"ok": True}
             # Nothing was started, so say why instead of replying "ok" to a
             # request that did not happen.
-            return {"ok": False, "error": f"{engine.label} needs no preparation."}
+            return {
+                "ok": False,
+                "error": tr(
+                    "daemon.engine_needs_no_setup", self._language(), engine=engine.label
+                ),
+            }
         if command == "ping":
             return {"ok": True, "pong": True}
         if command == "quit":
             self._shutdown.set()
             return {"ok": True}
-        return {"ok": False, "error": f"Unknown command: {command}"}
+        return {
+                "ok": False,
+                "error": tr("daemon.unknown_command", self._language(), command=command),
+            }
 
     def _command_loop(self, commands: "queue.Queue") -> None:
         """Serve the commands that may take time, one at a time.
@@ -637,6 +686,11 @@ class WayVoiceDaemon:
                     file=sys.stderr,
                 )
                 return
+            # Only now, with the session known to be ours: preparing the engine
+            # or warming the worker changes state the running daemon shares, and
+            # a duplicate that did it first would stop the real daemon's worker
+            # and leave one of its own behind.  See prepare_on_start().
+            self.prepare_on_start()
             self._serve_locked(path)
 
     def _serve_locked(self, path: Path) -> None:
@@ -713,7 +767,10 @@ class WayVoiceDaemon:
                     # means something is stuck.  The client is told so rather
                     # than left waiting for a reply that would never come.
                     try:
-                        _send(conn, {"ok": False, "error": "The daemon is busy."})
+                        _send(conn, {
+                            "ok": False,
+                            "error": tr("daemon.too_busy", self._language()),
+                        })
                     except OSError:
                         pass
                     _close(conn)

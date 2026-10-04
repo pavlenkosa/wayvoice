@@ -12,6 +12,7 @@ hub.
 
 import contextlib
 import threading
+import types
 import time
 import unittest
 from unittest import mock
@@ -19,6 +20,7 @@ from unittest import mock
 from wayvoice import daemon as daemon_mod
 from wayvoice.daemon import WayVoiceDaemon
 from wayvoice.engine import Engine
+from wayvoice.protocol import socket_path
 
 from support import isolate_engine, isolate_environment
 
@@ -99,7 +101,13 @@ class PrepareDaemon:
     """
 
     #: What the daemon under test believes the user chose.
-    CONFIG = {"model": "small", "engine_worker": True, "notify": False}
+    #:
+    #: The language is pinned because replies are translated: a test that asserts
+    #: on a message must not depend on the locale of the machine it runs on.
+    CONFIG = {
+        "model": "small", "engine_worker": True, "notify": False,
+        "ui_language": "en",
+    }
 
     def __init__(self, test: DaemonCase, engine, calls, config=None):
         self.test = test
@@ -406,6 +414,59 @@ class CommandTests(DaemonCase):
         self.assertFalse(reply["ok"])
         harness.wait_for("error")
 
+    def test_two_callers_in_the_starting_window_start_one_download(self):
+        # The window between "the thread exists" and "the thread runs" is real:
+        # the guard has to be set before start(), not inferred from is_alive()
+        # afterwards.  Two callers in that window used to both fetch the same
+        # file at the same time, from two threads, into one cache directory.
+        eng, calls = make_engine(present=False, states=["ready"], delay=0.05)
+        harness = PrepareDaemon(self, eng, calls)
+        window = threading.Event()
+        release = threading.Event()
+        first_answer = []
+        second_answer = []
+        real_thread = threading.Thread
+        gated = []
+
+        class SlowStartThread(real_thread):
+            """A thread that cannot begin until the test lets it."""
+
+            def start(self):
+                if not gated:
+                    gated.append(self)
+                    window.set()
+                    if not release.wait(20.0):
+                        raise AssertionError("the test never opened the window")
+                super().start()
+
+        # Only the daemon's own threading is replaced, and only its first thread
+        # waits; everything else in the process keeps the real module.
+        shim = types.SimpleNamespace(
+            Thread=SlowStartThread,
+            Event=threading.Event,
+            Timer=threading.Timer,
+        )
+        with mock.patch.object(daemon_mod, "threading", shim):
+            first = threading.Thread(
+                target=lambda: first_answer.append(
+                    harness.daemon.dispatch("prepare-model")
+                ),
+                daemon=True,
+            )
+            first.start()
+            self.assertTrue(window.wait(10.0), "the first download never reached start()")
+            # Inside the window: the thread object exists, but nothing has run.
+            second_answer.append(harness.daemon.dispatch("prepare-model"))
+            release.set()
+            first.join(timeout=20.0)
+        self.assertTrue(first_answer and first_answer[0]["ok"], first_answer)
+        self.assertFalse(
+            second_answer[0]["ok"],
+            "a second caller started a download while one was already starting",
+        )
+        harness.wait_for("ready")
+        self.assertEqual(calls["n"], 1, f"the file was fetched {calls['n']} times")
+
     def test_cancel_download_is_answered_honestly(self):
         eng, calls = make_engine(present=False, progress=True, delay=0.05)
         harness = PrepareDaemon(self, eng, calls)
@@ -430,6 +491,10 @@ class StartupTests(unittest.TestCase):
     Warming a model that is already on disk is free and makes the first
     dictation of the session as fast as the ones after it.  Fetching one is not
     free and is nobody's decision but the user's, so startup does not.
+
+    Preparation happens from :meth:`prepare_on_start`, which ``serve`` calls once
+    it holds the ownership lock - so these tests call it the way ``serve`` does,
+    and the last one pins why the order matters.
     """
 
     def _start(self, engine, **config):
@@ -446,11 +511,12 @@ class StartupTests(unittest.TestCase):
             self.addCleanup(patcher.stop)
         daemon = WayVoiceDaemon()
         self.addCleanup(daemon._prepare_cancel.set)
+        daemon.prepare_on_start()
         return daemon
 
     def _settle(self, daemon, timeout=10.0):
         deadline = time.monotonic() + timeout
-        while daemon._prepare_thread is not None and time.monotonic() < deadline:
+        while daemon._prepare_running and time.monotonic() < deadline:
             time.sleep(0.02)
 
     def test_starting_the_daemon_fetches_nothing(self):
@@ -490,6 +556,53 @@ class StartupTests(unittest.TestCase):
             self.assertTrue(daemon.dispatch("prepare-model")["ok"])
             self._settle(daemon)
         self.assertEqual(calls["n"], 1)
+
+    def test_a_daemon_that_is_refused_changes_nothing(self):
+        # Ownership is decided before anything is prepared, and that order is
+        # the point: preparing means warming the worker, which stops the running
+        # daemon's worker because the two disagree about the model, and then
+        # starts one of its own. A duplicate that did that first would leave the
+        # real daemon paying a cold model load and a pid file owned by a process
+        # that is already gone.
+        holder_warmed = threading.Event()
+
+        def warm_first(cfg):
+            holder_warmed.set()
+            return True
+
+        first, _calls = make_engine(present=True)
+        with mock.patch.object(daemon_mod, "engine_from_config", return_value=first), \
+             mock.patch.object(daemon_mod, "load_config", return_value={"model": "small"}), \
+             mock.patch("wayvoice.engine.warm_worker", side_effect=warm_first):
+            holder = WayVoiceDaemon()
+            holder.recorder = mock.Mock(recording=False)
+            thread = threading.Thread(target=holder.serve, daemon=True)
+            thread.start()
+            self.addCleanup(thread.join, 20.0)
+            self.addCleanup(holder.request_shutdown)
+            deadline = time.monotonic() + 20.0
+            while time.monotonic() < deadline and not socket_path().exists():
+                time.sleep(0.02)
+            self.assertTrue(socket_path().exists(), "the first daemon never served")
+            # Wait for the holder's own warm-up to have happened, rather than for
+            # a flag that is still false because the thread has not started yet:
+            # a late call of the holder's would land in the mock below and look
+            # like the duplicate's doing. This test passed or failed depending on
+            # how the scheduler felt before that was noticed.
+            self.assertTrue(
+                holder_warmed.wait(20.0), "the first daemon never warmed its worker"
+            )
+            self._settle(holder)
+
+            second_engine, _second_calls = make_engine(present=True)
+            with mock.patch.object(daemon_mod, "engine_from_config", return_value=second_engine), \
+                 mock.patch("wayvoice.engine.warm_worker", return_value=True) as warm:
+                duplicate = WayVoiceDaemon()
+                duplicate.recorder = mock.Mock(recording=False)
+                duplicate.serve()  # refused by the lock, returns at once
+                self.assertFalse(warm.called, "a refused daemon warmed a worker")
+                self.assertFalse(duplicate._prepare_running)
+            holder.request_shutdown()
 
     def test_the_warm_up_at_startup_is_reported_as_such(self):
         eng, calls = make_engine(present=True)

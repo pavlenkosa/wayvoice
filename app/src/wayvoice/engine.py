@@ -17,6 +17,7 @@ from typing import Any, Callable
 
 from . import fw_worker
 from . import languages
+from .i18n import tr
 from . import __version__
 from . import service
 from .models import forced_language
@@ -39,6 +40,12 @@ RUNTIME_STAMP = ".engine-v1-ready"
 WORKER_START_TIMEOUT = 20.0
 WORKER_POLL_INTERVAL = 0.15
 WORKER_PING_TIMEOUT = 1.5
+#: How long a model may take to load into the warm worker before the daemon
+#: stops watching for it.  Generous on purpose: ``large-v3`` is three gigabytes,
+#: and the load is a read from disk that a spinning drive or a cold page cache
+#: can make take minutes.  Nothing waits on this except the daemon's background
+#: preparation thread, and the window shows what it is waiting for.
+WARM_TIMEOUT = 900.0
 WORKER_CANCEL_GRACE = 3.0
 WORKER_RETRY_BACKOFF = 60.0
 
@@ -177,6 +184,7 @@ def download_model(
     model_id: str,
     on_progress: Callable[[int, int], None] | None = None,
     cancel_event: Event | None = None,
+    language: str | None = None,
 ) -> dict[str, Any]:
     """Fetch a model into the hub cache, reporting progress as it arrives.
 
@@ -196,7 +204,7 @@ def download_model(
     if args is None:
         return {
             "state": "unsupported",
-            "error": f"Cannot download this model: {model_id}",
+            "error": tr("engine.download_unsupported", language, model=model_id),
             "done": 0,
             "total": 0,
         }
@@ -228,18 +236,20 @@ def download_model(
             break
         if cancel_event is not None and cancel_event.is_set():
             _terminate_process(proc)
-            state, detail = "cancelled", "Download cancelled"
+            state = "cancelled"
+            detail = tr("engine.download_cancelled", language)
             break
         if time.monotonic() - started >= DOWNLOAD_TIMEOUT:
             _terminate_process(proc)
             state = "error"
-            detail = f"Download did not finish within {int(DOWNLOAD_TIMEOUT // 3600)} hours"
+            detail = tr("engine.download_timeout", language, hours=int(DOWNLOAD_TIMEOUT // 3600))
             break
         _apply_download_lines(lines, result, on_progress)
         time.sleep(0.2)
     for reader in readers:
         reader.join(timeout=5.0)
     _apply_download_lines(lines, result, on_progress)
+    _close_pipes(proc)
 
     stderr = "".join(errors).strip()
     if state != "ready":
@@ -262,7 +272,7 @@ def download_model(
         # success here would send the user to the hotkey for a model that is not
         # on disk.
         result["state"] = "error"
-        result["error"] = "The download finished but the model is not on disk"
+        result["error"] = tr("engine.download_missing_after", language)
     return result
 
 
@@ -279,7 +289,12 @@ def download_configured_model(
     lambda in the registry where a wrong argument order would only show up as a
     model that reports itself as "nothing to download".
     """
-    return download_model(str(cfg.get("model", "")), on_progress, cancel_event)
+    return download_model(
+        str(cfg.get("model", "")),
+        on_progress,
+        cancel_event,
+        language=cfg.get("ui_language"),
+    )
 
 
 def _start_line_readers(
@@ -511,6 +526,21 @@ def _start_readers(proc: subprocess.Popen[str]) -> tuple[list[threading.Thread],
     return threads, out, err
 
 
+def _close_pipes(proc: subprocess.Popen[str]) -> None:
+    """Close a child's pipes, on every path out.
+
+    A transcription is one of these per dictation, and the handles are freed when
+    the object is collected - which is not a moment anything can rely on.  A long
+    session then holds two file descriptors per dictation until it ends.
+    """
+    for stream in (proc.stdout, proc.stderr):
+        try:
+            if stream is not None:
+                stream.close()
+        except Exception:
+            pass
+
+
 def _finish(
     proc: subprocess.Popen[str],
     readers: list[threading.Thread],
@@ -561,6 +591,7 @@ def _run_cancelable(
         time.sleep(0.12)
     for thread in readers:
         thread.join(timeout=5.0)
+    _close_pipes(proc)
     return subprocess.CompletedProcess(
         args, proc.returncode, "".join(out), "".join(err)
     )
@@ -1291,20 +1322,46 @@ def prepare_model(
     return reply
 
 
-def warm_worker(cfg: dict[str, Any], timeout: float = WORKER_START_TIMEOUT) -> bool:
+def warm_worker(cfg: dict[str, Any], timeout: float = WARM_TIMEOUT) -> bool:
     """Make the warm worker hold the model, starting it if needed.
 
     Returns whether the model is in memory afterwards.  A worker that cannot be
     started is not an error here: recognition falls back to the one-shot runner,
     which loads the model itself and still works.
+
+    What this does not do is decide by a deadline of its own whether the model
+    arrived.  Loading weights takes seconds for ``small`` and minutes for
+    ``large-v3`` on a slow disk, and the reply to ``warm`` only comes when it is
+    finished: one fixed deadline for both would be a choice between "report
+    everything as ready while the model is still loading" and "block for minutes
+    before saying anything at all".
+
+    So a definite answer is taken at face value - the worker refused, or the
+    load is done - and only the *absence* of an answer sends this to watching a
+    ping, which the worker answers while it loads because a ping does not wait
+    for the model.  A worker that has died stops the watching at once instead of
+    running out the clock.
     """
     if not ensure_worker(cfg):
         return False
     try:
-        reply = _worker_call({"cmd": "warm"}, timeout=max(timeout, 30.0))
+        # A short deadline on purpose: the request may have to wait for the
+        # worker to be free, and nothing is lost by not hearing the reply.
+        reply = _worker_call({"cmd": "warm"}, timeout=WORKER_PING_TIMEOUT)
     except (OSError, ValueError, TimeoutError):
-        return False
-    return bool(reply.get("ok") and reply.get("warm"))
+        reply = None
+    if reply is not None:
+        return bool(reply.get("ok") and reply.get("warm"))
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        watched = _worker_ping()
+        if watched is None:
+            # The worker is gone, so nothing is going to load any more.
+            return False
+        if watched.get("warm"):
+            return True
+        time.sleep(WORKER_POLL_INTERVAL)
+    return False
 
 
 def request_engine_setup(engine: Engine | None) -> bool:
