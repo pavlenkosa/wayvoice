@@ -24,27 +24,23 @@ from .models import forced_language
 from .paths import app_dir, script_path
 from .postprocess import normalize
 
-# The engines are registered at the very bottom of this module, in
-# :data:`ENGINES`, because their ``transcribe``/``status`` callables are the
-# functions defined here.  Nothing above the registry branches on an engine id.
+# Engines register at the bottom of this module; nothing above the registry
+# branches on an engine id.
 #
-#: Engine used when a config does not name one.  It has to agree with the id
-#: registered below and with the shipped ``config.DEFAULTS``; a test holds the
-#: three together.
+#: Engine used when a config names none. Must match ``config.DEFAULTS`` and the
+#: id registered below.
 DEFAULT_ENGINE = "faster-whisper"
 
 RUNTIME_STAMP = ".engine-v1-ready"
 
-# Warm-worker limits.  Starting the worker must never delay the daemon for
-# long, and a worker that failed to start is not retried on every dictation.
+# Starting a worker must not delay the daemon, and a worker that failed to
+# start is not retried on every dictation.
 WORKER_START_TIMEOUT = 20.0
 WORKER_POLL_INTERVAL = 0.15
 WORKER_PING_TIMEOUT = 1.5
-#: How long a model may take to load into the warm worker before the daemon
-#: stops watching for it.  Generous on purpose: ``large-v3`` is three gigabytes,
-#: and the load is a read from disk that a spinning drive or a cold page cache
-#: can make take minutes.  Nothing waits on this except the daemon's background
-#: preparation thread, and the window shows what it is waiting for.
+#: How long a model may take to load into the warm worker before the daemon stops
+#: watching for it. ``large-v3`` is three gigabytes, and a cold page cache can
+#: make the read take minutes.
 WARM_TIMEOUT = 900.0
 WORKER_CANCEL_GRACE = 3.0
 WORKER_RETRY_BACKOFF = 60.0
@@ -53,8 +49,7 @@ _worker_lock = Lock()
 #: Guards the reader threads' line buffers of a running download.
 _download_lock = Lock()
 _worker_retry_after = 0.0
-# Handles of the workers we spawned, so an idle worker that exited can be
-# reaped instead of lingering as a zombie for the rest of the session.
+# Handles of the workers we spawned, so an idle one that exited can be reaped.
 _worker_procs: list[subprocess.Popen[str]] = []
 
 
@@ -69,10 +64,8 @@ class TranscriptionTimeout(RuntimeError):
 class WorkerUnavailable(RuntimeError):
     """The warm worker could not be reached or started.
 
-    Only this failure is worth retrying through the one-shot runner. An error
-    the worker *did* report (a bad model id, an out-of-memory CUDA context) is
-    a real result: repeating it through a second, freshly spawned process would
-    only double the latency of the failure.
+    Only this failure is worth retrying through the one-shot runner; an error the
+    worker reported itself is a real result.
     """
 
 
@@ -85,20 +78,14 @@ def _state_home() -> Path:
 
 
 def faster_runtime() -> Path:
-    """Return the directory holding the Faster-Whisper runtime.
+    """Directory holding the Faster-Whisper runtime, in order of preference.
 
-    Three locations, in order:
-
-    1. ``WAYVOICE_RUNTIME`` -- an explicit override;
-    2. a runtime shipped next to the application, i.e.
-       ``<prefix>/lib/wayvoice/runtime``. Only used when it really holds a
-       Python interpreter, so a leftover empty directory is ignored. This is
-       how the Flatpak build finds the engine that was baked into the image:
-       inside a sandbox ``XDG_DATA_HOME`` is a run-time directory, so the
-       per-user location below cannot hold a prebuilt engine;
-    3. the per-user ``$XDG_DATA_HOME/wayvoice/runtime``, which
-       :mod:`wayvoice.engine_setup` creates on first use. This is what the
-       Debian package uses.
+    1. ``WAYVOICE_RUNTIME``;
+    2. ``<prefix>/lib/wayvoice/runtime``, used only when it holds an interpreter -
+    this is how the Flatpak build finds the engine baked into the image, since
+    ``XDG_DATA_HOME`` is a run-time directory inside the sandbox;
+    3. ``$XDG_DATA_HOME/wayvoice/runtime``, created on first use by
+    :mod:`wayvoice.engine_setup`. This is what the Debian package uses.
     """
     override = os.environ.get("WAYVOICE_RUNTIME")
     if override:
@@ -118,10 +105,10 @@ def setup_status_path() -> Path:
 
 
 def worker_socket_path() -> Path:
-    """Return the unix socket of the warm Faster-Whisper worker.
+    """Unix socket of the warm worker.
 
-    The location itself is owned by :mod:`wayvoice.fw_worker` (the process
-    that binds it), so daemon and worker can never disagree about it.
+    The path is owned by :mod:`wayvoice.fw_worker`, which binds it, so the daemon
+    and the worker cannot disagree about it.
     """
     return fw_worker.default_socket_path()
 
@@ -129,14 +116,13 @@ def worker_socket_path() -> Path:
 # --------------------------------------------------------------------------
 # Fetching a model
 # --------------------------------------------------------------------------
-#: Longest a single model download may take.  Generous, because ``large-v3`` is
-#: about 3 GB and a slow line is not a failure - but not infinite either: the
-#: process belongs to the user session, and a stalled connection used to leave
-#: it there with nothing to show for it.
+#: Longest a single model download may take. ``large-v3`` is about 3 GB and a
+#: slow line is not a failure, but the download belongs to the user session, so
+#: a stalled connection has to end somewhere.
 DOWNLOAD_TIMEOUT = 6 * 3600.0
 
 #: Download lines are parsed from the helper's stdout, which speaks
-#: ``WV-PROGRESS <done> <total>``; anything else it prints is not progress.
+#: ``WV-PROGRESS <done> <total>``; anything else is not progress.
 _PROGRESS_PREFIX = "WV-PROGRESS"
 _READY_PREFIX = "WV-READY"
 _ERROR_PREFIX = "WV-ERROR"
@@ -145,10 +131,8 @@ _ERROR_PREFIX = "WV-ERROR"
 def model_is_present(model_id: str) -> bool:
     """Whether ``model_id`` can be used without touching the network.
 
-    Weights alone are not enough: a snapshot whose ``config.json`` was deleted
-    or never finished downloading passes a weight check and then fails at load
-    time with an error about a file the user has never heard of.  Both are the
-    same missing model, so both are checked here.
+    Weights alone are not enough: a snapshot whose ``config.json`` never finished
+    downloading passes a weight check and then fails at load time.
     """
     from . import model_store
 
@@ -159,10 +143,8 @@ def model_is_present(model_id: str) -> bool:
 
 
 def _model_download_args(model_id: str) -> list[str] | None:
-    """Command that fetches ``model_id``, or ``None`` when it cannot be fetched.
-
-    ``None`` means "not a hub model": a local directory the user provides, or a
-    model for an engine that keeps its weights somewhere else entirely.
+    """Command that fetches ``model_id``, or ``None`` when there is nothing to fetch:
+    a local directory, or weights an engine keeps somewhere else.
     """
     from . import model_store
 
@@ -188,14 +170,10 @@ def download_model(
 ) -> dict[str, Any]:
     """Fetch a model into the hub cache, reporting progress as it arrives.
 
-    Returns ``{"state": "ready" | "error" | "cancelled" | "unsupported",
-    "error": str, "done": int, "total": int}``.  Never raises: this runs on the
-    daemon's preparation path, where an exception would be a daemon that cannot
-    start.
-
-    A model that is already present returns immediately without a network
-    request at all -- the daemon asks about this on every start, and a check
-    that talked to huggingface.co would be both slow and rude.
+    Returns ``{"state": "ready" | "error" | "cancelled" | "unsupported", "error":
+    str, "done": int, "total": int}`` and never raises: this runs on the daemon's
+    preparation path. A model that is already present returns without a request,
+    because the daemon asks on every start.
     """
     result: dict[str, Any] = {"state": "ready", "error": "", "done": 0, "total": 0}
     if model_is_present(model_id):
@@ -209,7 +187,7 @@ def download_model(
             "total": 0,
         }
     env = os.environ.copy()
-    # The helper speaks its own progress protocol on stdout; the hub's own bars
+    # The helper speaks its own progress protocol on stdout; the hub's bars
     # would interleave with it on stderr.
     env["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
     env["PYTHONUNBUFFERED"] = "1"
@@ -268,9 +246,9 @@ def download_model(
         )
         return result
     if not model_is_present(model_id):
-        # The helper said it was done and the weights are not there. Reporting
-        # success here would send the user to the hotkey for a model that is not
-        # on disk.
+        # The helper said it was done and the weights are not there; reporting
+        # success would send the user to the hotkey for a model that is not on
+        # disk.
         result["state"] = "error"
         result["error"] = tr("engine.download_missing_after", language)
     return result
@@ -283,11 +261,8 @@ def download_configured_model(
 ) -> dict[str, Any]:
     """Fetch the model the *config* names; the registry hook.
 
-    :func:`download_model` takes a model id because that is what most callers
-    have, while a registered hook is always handed the whole config.  The
-    adapter between the two lives here, in one named function, rather than as a
-    lambda in the registry where a wrong argument order would only show up as a
-    model that reports itself as "nothing to download".
+    :func:`download_model` takes a model id, a registered hook is handed the whole
+    config.
     """
     return download_model(
         str(cfg.get("model", "")),
@@ -326,8 +301,8 @@ def _apply_download_lines(
 ) -> None:
     """Fold whatever the helper has printed so far into ``result``.
 
-    The list is the reader threads' buffer, so it is drained in one go and only
-    while holding it: two threads append to it while this runs.
+    The buffer is drained in one go while the lock is held: two reader threads append
+    to it while this runs.
     """
     while True:
         with _download_lock:
@@ -348,8 +323,8 @@ def _apply_download_lines(
                     try:
                         on_progress(done, total)
                     except Exception:
-                        # A progress callback that raises must not end a
-                        # download that is going fine.
+                        # A progress callback that raises must not end a download that is
+                        # going fine.
                         pass
         elif line.startswith(_ERROR_PREFIX):
             result["error"] = line[len(_ERROR_PREFIX):].strip()
@@ -378,9 +353,8 @@ def _read_setup_status() -> dict[str, Any]:
 def request_faster_setup() -> None:
     """Ask for the Faster-Whisper runtime to be prepared in the background.
 
-    How that request reaches the machine is decided by
-    :mod:`wayvoice.service` -- the user unit where one exists, a directly
-    spawned ``wayvoice.engine_setup`` otherwise.
+    :mod:`wayvoice.service` decides how the request reaches the machine: the user
+    unit where one exists, a spawned ``wayvoice.engine_setup`` otherwise.
     """
     service.request_engine_setup()
 
@@ -402,8 +376,8 @@ def _find_whisper_cpp(cfg: dict[str, Any]) -> str | None:
 def _status_faster(cfg: dict[str, Any]) -> dict[str, Any]:
     """Whether the Faster-Whisper runtime is prepared, installing or broken."""
     runtime = faster_runtime()
-    # Accept previous WayVoice-ready stamps and migrate lazily. This avoids
-    # a needless runtime rebuild after every application update.
+    # Accept previous WayVoice-ready stamps and migrate lazily, so an update does
+    # not force a runtime rebuild.
     ready_stamps = list(runtime.glob(".engine-*-ready")) if runtime.exists() else []
     if (faster_stamp().exists() or ready_stamps) and (runtime / "bin/python").exists():
         if ready_stamps and not faster_stamp().exists():
@@ -446,9 +420,7 @@ def _status_custom(cfg: dict[str, Any]) -> dict[str, Any]:
 def engine_status(cfg: dict[str, Any]) -> dict[str, Any]:
     """State of the engine a config selects: id, label, state and message.
 
-    An id no engine claims is an error, never a silent fallback: a hand-edited
-    config that quietly started using another recognizer would be worse than
-    a visible failure.
+    An id no engine claims is an error, never a fallback to another recognizer.
     """
     engine_id = str(cfg.get("engine", DEFAULT_ENGINE))
     engine = get_engine(engine_id)
@@ -463,11 +435,11 @@ def engine_status(cfg: dict[str, Any]) -> dict[str, Any]:
 
 
 def _terminate_process(proc: subprocess.Popen[str]) -> bool:
-    """Stop a child and its group; return whether it is really gone.
+    """Stop a child and its group; return whether it is gone.
 
-    Every failure here is swallowed on purpose - the caller is already on an
-    error path - but the outcome is reported, because a process that survived
-    both signals would leave the caller waiting on its pipes forever.
+    Failures are swallowed because the caller is already on an error path, but the
+    answer is reported: a process that survived both signals would leave the caller
+    waiting on its pipes.
     """
     if proc.poll() is not None:
         return True
@@ -500,12 +472,9 @@ def _terminate_process(proc: subprocess.Popen[str]) -> bool:
 def _start_readers(proc: subprocess.Popen[str]) -> tuple[list[threading.Thread], list[str], list[str]]:
     """Begin draining the child's pipes at once and return the buffers.
 
-    ``communicate()`` alone is not enough here: the loop in
-    :func:`_run_cancelable` polls the child instead of talking to it, so nothing
-    drains the pipes while it runs.  An engine that writes more than one pipe
-    buffer - ctranslate2 is not quiet about a model it does not like - blocks on
-    the write and never exits, and the user is told the recognition timed out
-    rather than what actually happened.
+    :func:`_run_cancelable` polls the child rather than talking to it, so nothing
+    else drains the pipes; an engine that writes more than one buffer blocks on the
+    write and never exits.
     """
     out: list[str] = []
     err: list[str] = []
@@ -529,9 +498,7 @@ def _start_readers(proc: subprocess.Popen[str]) -> tuple[list[threading.Thread],
 def _close_pipes(proc: subprocess.Popen[str]) -> None:
     """Close a child's pipes, on every path out.
 
-    A transcription is one of these per dictation, and the handles are freed when
-    the object is collected - which is not a moment anything can rely on.  A long
-    session then holds two file descriptors per dictation until it ends.
+    Otherwise every dictation leaks two descriptors until the session ends.
     """
     for stream in (proc.stdout, proc.stderr):
         try:
@@ -600,17 +567,15 @@ def _run_cancelable(
 # --------------------------------------------------------------------------
 # Warm Faster-Whisper worker
 #
-# Everything in this section is an optimisation.  Every entry point swallows its
-# own failures so that a missing, broken or disabled worker falls back to the
-# one-shot runner below, which stays the reference behaviour.
+# Every entry point here falls back to the one-shot runner below when the worker
+# is missing, broken or disabled, and that runner stays the reference behaviour.
 # --------------------------------------------------------------------------
 
 
 def _worker_call(payload: dict[str, Any], timeout: float, path: Path | None = None) -> dict[str, Any]:
     """Send one request to the worker and return its reply.
 
-    The wire format matches :mod:`wayvoice.protocol`: one JSON line in, one
-    JSON line out.
+    Wire format as in :mod:`wayvoice.protocol`: one JSON line in, one out.
     """
     target = path or worker_socket_path()
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -657,15 +622,11 @@ def _worker_settings(cfg: dict[str, Any]) -> dict[str, Any]:
 
 
 def _worker_settings_match(reply: dict[str, Any], cfg: dict[str, Any]) -> bool:
-    """Return whether the running worker matches the current settings.
+    """Whether the running worker matches the current settings.
 
-    An unknown worker (no ``config`` in its reply) is left alone: replacing it
-    would be worse than trusting it.
-
-    The version is part of the answer. The worker keeps running across daemon
-    restarts - that is what makes it warm - so after an update the daemon would
-    otherwise keep sending requests to a process that is running the previous
-    version of the code, and neither of them would ever mention it.
+    An unknown worker (no ``config`` in its reply) is left alone. The version is part
+    of the answer: the worker outlives daemon restarts, so after an update the daemon
+    would otherwise keep talking to the previous version of the code.
     """
     remote_version = str(reply.get("version") or "")
     if remote_version and remote_version != __version__:
@@ -714,12 +675,11 @@ def _reap_workers() -> None:
 
 
 def _is_worker_process(pid: int) -> bool:
-    """Return whether ``pid`` looks like a WayVoice worker process.
+    """Whether ``pid`` looks like a WayVoice worker process.
 
-    The pid file can outlive a crash and pids get recycled, so the command line
-    is verified before anything is signalled.  ``--serve`` is required as well:
-    the one-shot runner is the same script, and stopping "the worker" must never
-    kill a transcription that is running on its own.
+    The pid file can outlive a crash and pids get recycled, so the command line is
+    verified before anything is signalled. ``--serve`` is required too: stopping
+    "the worker" must not kill a transcription running on its own.
     """
     try:
         raw = Path(f"/proc/{pid}/cmdline").read_bytes()
@@ -732,8 +692,8 @@ def _is_worker_process(pid: int) -> bool:
 def stop_worker() -> bool:
     """Stop the running worker, if any.
 
-    Returns ``True`` when a worker was signalled.  Best effort by design: it is
-    used to replace a worker that was started for stale settings.
+    Best effort: this is used to replace a worker that was started for stale
+    settings.
     """
     stopped = False
     pid = 0
@@ -758,8 +718,8 @@ def stop_worker() -> bool:
     except OSError:
         pass
     # The worker removes its socket on the way out; a leftover file belongs to
-    # nobody and would make every later connection fail with ECONNREFUSED.  A
-    # socket that still answers is left alone: it belongs to a live worker.
+    # nobody and makes every later connection fail. A socket that still answers is
+    # left alone - it belongs to a live worker.
     if stopped or _worker_ping() is None:
         try:
             worker_socket_path().unlink(missing_ok=True)
@@ -769,18 +729,16 @@ def stop_worker() -> bool:
 
 
 def worker_info() -> dict[str, Any]:
-    """What the warm worker is holding right now.
+    """What the warm worker is holding: ``{"running", "model", "version"}``.
 
-    ``{"running": bool, "model": str, "version": str}``.  The settings window
-    asks before it offers to delete a model, and a model held in the worker's
-    memory is one the user is about to need again: deleting it under the
-    worker's feet would leave the recognizer claiming a model that is no longer
-    there.  The model is the raw configured value, so the caller compares it
-    with what the window shows rather than with a repository id.
+    The settings window asks before it offers to delete a model, and a model in the
+    worker's memory is one the user is about to need again. The model is the raw
+    configured value, so the caller compares it with what the window shows rather
+    than with a repository id.
 
-    Never raises and never blocks for long: a worker that does not answer the
-    ping within :data:`WORKER_PING_TIMEOUT` counts as "not running", which is
-    the same answer :func:`stop_worker` acts on.
+    Never blocks for long: a worker that does not answer the ping within
+    :data:`WORKER_PING_TIMEOUT` counts as not running, which is what
+    :func:`stop_worker` acts on.
     """
     reply = _worker_ping()
     if reply is None:
@@ -845,10 +803,9 @@ def _start_worker(cfg: dict[str, Any]) -> bool:
 def ensure_worker(cfg: dict[str, Any]) -> bool:
     """Make sure a warm worker matching ``cfg`` is available.
 
-    Returns ``False`` when no worker could be reached or started; the caller
-    then falls back to the one-shot runner.  A worker that cannot be started is
-    not retried for a while, so a broken runtime cannot add its start timeout
-    to every single dictation.
+    ``False`` means the caller should fall back to the one-shot runner. A worker that
+    cannot be started is not retried for a while, so a broken runtime cannot add its
+    start timeout to every dictation.
     """
     global _worker_retry_after
 
@@ -893,13 +850,11 @@ def _worker_send_cancel(request_id: str) -> None:
 def _worker_transcribe(payload: dict[str, Any], request_id: str, timeout: float, cancel_event: Event | None) -> dict[str, Any]:
     """Run one transcription on the worker while honouring cancel and timeout.
 
-    The socket is polled instead of read in one blocking call, so a cancel is
-    noticed within a fraction of a second even though the model may be busy for
-    a minute.
-
-    Raises :class:`WorkerUnavailable` when the worker cannot be talked to, and
-    :class:`TranscriptionCancelled` as soon as the user asked to stop -- also
-    when the answer arrived first, so a cancel is never silently ignored.
+    The socket is polled rather than read in one blocking call, so a cancel is
+    noticed within a fraction of a second even though the model may be busy for a
+    minute. Raises :class:`WorkerUnavailable` when the worker cannot be talked to, and
+    :class:`TranscriptionCancelled` as soon as the user asked to stop, including when
+    the answer arrived first.
     """
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.settimeout(WORKER_POLL_INTERVAL)
@@ -949,12 +904,10 @@ def _worker_transcribe(payload: dict[str, Any], request_id: str, timeout: float,
 def _language(cfg: dict[str, Any]) -> str:
     """Effective recognition language for a config.
 
-    A single-language model overrides the setting, and the result is always a
-    code the engine understands: a stale value left in an old ``config.json``
-    (``"RU_ru"``, ``"klingon"``, ``""``) normalizes to a real code or to
-    :data:`~wayvoice.languages.AUTO`.  ``auto`` is passed on as ``auto``:
-    faster-whisper turns it into ``None`` for the model, and whisper.cpp
-    detects the language itself with ``-l auto``.
+    A single-language model overrides the setting. A stale value from an old
+    ``config.json`` normalizes to a real code or to ``auto``, and ``auto`` is passed
+    on: faster-whisper turns it into ``None``, whisper.cpp detects the language itself
+    with ``-l auto``.
     """
     model = str(cfg.get("model", "small"))
     return languages.normalize(forced_language(model) or cfg.get("language"))
@@ -963,9 +916,9 @@ def _language(cfg: dict[str, Any]) -> str:
 def _transcribe_via_worker(audio: Path, cfg: dict[str, Any], cancel_event: Event | None) -> str:
     """Transcribe through the warm worker.
 
-    Raises :class:`WorkerUnavailable` when the worker itself is unreachable, so
-    the caller can retry through the one-shot runner, and a plain
-    :class:`RuntimeError` when the worker reported a genuine engine error.
+    :class:`WorkerUnavailable` when the worker itself is unreachable, so the caller
+    can retry through the one-shot runner; a plain :class:`RuntimeError` when the
+    worker reported a genuine engine error.
     """
     if not ensure_worker(cfg):
         raise WorkerUnavailable("the Faster-Whisper worker is not available")
@@ -997,7 +950,7 @@ def _postprocess(text: str, cfg: dict[str, Any]) -> str:
             spoken_punctuation=bool(cfg.get("spoken_punctuation", True)),
             ensure_terminal_punctuation=bool(cfg.get("ensure_terminal_punctuation", True)),
             # The spoken-punctuation words follow the language the speech was
-            # actually in, which is the model's own language when it forces one.
+            # in, which is the model's own language when it forces one.
             language=_language(cfg),
         )
     if text and cfg.get("append_space", True):
@@ -1010,10 +963,9 @@ def _transcribe_faster(audio: Path, cfg: dict[str, Any], cancel_event: Event | N
     if not runtime_python.exists():
         raise RuntimeError("Faster-Whisper is not ready")
     if bool(cfg.get("engine_worker", True)):
-        # The warm worker only removes the model load from the critical path.
-        # When the worker itself is unusable we quietly use the one-shot runner
-        # below. An error the worker *did* report is not retried: that would
-        # run the same failing job twice and double the latency of the failure.
+        # The warm worker only takes the model load off the critical path. When it
+        # is unusable we fall back to the one-shot runner; an error it reported is
+        # not retried, which would run the same failing job twice.
         try:
             return _transcribe_via_worker(audio, cfg, cancel_event)
         except (TranscriptionCancelled, TranscriptionTimeout):
@@ -1087,8 +1039,8 @@ def _transcribe_custom(audio: Path, cfg: dict[str, Any], cancel_event: Event | N
 def transcribe(audio: Path, cfg: dict[str, Any], cancel_event: Event | None = None) -> str:
     """Recognize ``audio`` with the configured engine and postprocess the text.
 
-    The engine itself returns the raw transcript; punctuation and the trailing
-    space are shared by all of them and stay here.
+    The engine returns the raw transcript; punctuation and the trailing space are
+    shared by all engines and stay here.
     """
     engine_id = str(cfg.get("engine", DEFAULT_ENGINE))
     engine = get_engine(engine_id)
@@ -1100,11 +1052,9 @@ def transcribe(audio: Path, cfg: dict[str, Any], cancel_event: Event | None = No
 # --------------------------------------------------------------------------
 # Engine registry
 #
-# This is the single place that knows which engines exist.  Everything else --
-# the daemon, the CLI, the settings window -- asks the registry instead of
-# comparing engine ids, so adding an engine is one entry here plus its
-# ``_transcribe_*``/``_status_*`` functions above, and nothing is left behind
-# that still believes there are only two or three engines.
+# The only place that knows which engines exist. The daemon, the CLI and the
+# settings window ask the registry instead of comparing ids, so an engine is one
+# entry here plus its ``_transcribe_*``/``_status_*`` functions.
 # --------------------------------------------------------------------------
 
 
@@ -1112,21 +1062,14 @@ def transcribe(audio: Path, cfg: dict[str, Any], cancel_event: Event | None = No
 class Engine:
     """One recognition engine: how to run it and what its settings look like.
 
-    ``transcribe`` returns the raw text and ``status`` a ``state``/``message``
-    pair; the identity of the engine (``id``/``label``) is added by
-    :func:`engine_status`, which keeps every engine's report uniform.
+    ``transcribe`` returns the raw text, ``status`` a ``state``/``message`` pair, and
+    :func:`engine_status` adds the id and label so every engine reports alike.
 
-    ``settings`` lists the config keys that belong to this engine and to no
-    other -- the settings window shows a row exactly when its key is in there.
-    Keys every engine shares (language, timeouts) are in none of them.
-
-    ``setup`` is the optional hook that prepares the engine's runtime in the
-    background.  It is what ``needs_setup`` advertises to the UI, and the two
-    must agree: a button that prepares nothing must not be shown.
-
-    ``model_present``/``model_download`` are the same agreement for weights: an
-    engine that reports a model as missing and has no way to fetch it would show
-    a download that cannot start.
+    ``settings`` lists the config keys that belong to this engine alone; the settings
+    window shows a row when its key is in there. Keys every engine shares (language,
+    timeouts) are in none of them. ``setup`` prepares the engine's runtime and is what
+    ``needs_setup`` advertises to the UI, so the two must agree; ``model_present`` and
+    ``model_download`` are the same agreement for weights.
     """
 
     id: str
@@ -1137,9 +1080,9 @@ class Engine:
     needs_setup: bool
     settings: tuple[str, ...]
     setup: Callable[[], None] | None = None
-    #: Whether the engine's weights are already usable, when that is a question
-    #: this daemon can answer.  ``None`` for an engine whose weights live
-    #: outside the hub cache - a local folder, or an external command.
+    #: Whether the engine's weights are usable right now. ``None`` for an engine
+    #: whose weights live outside the hub cache - a local folder, or an external
+    #: command.
     model_present: Callable[[dict[str, Any]], bool] | None = None
     #: Fetch the weights, reporting progress; ``None`` when there is nothing to
     #: fetch.  See :func:`download_model` for the reply shape.
@@ -1163,9 +1106,9 @@ _register(Engine(
     uses_models=True,
     needs_setup=True,
     # ``custom_model`` is the "custom" entry of the model list, and the worker
-    # settings only exist for this engine.  ``compute_type_*`` are still read
-    # by nothing (the quantization is derived from the device), but they name a
-    # faster-whisper setting, so they belong here rather than to nobody.
+    # settings exist for this engine only. ``compute_type_*`` are read by nothing
+    # (the quantization comes from the device) but they name a faster-whisper
+    # setting.
     settings=(
         "model",
         "custom_model",
@@ -1222,9 +1165,8 @@ def engine_label(engine_id: str | None) -> str:
 def engine_from_config(cfg: dict[str, Any]) -> Engine | None:
     """Engine a config selects, or ``None`` when its id is unknown.
 
-    ``None`` is handed back instead of a default engine on purpose: a config
-    that names a nonexistent engine is broken, and only the caller knows how
-    much to say about it.
+    No default is substituted: a config naming a nonexistent engine is broken, and
+    only the caller knows how much to say about it.
     """
     return get_engine(cfg.get("engine", DEFAULT_ENGINE))
 
@@ -1232,19 +1174,15 @@ def engine_from_config(cfg: dict[str, Any]) -> Engine | None:
 def model_state(engine: Engine | None, cfg: dict[str, Any]) -> dict[str, Any]:
     """What is known about the weights the config names.
 
-    ``{"supported": bool, "present": bool, "model": str}``.  ``supported`` asks
-    whether *this* value is a model WayVoice manages, and that is two questions
-    answered in turn: does the engine have hub models at all, and is the value
-    one of them.
+    ``{"supported": bool, "present": bool, "model": str}``. ``supported`` asks
+    whether *this* value is a model WayVoice manages: does the engine have hub models
+    at all, and is the value one of them.
 
-    Both matter, and confusing them breaks dictation for people who did nothing
-    wrong.  A local directory is a perfectly good model - the settings window
-    asks for exactly that, and the engine hands the path straight to
-    Faster-Whisper, which loads it from disk - but nothing about it can be
-    fetched, counted or deleted.  Answering "missing" for it makes the daemon
-    refuse every hot-key press, and answering with an error when asked to
-    prepare it makes a working setup look broken.  So for a value that is not a
-    hub repository the answer is "not ours": not missing, not downloadable.
+    A local directory is a perfectly good model - the window asks for exactly that,
+    and the engine hands the path straight to Faster-Whisper, which loads it from disk
+    - but nothing about it can be fetched, counted or deleted. Answering "missing"
+    would make the daemon refuse every hot-key press, so a value that is not a hub
+    repository is reported as "not ours": neither missing nor downloadable.
     """
     model_id = str(cfg.get("model", ""))
     foreign = {"supported": False, "present": True, "model": model_id}
@@ -1254,14 +1192,14 @@ def model_state(engine: Engine | None, cfg: dict[str, Any]) -> dict[str, Any]:
 
     if model_store.repo_id_for(model_id) is None:
         # Not a hub repository: a local path, a nested path, or a free-form
-        # value.  ``repo_id_for`` is the same answer the cache layout is built
-        # from, so "not downloadable" and "not in our cache" cannot disagree.
+        # value.  ``repo_id_for`` is what the cache layout is built from, so "not
+        # downloadable" and "not in our cache" cannot disagree.
         return foreign
     try:
         present = bool(engine.model_present(cfg))
     except Exception:
-        # A cache that cannot even be walked is not a reason to claim the model
-        # is missing: that would start a download of something already there.
+        # A cache that cannot be walked is no reason to call the model missing:
+        # that would start a download of something already there.
         present = True
     return {"supported": True, "present": present, "model": model_id}
 
@@ -1274,26 +1212,22 @@ def prepare_model(
     on_warming: Callable[[], None] | None = None,
     download: bool = True,
 ) -> dict[str, Any]:
-    """Fetch the engine's weights, and load them into the warm worker.
+    """Fetch the engine's weights and load them into the warm worker.
 
-    Runs in the background: this is the path a user waits out while a 3 GB model
-    comes down, and the daemon has to keep answering the hot key throughout.
-    The reply carries what happened, the same shape :func:`download_model`
-    returns; the worker warm-up is reported separately in ``warming`` because it
-    is the second half of the job and the second half can fail on its own.
+    Runs in the background, because the daemon has to keep answering the hot key while
+    a 3 GB model comes down. The reply carries what happened, the same shape
+    :func:`download_model` returns; the warm-up is reported separately in ``warming``,
+    since it is the second half of the job and can fail on its own.
 
-    ``on_warming`` is called once the weights are down and the model is going
-    into memory.  It exists because that second phase can take as long as the
-    first one on a slow disk, and a window that is told only that "the download"
-    is still running would sit at 100% with nothing happening.
+    ``on_warming`` is called once the weights are down and the model is going into
+    memory, which on a slow disk can take as long as the download itself - a window
+    told only that "the download" runs would sit at 100% with nothing happening.
 
-    ``download=False`` warms the worker without fetching anything.  That is the
-    daemon's startup path on purpose: reading a model the user already has is
-    free, while fetching three gigabytes the moment WayVoice starts is a decision
-    nobody asked for - on a tethered laptop that is somebody else's bandwidth.
-
-    Engines with nothing to fetch are reported as ``ready`` without doing
-    anything, which is what lets the daemon call this unconditionally.
+    ``download=False`` warms without fetching, which is the daemon's startup path:
+    reading a model the user already has is free, while fetching three gigabytes the
+    moment WayVoice starts is nobody's decision. Engines with nothing to fetch report
+    ``ready`` without doing anything, which is what lets the daemon call this
+    unconditionally.
     """
     reply: dict[str, Any] = {
         "state": "ready", "error": "", "done": 0, "total": 0, "warming": False,
@@ -1310,7 +1244,7 @@ def prepare_model(
         return reply
     if engine is None or "engine_worker" not in engine.settings:
         # No worker for this engine: the warm one speaks the Faster-Whisper
-        # protocol and would be asked to warm a model that it cannot hold.
+        # protocol and would be asked to hold a model it cannot.
         return reply
     if on_warming is not None:
         try:
@@ -1325,27 +1259,19 @@ def prepare_model(
 def warm_worker(cfg: dict[str, Any], timeout: float = WARM_TIMEOUT) -> bool:
     """Make the warm worker hold the model, starting it if needed.
 
-    Returns whether the model is in memory afterwards.  A worker that cannot be
-    started is not an error here: recognition falls back to the one-shot runner,
-    which loads the model itself and still works.
+    Returns whether the model is in memory afterwards. A worker that cannot be started
+    is not an error here: recognition falls back to the one-shot runner.
 
-    What this does not do is decide by a deadline of its own whether the model
-    arrived.  Loading weights takes seconds for ``small`` and minutes for
-    ``large-v3`` on a slow disk, and the reply to ``warm`` only comes when it is
-    finished: one fixed deadline for both would be a choice between "report
-    everything as ready while the model is still loading" and "block for minutes
-    before saying anything at all".
-
-    So a definite answer is taken at face value - the worker refused, or the
-    load is done - and only the *absence* of an answer sends this to watching a
-    ping, which the worker answers while it loads because a ping does not wait
-    for the model.  A worker that has died stops the watching at once instead of
-    running out the clock.
+    The load has no deadline of its own - seconds for ``small``, minutes for
+    ``large-v3`` on a slow disk. A definite answer is taken at face value (the worker
+    refused, or the load is done) and only the absence of one sends this to watching a
+    ping, which the worker answers while it loads. A worker that has died stops the
+    watching at once instead of running out the clock.
     """
     if not ensure_worker(cfg):
         return False
     try:
-        # A short deadline on purpose: the request may have to wait for the
+        # Short deadline on purpose: the request may have to wait for the
         # worker to be free, and nothing is lost by not hearing the reply.
         reply = _worker_call({"cmd": "warm"}, timeout=WORKER_PING_TIMEOUT)
     except (OSError, ValueError, TimeoutError):
@@ -1367,8 +1293,8 @@ def warm_worker(cfg: dict[str, Any], timeout: float = WARM_TIMEOUT) -> bool:
 def request_engine_setup(engine: Engine | None) -> bool:
     """Ask for the runtime of ``engine`` to be prepared in the background.
 
-    Returns ``False`` when that engine needs no preparation at all, so a
-    caller can tell the user instead of doing nothing quietly.
+    ``False`` when that engine needs no preparation, so a caller can tell the user
+    instead of doing nothing quietly.
     """
     if engine is None or not engine.needs_setup or engine.setup is None:
         return False
