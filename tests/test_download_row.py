@@ -130,8 +130,8 @@ class DownloadRowTests(unittest.TestCase):
         self.assertFalse(self.window.model_download_cancel_btn.sensitive)
 
     def test_warming_is_its_own_message(self):
-        # Nothing is being fetched any more: the weights are down and the model
-        # is going into memory. Showing 100% forever would look stuck.
+        # Nothing is being fetched any more: the weights are down and the model is going
+        # into memory. Showing 100% forever would look stuck.
         self._apply(self._downloading(done_bytes=100, total_bytes=100, warming=True))
         self.assertTrue(self.row.visible)
         self.assertTrue(self.bar.paused)
@@ -165,8 +165,8 @@ class DownloadRowTests(unittest.TestCase):
             self.assertFalse(self.row.visible)
 
     def test_another_models_download_is_not_reported_as_this_row(self):
-        # The report is about the selected model; a download of something else
-        # must not be painted next to it.
+        # The report is about the selected model; a download of something else must not
+        # be painted next to it.
         self._apply({"supported": True, "present": False, "model": "small",
                      "download": {"state": "downloading", "model": "medium",
                                   "done_bytes": 5, "total_bytes": 10,
@@ -175,11 +175,9 @@ class DownloadRowTests(unittest.TestCase):
         self.assertFalse(self.row.visible)
 
     def test_another_models_warm_up_is_not_reported_as_this_row_either(self):
-        # The same lie in the other direction: the user picked another model while
-        # the old one was still being read into the worker, and the warm-up bar
-        # was painted next to the new model - which has nothing loaded and
-        # nothing coming. The warm-up is a branch of its own, so it needed the
-        # same guard as the download, and in the same place: before it.
+        # The same lie in the other direction: the user picked another model while the
+        # old one was still being read into the worker. The warm-up is a branch of its
+        # own, so it needed the same guard, in the same place: before it.
         self._apply({"supported": True, "present": False, "model": "small",
                      "download": {"state": "warming", "model": "medium",
                                   "done_bytes": 0, "total_bytes": 0,
@@ -231,8 +229,8 @@ class FetchButtonTests(unittest.TestCase):
         self.window._model_entry = base
 
     def test_a_missing_hub_model_offers_the_download(self):
-        # Without this button the only way to fetch a model was to pick a
-        # different one - a place a user goes to only by accident.
+        # Without this button the only way to fetch a model was to pick a different
+        # one - a place a user goes to only by accident.
         self._entry()
         self.window._apply_download_state(self._download())
         self.assertTrue(self.window.model_fetch_btn.visible)
@@ -250,8 +248,8 @@ class FetchButtonTests(unittest.TestCase):
         self.assertFalse(self.window.model_fetch_btn.visible)
 
     def test_a_failed_download_offers_it_again(self):
-        # The reason it failed may be gone - the network came back - and a user
-        # who cannot retry has to restart the program.
+        # The reason it failed may be gone - the network came back - and a user who
+        # cannot retry has to restart the program.
         self._entry()
         self.window._apply_download_state(
             self._download(state="error", model="medium", error="404 Client Error")
@@ -299,8 +297,8 @@ class ChoosingAModelTests(unittest.TestCase):
         self.window._decide_what_to_do_about_the_selected_model(base)
 
     def test_a_model_on_disk_is_warmed_without_a_question(self):
-        # Loading it is free, and the first dictation would otherwise pay for it
-        # with nothing having said so.
+        # Loading it is free, and the first dictation would otherwise pay for it with
+        # nothing having said so.
         self.window._download_confirmation_for = "medium"
         self._decide(downloaded=True)
         self.assertEqual(self.prepared, [True])

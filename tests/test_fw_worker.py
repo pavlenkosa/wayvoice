@@ -186,8 +186,8 @@ class HandleRequestTests(unittest.TestCase):
         self.assertIsNone(kwargs["language"])
 
     def test_no_speech_filter_threshold(self):
-        # This threshold is part of the engine contract: a segment is dropped
-        # only when no_speech_prob > 0.72 *and* avg_logprob < -1.0.
+        # This threshold is part of the engine contract: a segment is dropped only when
+        # no_speech_prob > 0.72 *and* avg_logprob < -1.0.
         cases = [
             (FakeSegment("шум", no_speech_prob=0.9, avg_logprob=-1.5), ""),
             (FakeSegment("речь", no_speech_prob=0.9, avg_logprob=-0.5), "речь"),
@@ -371,8 +371,8 @@ class RunServerTests(unittest.TestCase):
         self.assertFalse(self.socket_path.exists())
 
     def test_early_cancel_does_not_reach_a_later_request(self):
-        # A cancel that arrives before its request is remembered for a short
-        # grace period, and only for the matching request id.
+        # A cancel that arrives before its request is remembered for a short grace
+        # period, and only for the matching request id.
         reply = _call(self.socket_path, {"cmd": "cancel", "request_id": "req-late"})
         self.assertTrue(reply["ok"])
         self.assertFalse(reply["cancelled"])
@@ -442,8 +442,8 @@ class RunServerCancelTests(unittest.TestCase):
 class WarmTests(unittest.TestCase):
     """Loading the model before the first dictation needs it.
 
-    The daemon asks for this right after it starts, so that the first recording
-    costs the same as every one after it.
+    The daemon asks for this right after it starts, so that the first recording costs the
+    same as every one after it.
     """
 
     def setUp(self):
@@ -497,9 +497,8 @@ class WarmTests(unittest.TestCase):
         self.assertEqual(len(self.factory.calls), 1)
 
     def test_the_duration_is_reported_so_a_slow_load_is_visible(self):
-        # The daemon shows this to say "already loading for a while".  It has to
-        # be the measured time and not a constant: the assertion this replaces
-        # was "at least zero", which every implementation satisfies, including
+        # This has to be the measured time and not a constant: the assertion this
+        # replaces was "at least zero", which every implementation satisfies, including
         # one that never started a clock.
         class SlowFactory(RecordingFactory):
             def __call__(self, model_id, device, compute_type):
@@ -514,9 +513,8 @@ class WarmTests(unittest.TestCase):
         )
 
     def test_a_model_that_was_already_loaded_reports_no_wait(self):
-        # The other end: after the first load there is nothing left to wait for,
-        # and saying "0.0 s" every time is what lets the daemon tell the two
-        # apart.
+        # The other end: after the first load there is nothing left to wait for, and
+        # saying "0.0 s" every time is what lets the daemon tell the two apart.
         cache = ModelCache(RecordingFactory())
         handle_request({"cmd": "warm"}, cache, self.config)
         reply = handle_request({"cmd": "warm"}, cache, self.config)
@@ -526,13 +524,11 @@ class WarmTests(unittest.TestCase):
 class WarmHoldsTheWorkerTests(unittest.TestCase):
     """A model that is loading is work, and the idle timer must know it.
 
-    ``warm`` is not a transcription: there is no request id to cancel, so nothing
-    was registered as active while the weights were read.  The idle timer looks
-    only at activity, and the default deadline is fifteen minutes - which is
-    shorter than a large model on a slow disk.  Without a hold, the worker would
-    decide it was unused and exit in the middle of the load, which is the one
-    moment where exiting is worst: the daemon would be told the model is warm,
-    and the worker holding it would be gone.
+    ``warm`` is not a transcription: there is no request id to cancel, so nothing was
+    registered as active while the weights were read, and the default idle deadline of
+    fifteen minutes is shorter than a large model on a slow disk. Without a hold the worker
+    would decide it was unused and exit mid-load - the moment where exiting is worst,
+    since the daemon would have been told the model is warm.
     """
 
     def setUp(self):
@@ -567,8 +563,8 @@ class WarmHoldsTheWorkerTests(unittest.TestCase):
         try:
             alive = _call(self.socket_path, {"cmd": "ping"}, timeout=5.0).get("ok")
         except OSError as exc:
-            # The socket is unlinked when the server gives up, so this is what a
-            # worker that expired mid-load looks like from the outside.
+            # The socket is unlinked when the server gives up, so this is what a worker
+            # that expired mid-load looks like from the outside.
             self.fail(f"the worker exited while it was loading the model: {exc}")
         self.assertTrue(alive, "the worker reported itself gone mid-load")
         self.assertTrue(self.thread.is_alive())
@@ -579,8 +575,8 @@ class WarmHoldsTheWorkerTests(unittest.TestCase):
         self.assertTrue(self.replies[0]["warm"])
 
     def test_the_hold_is_released_when_the_load_is_over(self):
-        # The other half: a hold that outlived its work would keep a worker
-        # alive for ever, which is the same fault with a different symptom.
+        # The other half: a hold that outlived its work would keep a worker alive for
+        # ever, which is the same fault with a different symptom.
         self.factory.release.set()
         self.client.join(timeout=20.0)
         self.assertTrue(self.replies[0]["ok"], self.replies[0])
@@ -602,9 +598,8 @@ class ServerWarmTests(unittest.TestCase):
         self.socket_path = Path(self.tmp.name) / "worker.sock"
         self.factory = RecordingFactory([FakeSegment("привет")])
         config = WorkerConfig(model="tiny", device="cpu", beam_size=3, vad=False)
-        # A short real idle timeout: the worker then stops itself shortly after
-        # the test, instead of the test waiting one out or leaving a live server
-        # thread behind.
+        # A short real idle timeout: the worker stops itself shortly after the test,
+        # instead of the test waiting one out or leaving a live server thread behind.
         self.thread = _start_worker_thread(
             self.socket_path, config, self.factory, 1.0, time.monotonic
         )

@@ -169,11 +169,10 @@ class PrivilegeTests(unittest.TestCase):
             self.assertTrue(pkgsys.requires_privilege())
 
     def test_requires_privilege_assumes_privilege_where_it_cannot_ask(self):
-        # A platform without geteuid - or one that removed it - must not be read
-        # as "no privileges needed", or an installer would be started without
-        # pkexec and fail in a way the user cannot act on.  Asserting the type of
-        # the answer, which is what this test did, passes for an implementation
-        # that returns a constant.
+        # A platform without geteuid - or one that removed it - must not be read as "no
+        # privileges needed", or an installer would start without pkexec and fail in a
+        # way the user cannot act on. Asserting the type of the answer, as this test
+        # once did, passes for an implementation that returns a constant.
         with mock.patch("os.geteuid", side_effect=AttributeError):
             self.assertTrue(pkgsys.requires_privilege())
 
@@ -185,8 +184,8 @@ class PrivilegeTests(unittest.TestCase):
 
 
 class InstallGuardTests(unittest.TestCase):
-    """The install path must never be reached implicitly, and these tests must
-    never run a package manager."""
+    """The install path must never be reached implicitly, and these tests must never run
+    a package manager."""
 
     def test_install_refuses_without_a_detectable_manager(self):
         with mock.patch("shutil.which", _which_returning({})), \
@@ -215,10 +214,10 @@ class InstallGuardTests(unittest.TestCase):
 class AvailabilityTests(unittest.TestCase):
     """Knowing a package name is not knowing that the package exists.
 
-    Debian 13 ships no ``ydotool`` at all, and a manager asked to install one
-    says so in four words the user has to decode - after an authorization dialog
-    and a password prompt. So the question is asked first, and these tests check
-    both answers and the moment the answer arrives.
+    Debian 13 ships no ``ydotool`` at all, and a manager asked to install one says so in
+    four words the user has to decode - after an authorization dialog and a password
+    prompt. So the question is asked first, and these tests check both answers and the
+    moment the answer arrives.
     """
 
     #: What ``apt-cache policy`` prints in the C locale.
@@ -300,18 +299,17 @@ class AvailabilityTests(unittest.TestCase):
         self.assertIn("apt-get", started[0][0][0])
 
     def test_a_name_the_manager_has_never_heard_of_is_also_refused(self):
-        # The other shape of "not there": apt prints nothing at all, which is an
-        # answer rather than a shrug - and treating it as a shrug would send the
-        # user to a command that cannot work.
+        # The other shape of "not there": apt prints nothing at all, which is an answer
+        # rather than a shrug - treating it as a shrug would send the user to a command
+        # that cannot work.
         ok, message, lookups, started = self._install(self.UNKNOWN_NAME)
         self.assertFalse(ok)
         self.assertIn("ydotool", message)
         self.assertEqual(started, [])
 
     def test_output_nobody_can_read_is_not_an_answer(self):
-        # Something answered, but not with something we understand. That is "don't
-        # know", and refusing an install on it would be worse than the failure it
-        # prevents.
+        # Something answered, but not with something we understand. That is "don't know",
+        # and refusing an install on it would be worse than the failure it prevents.
         _lookups, patched = self._policy("W: apt-cache is having a bad day\n")
         with mock.patch("shutil.which", _which_returning({
             "apt-cache": "/usr/bin/apt-cache",
@@ -328,10 +326,10 @@ class AvailabilityTests(unittest.TestCase):
         self.assertNotIn("repositories", message)
 
     def test_the_question_is_asked_in_the_c_locale(self):
-        # apt translates its output. A parser written against "Candidate:" finds
-        # nothing on a Russian system, and answers "don't know" for every package
-        # - which is how this check once passed silently for a package that is
-        # there and for one that is not.
+        # apt translates its output. A parser written against "Candidate:" finds nothing
+        # on a Russian system and answers "don't know" for every package - which is how
+        # this check once passed silently both for a package that is there and one that
+        # is not.
         _ok, _message, lookups, _started = self._install(self.PRESENT)
         self.assertEqual(lookups[0][1]["env"]["LC_ALL"], "C")
 
