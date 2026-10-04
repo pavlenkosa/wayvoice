@@ -1,16 +1,15 @@
 """The model store has to describe the cache the way it really is.
 
-Every test here builds a fake hub in a temporary directory that reproduces the
-shape of ``~/.cache/huggingface/hub`` on this machine:
+Every test builds a fake hub in a temporary directory that reproduces the shape of
+``~/.cache/huggingface/hub``:
 
-* ``models--<org>--<name>/`` with ``refs/main``, ``snapshots/<rev>/`` and a
-  private ``blobs/``;
-* snapshot entries are **symlinks**, and some of those symlinks point at the
-  shared ``<hub>/blobs/<2 hex>/<hash>`` store (the Xet layout) -- so
-  ``du``/``lstat`` of the model directory says 2.6 MB while the weights are
-  483 MB;
-* ``tokenizer.json`` and ``vocabulary.txt`` are **one and the same blob** shared
-  by two models, which is what makes a naive delete break the other one;
+* ``models--<org>--<name>/`` with ``refs/main``, ``snapshots/<rev>/`` and a private
+``blobs/``;
+* snapshot entries are **symlinks**, and some point into the shared
+``<hub>/blobs/<2 hex>/<hash>`` store (the Xet layout) - so ``du`` or ``lstat`` of the
+model directory says 2.6 MB while the weights are 483 MB;
+* ``tokenizer.json`` and ``vocabulary.txt`` are **one and the same blob** shared by two
+models, which is what makes a naive delete break the other one;
 * a repository of another application lives in the same hub and must survive;
 * a directory left by an interrupted download has no snapshot at all.
 
@@ -75,9 +74,9 @@ class FakeHub:
     def _repo(self, org: str, name: str, rev: str, files: dict) -> Path:
         """Lay out one cached repository.
 
-        Every snapshot entry is a symlink to ``../../blobs/<name>``, and for the
-        "shared" kinds that ``blobs/<name>`` is itself a symlink into
-        ``<hub>/blobs/<2 hex>/<name>`` -- the two hops the real cache has.
+        Every snapshot entry is a symlink to ``../../blobs/<name>``, and for the "shared" kinds
+        that ``blobs/<name>`` is itself a symlink into ``<hub>/blobs/<2 hex>/<name>`` - the two
+        hops the real cache has.
         """
         folder = self.hub / f"models--{org}--{name}"
         (folder / "refs").mkdir(parents=True)
@@ -129,13 +128,12 @@ class ModelStoreTests(unittest.TestCase):
 
     # ---- the blob that lives inside somebody else's model ---------------
     #
-    # The fake hub above keeps every shared blob in the shared store, which is
-    # the friendly case.  The cache on a real machine has the other one too, and
-    # it is the dangerous one: a blob can sit in the private ``blobs/`` of
-    # whichever repository fetched it first, with the other model's snapshot
-    # symlinking straight into that private directory.  Deleting the first model
-    # with ``rmtree`` then takes a file the second model still needs.
-    # ``_borrow_shared_private_blob`` builds exactly that.
+    # The fake hub above keeps every shared blob in the shared store, which is the
+    # friendly case. A real machine has the other one too, and it is the dangerous one:
+    # a blob can sit in the private ``blobs/`` of whichever repository fetched it first,
+    # with the other model's snapshot symlinking straight into that private directory.
+    # Deleting the first model with ``rmtree`` then takes a file the second model still
+    # needs. ``_borrow_shared_private_blob`` builds exactly that.
     def _borrow_shared_private_blob(self):
         """Make small's private config.json the file medium points at too."""
         small = self.fake.hub / "models--Systran--faster-whisper-small"
@@ -160,12 +158,12 @@ class ModelStoreTests(unittest.TestCase):
         self.assertTrue(borrowed.exists(), "dangling symlink left in medium")
         self.assertTrue(private.is_file(), "a blob another model uses was deleted")
         self.assertEqual(borrowed.read_bytes(), b"\0" * 77)
-        # The bytes that survived must not be reported as freed space: the borrowed
-        # blob is 77 bytes that are still on disk afterwards.
+        # The bytes that survived must not be reported as freed space: the borrowed blob
+        # is 77 bytes that are still on disk afterwards.
         self.assertEqual(result["kept_bytes"], 77)
-        # Everything small held, except the two blobs it shares with medium --
-        # those live in the shared store and are none of this deletion's
-        # business -- plus the one-byte ``.refs`` sidecar of the freed weight.
+        # Everything small held, except the two blobs it shares with medium - those live
+        # in the shared store and are none of this deletion's business - plus the
+        # one-byte ``.refs`` sidecar of the freed weight.
         self.assertEqual(result["freed_bytes"], before - TOKENIZER - VOCABULARY + 1)
 
     def test_the_model_is_gone_even_when_a_blob_had_to_stay(self):
@@ -200,15 +198,15 @@ class ModelStoreTests(unittest.TestCase):
         self.assertLess(du_like, WEIGHT, "the trap this guards against is a size read off the symlinks")
 
     def test_shared_blob_is_not_counted_twice(self):
-        # small and medium share tokenizer.json and vocabulary.txt as one file.
-        # A size that added them per reference would exceed the real total.
+        # small and medium share tokenizer.json and vocabulary.txt as one file. A size
+        # that added them per reference would exceed the real total.
         self.assertEqual(self.size("small"), WEIGHT + CONFIG + TOKENIZER + VOCABULARY)
         self.assertEqual(self.size("medium"), 700 + 11 + TOKENIZER + VOCABULARY)
         self.assertLess(self.size("small") + self.size("medium"), WEIGHT + 700 + 2 * CONFIG + 2 * TOKENIZER + 2 * VOCABULARY + 11)
 
     def test_total_size_counts_the_shared_blob_once(self):
-        # Only catalogue models count, and the two shared blobs count once even
-        # though two models reference them.
+        # Only catalogue models count, and the two shared blobs count once even though
+        # two models reference them.
         self.assertEqual(
             model_store.total_size(),
             WEIGHT + 700 + CONFIG + 11 + TOKENIZER + VOCABULARY,
@@ -291,8 +289,8 @@ class ModelStoreTests(unittest.TestCase):
         self.assertEqual(again["freed_bytes"], 0)
 
     def test_delete_does_not_leave_a_shared_blob_for_a_later_model(self):
-        # Delete small, then medium: the shared tokenizer has no referrer left
-        # and must now go too, or the cache leaks forever.
+        # Delete small, then medium: the shared tokenizer has no referrer left and must
+        # now go too, or the cache leaks forever.
         model_store.delete("small")
         model_store.delete("medium")
         for name in ("TOKENIZER", "VOCABULARY"):
@@ -320,8 +318,8 @@ class ModelStoreTests(unittest.TestCase):
             model_store.delete("some/other-model")
 
     def test_refuse_missing_model(self):
-        # A catalogue model that was never downloaded: by default a harmless
-        # no-op, and a refusal for a caller that insists it must be there.
+        # A catalogue model that was never downloaded: by default a harmless no-op, and
+        # a refusal for a caller that insists it must be there.
         result = model_store.delete("large-v3")
         self.assertTrue(result["ok"])
         self.assertEqual(result["freed_bytes"], 0)
@@ -362,8 +360,8 @@ class ModelStoreTests(unittest.TestCase):
         (local / "model.bin").write_bytes(b"\0" * 50)
         (local / "sub" / "extra.bin").write_bytes(b"\0" * 20)
         self.assertEqual(self.size(str(local)), 70)
-        # A local model is "downloaded" in the sense that its files exist, and it
-        # is marked local so it can never be deleted.
+        # A local model is "downloaded" in the sense that its files exist, and it is
+        # marked local so it can never be deleted.
         entry = model_store.describe(str(local))
         self.assertEqual(entry["kind"], "local")
         self.assertTrue(entry["downloaded"])
@@ -435,11 +433,11 @@ class ModelStoreTests(unittest.TestCase):
     def test_aliases_match_the_installed_runtime(self):
         """The alias copy must not drift from the engine that is installed.
 
-        It has to be a copy, because the settings window runs without the
-        engine venv, but a stale copy is worse than none: a model the runtime
-        knows and this table does not is reported as a local path, gets no size
-        and can never be deleted.  So compare against the real thing whenever
-        the runtime is there, and skip when it is not (a fresh checkout, CI).
+        It has to be a copy, because the settings window runs without the engine venv, but a
+        stale copy is worse than none: a model the runtime knows and this table does not is
+        reported as a local path, gets no size and can never be deleted. So compare against the
+        real thing whenever the runtime is there, and skip when it is not (a fresh checkout,
+        CI).
         """
         runtime = engine.faster_runtime()
         python = runtime / "bin" / "python"
