@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 
@@ -129,8 +130,6 @@ class Reporter:
 
     def report(self, force: bool = True) -> None:
         """Print the current counts, at most once per interval."""
-        import time
-
         now = time.monotonic()
         if not force and (now - self._last) < self._interval:
             return
@@ -142,11 +141,17 @@ class Reporter:
 def progress_tqdm_class(reporter: Reporter):
     """Build the progress-bar class the hub will instantiate.
 
-    ``huggingface_hub`` takes any object with the ``tqdm`` shape, treats it as
-    a context manager, feeds it with ``update(n)`` and then reads ``total``,
-    ``n`` and a handful of cosmetic setters back out of it.  Nothing is drawn:
-    this process' stdout is a pipe, and the only thing worth writing to it is
-    a number the daemon can turn into a bar.
+    ``huggingface_hub`` takes any object with the ``tqdm`` shape and then uses
+    it as a tqdm: it feeds it with ``update()`` and ``update_transfer()``, sets
+    ``total`` as the size of each file becomes known, and reads ``n``, ``total``,
+    ``pos``, ``format_dict`` and a handful of cosmetic setters back out.  On the
+    xet path it also walks into that shape directly - the aggregate reporter
+    calls ``format_dict`` to derive a rate - so a missing attribute is an
+    ``AttributeError`` in the middle of a multi-gigabyte download, raised from a
+    callback the library swallows and prints.
+
+    Nothing is drawn here: this process' stdout is a pipe, and the only thing
+    worth writing to it is a number the daemon can turn into a bar.
 
     A fresh class per call keeps the reporter private to one download, which
     matters because ``snapshot_download`` downloads several files concurrently
@@ -161,21 +166,62 @@ def progress_tqdm_class(reporter: Reporter):
             self.total = int(kwargs.get("total") or 0)
             self.unit = str(kwargs.get("unit") or "")
             self.desc = str(kwargs.get("desc") or "")
+            #: Where the bar sits on screen; read by the hub, drawn by nobody.
+            self.pos = int(kwargs.get("position") or 0)
+            self._rate = 0.0
+            self._last = time.monotonic()
             reporter.register(self)
+
+        @property
+        def format_dict(self) -> dict[str, object]:
+            """What tqdm's own ``format_dict`` carries, in the shape it is read.
+
+            The aggregate reporter reads ``rate`` from here to show a combined
+            throughput, and a download whose repository is served over xet asks
+            for it on every progress report.
+            """
+            return {
+                "n": self.n,
+                "total": self.total,
+                "elapsed": max(0.0, time.monotonic() - self._last),
+                "rate": self._rate,
+                "unit": self.unit,
+                "desc": self.desc,
+                "pos": self.pos,
+                "ncols": 0,
+            }
 
         def update(self, amount=1):
             self.n += int(amount or 0)
+            self._rate = self._track_rate(self.n)
             reporter.report(force=False)
 
-        def update_transfer(self, _amount=1):
-            # Bytes on the wire, which the hub also reports as written bytes.
-            # Counting both would double the progress of every download.
-            return
+        def update_transfer(self, amount=1):
+            # Bytes on the wire. Not counted: the hub reports the same bytes as
+            # written, and adding both would double the progress of every
+            # download. The rate is kept, because that is what the aggregate
+            # reporter displays and it has no better source.
+            self._rate = self._track_rate(self.n + int(amount or 0))
+
+        def _track_rate(self, counter: int) -> float:
+            now = time.monotonic()
+            elapsed = now - self._last
+            if elapsed <= 0:
+                return self._rate
+            return max(0.0, (counter - self.n) / elapsed)
 
         def refresh(self):
             reporter.report(force=False)
 
+        def clear(self):
+            return
+
         def set_postfix_str(self, *_args, **_kwargs):
+            return
+
+        def set_transfer_postfix_str(self, *_args, **_kwargs):
+            # Called by the xet aggregate reporter alongside set_postfix_str.
+            # Present because the hub calls it, not because anything is drawn.
             return
 
         def set_description(self, *_args, **_kwargs):

@@ -10,6 +10,8 @@ not about the network.
 """
 
 import io
+import json
+import os
 import sys
 import unittest
 from unittest import mock
@@ -128,25 +130,6 @@ class ReporterTests(unittest.TestCase):
         reporter.report(force=True)
         self.assertEqual(self.lines()[-1], "WV-PROGRESS 512 2048")
 
-    def test_the_cosmetic_setters_the_hub_calls_all_exist(self):
-        # The hub reads these back after creating a bar; a missing one is an
-        # AttributeError in the middle of a multi-gigabyte download.
-        reporter = model_fetch.Reporter(total=10)
-        bar = model_fetch.progress_tqdm_class(reporter)(total=10, unit="B")
-        for name in (
-            "update", "update_transfer", "refresh", "set_postfix_str",
-            "set_description", "set_description_str", "close",
-        ):
-            self.assertTrue(callable(getattr(bar, name)), name)
-        with bar as entered:
-            self.assertIs(entered, bar)
-        bar.update_transfer(5)
-        bar.set_postfix_str("1 MB/s")
-        bar.set_description("Downloading bytes")
-        bar.set_description_str("done")
-        bar.refresh()
-        bar.close()
-
 
 class ExpectedTotalTests(unittest.TestCase):
     """The denominator, which must be right or the bar is a lie."""
@@ -235,3 +218,126 @@ class MainTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# --------------------------------------------------------------------------
+# Compatibility with the installed huggingface_hub
+# --------------------------------------------------------------------------
+# The bar in this module is not a tqdm: it is whatever shape the hub expects,
+# and the hub is the only thing that decides that shape.  Both tests below read
+# the requirement out of the *installed library* - one from its source, one by
+# driving it - because a test that enumerates the methods of our own class
+# cannot fail for anything the library actually calls.  That is how an
+# AttributeError could ship in the middle of a real download.
+def _hub_runtime() -> str | None:
+    """The engine runtime interpreter, which is where huggingface_hub lives."""
+    from wayvoice import engine
+
+    python = engine.faster_runtime() / "bin/python"
+    return str(python) if python.exists() else None
+
+
+def _hub_probe(source: str) -> str:
+    """Run a snippet under the runtime interpreter and return its stdout."""
+    import subprocess
+
+    from wayvoice import engine
+    from wayvoice.paths import app_src_dir
+
+    proc = subprocess.run(
+        [_hub_runtime(), "-c", source],
+        capture_output=True,
+        text=True,
+        timeout=180,
+        cwd=str(app_src_dir().parent),
+        env={**os.environ, "PYTHONPATH": str(app_src_dir())},
+    )
+    if proc.returncode != 0:
+        raise AssertionError(f"the runtime could not run the probe: {proc.stderr.strip()}")
+    return proc.stdout
+
+
+class HubCompatibilityTests(unittest.TestCase):
+    """The progress bar has to be the shape the installed hub actually uses."""
+
+    def setUp(self):
+        if _hub_runtime() is None:
+            self.skipTest("the Faster-Whisper runtime is not installed")
+
+    def test_the_bar_offers_every_attribute_the_hub_touches(self):
+        # Read out of the library's own source: every attribute it reaches for
+        # on a progress-bar object, in the xet reporter and in the two snapshot
+        # download classes that feed it.  A name that appears there and not on
+        # our bar is an AttributeError waiting for the first chunk of a download.
+        required = _hub_probe(
+            "import ast, inspect, json\n"
+            "from huggingface_hub.utils import _xet_progress_reporting as xpr\n"
+            "from huggingface_hub import _snapshot_download as snap\n"
+            "names = set()\n"
+            "def collect(source):\n"
+            "    tree = ast.parse(source)\n"
+            "    for func in [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef,))]:\n"
+            "        params = {a.arg for a in func.args.args + func.args.kwonlyargs}\n"
+            "        for node in ast.walk(func):\n"
+            "            if not isinstance(node, ast.Attribute):\n"
+            "                continue\n"
+            "            target = node.value\n            # a parameter named like a bar...\n"
+            "            if isinstance(target, ast.Name) and target.id in params and 'bar' in target.id:\n"
+            "                names.add(node.attr)\n"
+            "            # ...or self.reconstruction_bar / self.transfer_bar\n"
+            "            if (isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)\n"
+            "                    and target.value.id == 'self' and target.attr.endswith('_bar')):\n"
+            "                names.add(node.attr)\n"
+            "collect(inspect.getsource(xpr))\n"
+            "collect(inspect.getsource(snap))\n"
+            "print(json.dumps(sorted(names)))\n"
+        )
+        wanted = set(json.loads(required))
+        self.assertTrue(
+            {"total", "n", "update"} <= wanted,
+            f"the probe did not find the obvious ones: {sorted(wanted)}",
+        )
+        reporter = model_fetch.Reporter(total=100)
+        bar = model_fetch.progress_tqdm_class(reporter)(total=100, unit="B")
+        missing = sorted(name for name in wanted if not hasattr(bar, name))
+        self.assertEqual(
+            missing, [],
+            "the installed hub uses bar." + missing[0] + " and the bar has none"
+            if missing else "",
+        )
+
+    def test_the_installed_xet_reporter_can_report_into_the_bar(self):
+        # The behavioural version: hand the real reporter a real bar and push a
+        # progress report through it.  This is the path a multi-gigabyte model
+        # takes, and it is where the AttributeError was raised.
+        output = _hub_probe(
+            "import json\n"
+            "from types import SimpleNamespace\n"
+            "from huggingface_hub.utils._xet_progress_reporting import XetDownloadProgressReporter\n"
+            "from wayvoice import model_fetch\n"
+            "reporter_holder = model_fetch.Reporter(total=1000)\n"
+            "bar = model_fetch.progress_tqdm_class(reporter_holder)(total=1000, unit='B')\n"
+            "xet = XetDownloadProgressReporter(\n"
+            "    reconstruction_desc='Reconstructing', log_level=20,\n"
+            "    external_reconstruction_bar=bar,\n"
+            ")\n"
+            "report = SimpleNamespace(\n"
+            "    total_bytes_completed=400, total_transfer_bytes_completed=350,\n"
+            "    total_bytes_completion_rate=100.0, total_transfer_bytes_completion_rate=90.0,\n"
+            "    total_bytes=1000,\n"
+            ")\n"
+            "xet.update_progress(report)\n"
+            "xet.update_progress(SimpleNamespace(\n"
+            "    total_bytes_completed=900, total_transfer_bytes_completed=800,\n"
+            "    total_bytes_completion_rate=100.0, total_transfer_bytes_completion_rate=90.0,\n"
+            "    total_bytes=1000,\n"
+            "))\n"
+            "xet.close()\n"
+            "reporter_holder.report(force=True)\n"
+        )
+        self.assertIn("WV-PROGRESS", output, output)
+        done, total = output.strip().splitlines()[-1].split()[1:]
+        # Bytes written to disk are what a progress bar shows; the network
+        # counter is the hub's own business.
+        self.assertEqual(total, "1000")
+        self.assertEqual(int(done), 900)
