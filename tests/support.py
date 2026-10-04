@@ -16,6 +16,7 @@ a model in memory.
 """
 
 import os
+import shutil
 import tempfile
 from pathlib import Path
 from unittest import mock
@@ -57,6 +58,15 @@ _ISOLATED = {
     },
 }
 
+#: Module globals a test run can move and must not leave moved.
+#:
+#: ``_worker_retry_after`` is a backoff deadline written whenever a worker
+#: cannot be started.  A test that fails to start one therefore leaves it in the
+#: future, and every test after it - in whichever module the alphabetical order
+#: happens to put next - skips starting a worker without even trying.  The
+#: failure it causes is silence, in a code path that is otherwise fine.
+_ISOLATED_GLOBALS = {"_worker_retry_after": 0.0}
+
 #: What each name was before any test touched it.  Restoring these explicitly,
 #: rather than through the patcher, keeps the cleanup correct when a test has
 #: patched the same name itself: ``mock.patch`` restores whatever it found when
@@ -64,6 +74,9 @@ _ISOLATED = {
 #: real function - and the leak would only show up in whichever module the
 #: alphabetical ordering happened to run next.
 _ORIGINALS = {name: getattr(_engine, name) for name in _ISOLATED}
+_ORIGINAL_GLOBALS = {
+    name: getattr(_engine, name) for name in _ISOLATED_GLOBALS
+}
 
 
 def isolate_environment(test) -> Path:
@@ -76,7 +89,7 @@ def isolate_environment(test) -> Path:
     replaced the user's settings with defaults.
     """
     root = Path(tempfile.mkdtemp(prefix="wayvoice-test-"))
-    test.addCleanup(lambda: __import__("shutil").rmtree(root, ignore_errors=True))
+    test.addCleanup(shutil.rmtree, root, ignore_errors=True)
     for name in _XDG_VARS:
         patcher = mock.patch.dict(os.environ, {name: str(root / name)})
         patcher.start()
@@ -92,7 +105,15 @@ def isolate_engine(test) -> None:
 
     Call from ``setUp``.  A test that needs different behaviour patches the same
     names afterwards and gets it for as long as its own patch lasts.
+
+    The guarantees are checked by ``test_isolation.py``, which is worth reading
+    before trusting this one: everything here is a promise to the tests that
+    follow, and a promise that quietly stops being kept costs a code path its
+    only exercise.
     """
     for name, replacement in _ISOLATED.items():
         test.addCleanup(setattr, _engine, name, _ORIGINALS[name])
         setattr(_engine, name, replacement)
+    for name, value in _ISOLATED_GLOBALS.items():
+        test.addCleanup(setattr, _engine, name, _ORIGINAL_GLOBALS[name])
+        setattr(_engine, name, value)

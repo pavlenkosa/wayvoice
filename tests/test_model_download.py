@@ -22,6 +22,8 @@ from unittest import mock
 
 from wayvoice import engine, model_store
 
+from support import isolate_engine, isolate_environment
+
 #: A stand-in for model_fetch.py: speaks the protocol, needs no network.
 FAKE_HELPER = """
 import sys, time
@@ -100,7 +102,17 @@ class ModelStateTests(unittest.TestCase):
     only on the engine: a local directory is a model the engine loads from disk,
     and calling it "missing" made the daemon refuse every hot-key press. These
     tests pin the answer for every shape of value the settings window accepts.
+
+    Both halves of the environment are pinned here.  Without them the answer for
+    a catalogue model depends on what this machine happens to have downloaded -
+    which is how this class was passing for the wrong reason: an earlier module
+    left the presence hook replaced, and the day that stopped happening the test
+    started failing on a machine with a different cache.
     """
+
+    def setUp(self):
+        isolate_environment(self)
+        isolate_engine(self)
 
     def _state(self, model_id: str, engine_id: str = "faster-whisper"):
         engine_ = engine.get_engine(engine_id)
