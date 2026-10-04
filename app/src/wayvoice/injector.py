@@ -284,11 +284,10 @@ def paste_with_ydotool(mode: str, language: str | None = None) -> tuple[bool, st
         short = lines[-1] if lines else tr("injector.ydotool_failed_generic", language)
         message = tr("injector.ydotool_failed", language, reason=short)
         if not started:
-            # Naming the difference between "ydotool is broken" and "ydotool is
-            # not running" is the difference between a bug report and a fix.
-            message = tr(
-                "injector.ydotool_helper_down", language, reason=short,
-            )
+            # The helper could not be raised, so the message names the one command
+            # that fixes it. The reason stays in the log: it is ydotool's own English
+            # and does not belong inside a translated sentence.
+            message = tr("injector.ydotool_helper_down", language)
         # And to the service log, so that "it does not paste" is a line in
         # journalctl rather than something the user has to describe.
         print(f"WayVoice: auto-paste failed: {short}", file=sys.stderr)
