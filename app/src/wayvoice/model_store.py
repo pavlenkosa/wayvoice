@@ -1,23 +1,21 @@
 """What is actually on disk under the model catalogue.
 
-This module is the single source of truth about model files.  It knows how the
-Hugging Face hub cache is laid out, how big a model really is, and -- the part
-that is easy to get wrong -- which blobs belong to a model exclusively and which
-ones another model (or another application entirely) still points at.
+The single source of truth about model files: the layout of the Hugging Face hub
+cache, how big a model really is, and which blobs belong to a model exclusively
+and which ones another model - or another application - still points at.
 
-Design rules that the rest of the project relies on:
+Three rules the rest of the project relies on:
 
-* **No network, no ``huggingface_hub`` import.**  The engine runtime is a
-  separate optional installation (see :mod:`wayvoice.engine_setup`) and is
-  routinely *absent* while the settings window runs.  Everything here is derived
-  from the filesystem and the standard library.
-* **Sizes are the sizes of the real files.**  A ``models--*`` directory holds
-  symlinks into ``blobs/``; measuring the model directory with ``du`` reports a
-  couple of megabytes for a model whose weights are half a gigabyte.
-* **The cache is shared.**  It also holds models downloaded by other programs,
-  and the blob store holds blobs nobody references any more.  Nothing outside
-  the catalogue is ever deleted, and a blob is only removed when no snapshot in
-  the whole hub still points at it.
+* no network and no ``huggingface_hub`` import. The engine runtime is a separate
+optional installation (:mod:`wayvoice.engine_setup`) and is routinely absent while
+the settings window runs, so everything here comes from the filesystem and the
+standard library;
+* sizes are the sizes of the real files. A ``models--*`` directory holds symlinks
+into ``blobs/``, and measuring it with ``du`` reports megabytes for a model whose
+weights are half a gigabyte;
+* the cache is shared. It holds models downloaded by other programs and blobs nobody
+references any more, so nothing outside the catalogue is ever deleted and a blob
+goes only when no snapshot in the whole hub points at it.
 """
 
 from __future__ import annotations
@@ -33,26 +31,25 @@ from .models import MODEL_PRESETS, display_name, preset_for
 #: Prefix of a cached repository directory (``models--org--name``).
 REPO_DIR_PREFIX = "models--"
 
-#: Weights that make a snapshot "really there".  faster-whisper downloads
-#: ``model.bin``; a safetensors conversion of the same repo would use the other
-#: name, and both are counted.
+#: Weights that make a snapshot "really there". faster-whisper downloads
+#: ``model.bin``; a safetensors conversion of the same repo uses the other name, and
+#: both are counted.
 WEIGHT_NAMES = ("model.bin", "model.safetensors")
 
-#: Sidecar files the hub keeps next to a shared blob.  They belong to the blob
-#: and are freed together with it, so they are measured and removed as a unit.
+#: Sidecar files the hub keeps next to a shared blob. They belong to the blob and
+#: are freed with it, so they are measured and removed as a unit.
 BLOB_SIDECAR_SUFFIXES = (".lock", ".refs")
 
-#: faster-whisper aliases -> hub repository.  This is a copy of
-#: ``faster_whisper.utils._MODELS`` from the runtime the project installs
-#: (checked against faster-whisper 1.2.1) and must stay in sync with it: the
-#: catalogue offers "small" and "turbo", but the cache directory is
-#: ``models--Systran--faster-whisper-small``, so without this table the UI would
-#: report every stock model as "not downloaded" and refuse to delete it.
+#: faster-whisper alias -> hub repository, a copy of ``faster_whisper.utils._MODELS``
+#: from the installed runtime (checked against faster-whisper 1.2.1). A copy and not
+#: an import, because the engine lives in its own venv and this module has to work in
+#: the settings window where that venv may not exist yet.
 #:
-#: It is a copy rather than an import because the engine lives in its own venv:
-#: this module has to work in the settings window, where that venv may not exist
-#: yet. ``tests/test_model_store.py`` compares the copy with the runtime that is
-#: installed, so an upgrade that adds a model cannot pass unnoticed.
+#: The catalogue offers "small", the cache directory is
+#: ``models--Systran--faster-whisper-small``, and without this table every stock model
+#: reads as "not downloaded" and cannot be deleted. ``tests/test_model_store.py``
+#: compares the copy with the installed runtime, so an upgrade that adds a model
+#: cannot pass unnoticed.
 REPO_ALIASES: dict[str, str] = {
     "tiny.en": "Systran/faster-whisper-tiny.en",
     "tiny": "Systran/faster-whisper-tiny",
@@ -75,17 +72,14 @@ REPO_ALIASES: dict[str, str] = {
     "turbo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
 }
 
-#: Files that make a faster-whisper snapshot usable.  A copy of the
-#: ``allow_patterns`` list in ``faster_whisper.utils.download_model`` from the
-#: runtime the project installs (checked against faster-whisper 1.2.1).
-#:
-#: It has to be a copy, and it has to be a copy of *this* list and not of the
-#: whole repository: the Systran repos carry safetensors weights and extra
-#: files next to the CTranslate2 ``model.bin``, so fetching everything doubles
-#: the download for ``tiny`` and wastes gigabytes on ``large``.  Fetching less
-#: than this list would leave the model unusable, which is a far worse outcome
-#: than a few extra megabytes, so a mismatch is caught by the test that compares
-#: this copy with the installed runtime.
+#: Files that make a faster-whisper snapshot usable. A copy of the
+#: ``allow_patterns`` list in ``faster_whisper.utils.download_model`` (checked against
+#: faster-whisper 1.2.1), and a copy of *that list* rather than of the whole
+#: repository: the Systran repos carry safetensors weights and extra files next to
+#: the CTranslate2 ``model.bin``, so fetching everything doubles the download for
+#: ``tiny`` and wastes gigabytes on ``large``. Fetching less would leave the model
+#: unusable, and the test that compares this copy with the runtime catches a
+#: mismatch.
 FETCH_PATTERNS: list[str] = [
     "config.json",
     "preprocessor_config.json",
@@ -104,9 +98,8 @@ CUSTOM_ID = "__custom__"
 class RefusedError(RuntimeError):
     """A deletion was refused before anything was touched.
 
-    Carries a translation key in :attr:`key` and the offending value in
-    :attr:`detail`, so the UI can show a localized reason without this module
-    having to know about language selection.
+    Carries a translation key in :attr:`key` and the offending value in :attr:`detail`,
+    so the UI can localize the reason without this module knowing about languages.
     """
 
     def __init__(self, key: str, detail: str = ""):
@@ -122,9 +115,8 @@ class RefusedError(RuntimeError):
 def refusal_message(key: str, detail: str = "", language: str | None = None) -> str:
     """Localized text of a refusal that crossed a thread or a return value.
 
-    Deletion reports a refusal as a key and a detail rather than a sentence, so
-    the wording stays with the translations and never leaks an English-only
-    string into the Russian interface.
+    Deletion reports a refusal as a key and a detail rather than a sentence, so the
+    wording stays with the translations.
     """
     return tr(str(key or ""), language, detail=str(detail or ""))
 
@@ -135,27 +127,18 @@ def refusal_message(key: str, detail: str = "", language: str | None = None) -> 
 def hub_root(root: str | os.PathLike[str] | None = None) -> Path:
     """The hub cache directory, without importing anything from the hub.
 
-    The order below is the one ``huggingface_hub.constants`` uses, read off its
-    source rather than guessed:
+    The order ``huggingface_hub.constants`` uses, read off its source: ``HF_HUB_CACHE``,
+    the legacy ``HUGGINGFACE_HUB_CACHE``, ``HF_HOME/hub`` (``HF_HOME`` defaults to
+    ``$XDG_CACHE_HOME/huggingface`` and then to ``~/.cache/huggingface``, so this covers
+    the last two), ``$XDG_CACHE_HOME/huggingface/hub``, ``~/.cache/huggingface/hub``.
 
-    1. ``HF_HUB_CACHE`` -- the current variable, used verbatim;
-    2. ``HUGGINGFACE_HUB_CACHE`` -- the legacy spelling;
-    3. ``HF_HOME/hub`` -- ``HF_HOME`` itself defaults to
-       ``$XDG_CACHE_HOME/huggingface`` and then to ``~/.cache/huggingface``,
-       so this one step covers the remaining two;
-    4. ``$XDG_CACHE_HOME/huggingface/hub``;
-    5. ``~/.cache/huggingface/hub``.
+    One deliberate difference: upstream expands ``~`` and ``$VARS`` for ``HF_HUB_CACHE``
+    and ``HF_HOME`` but not for the legacy name. Expanding here as well only ever turns
+    a literal ``~`` into the home directory.
 
-    One deliberate difference: upstream expands ``~`` and ``$VARS`` for
-    ``HF_HUB_CACHE`` and ``HF_HOME`` but not for the legacy
-    ``HUGGINGFACE_HUB_CACHE``.  Doing it here as well only ever turns a literal
-    ``~`` into the home directory, which is what the user meant.
-
-    A missing directory is not an error: it means nothing was ever downloaded,
-    and every caller answers "not downloaded" from that.
-
-    ``root`` overrides the lookup entirely, which is how the tests point the
-    module at a fake cache instead of the real one.
+    A missing directory is not an error; it means nothing was downloaded, and every
+    caller answers "not downloaded" from that. ``root`` overrides the lookup, which is
+    how the tests point this at a fake cache.
     """
     if root is not None:
         return Path(root).expanduser()
@@ -172,14 +155,13 @@ def hub_root(root: str | os.PathLike[str] | None = None) -> Path:
 def is_repo_id(model_id: str | None) -> bool:
     """Whether ``model_id`` is a hub repository id rather than a local path.
 
-    A repository id is exactly ``org/name``: one slash, two non-empty parts, no
-    ``..``, no absolute path, no ``~``, no spaces or control characters.  The
-    separator ``--`` is refused as well, because the hub forbids it in a repo id
-    and the cache directory name is built by replacing ``/`` with ``--``, so
-    ``a--b/c`` and ``a/b--c`` would be indistinguishable on disk.
+    A repository id is exactly ``org/name``: one slash, two non-empty parts, no ``..``,
+    no absolute path, no ``~``, no spaces or control characters. ``--`` is refused as
+    well, because the cache directory name is built by replacing ``/`` with ``--``, which
+    would make ``a--b/c`` and ``a/b--c`` indistinguishable on disk.
 
-    Everything else is a path the user owns.  It is never turned into a cache
-    directory, no matter how much it resembles one.
+    Everything else is a path the user owns, and is never turned into a cache directory
+    however much it resembles one.
     """
     value = str(model_id or "")
     if not value or value.count("/") != 1:
@@ -199,9 +181,9 @@ def is_repo_id(model_id: str | None) -> bool:
 def is_local_path(model_id: str | None) -> bool:
     """Whether ``model_id`` is a filesystem path instead of a cached repo.
 
-    Stock aliases ("small", "turbo") are neither: they are resolved to their
-    repository first, so only genuinely unknown bare names, relative paths and
-    absolute paths end up here.
+    Stock aliases ("small", "turbo") are neither: they are resolved to their repository
+    first, so only genuinely unknown bare names, relative paths and absolute paths end
+    up here.
     """
     return not repo_id_for(model_id)
 
@@ -232,8 +214,8 @@ def repo_dir_name(model_id: str | None) -> str | None:
 def model_dir(model_id: str, root: str | os.PathLike[str] | None = None) -> Path | None:
     """Cache directory of a catalogue entry, or ``None`` for a local path.
 
-    The path is returned whether or not it exists -- "does not exist" is what
-    ``is_downloaded`` reports -- but never for a local path.
+    Returned whether or not it exists - "does not exist" is what ``is_downloaded``
+    reports - and never for a local path.
     """
     name = repo_dir_name(model_id)
     if name is None:
@@ -262,10 +244,9 @@ def _iter_snapshot_dirs(model_dir_path: Path) -> Iterable[Path]:
 def snapshot_dir(model_id: str, root: str | os.PathLike[str] | None = None) -> Path | None:
     """Snapshot directory holding the files of a catalogue entry.
 
-    ``refs/main`` names the revision the hub would use, so it wins; a revision
-    without a ref (a leftover download) is still returned.  ``None`` when there
-    is no snapshot at all -- a directory left by an interrupted download is not
-    a model.
+    ``refs/main`` names the revision the hub would use and wins; a revision without a ref
+    (a leftover download) is still returned. ``None`` when there is no snapshot at all: a
+    directory left by an interrupted download is not a model.
     """
     path = model_dir(model_id, root)
     if path is None:
@@ -298,9 +279,9 @@ def _weight_files(snapshot: Path) -> Iterable[Path]:
 def is_downloaded(model_id: str, root: str | os.PathLike[str] | None = None) -> bool:
     """Whether a catalogue entry is present on disk and usable.
 
-    A snapshot with a non-empty ``model.bin``/``model.safetensors`` -- not "the
-    directory exists".  A repository directory survives an interrupted download
-    and an offline deletion, and both look exactly the same from the outside.
+    A snapshot with a non-empty ``model.bin``/``model.safetensors``, not "the directory
+    exists": a repository directory survives both an interrupted download and an offline
+    deletion, and they look the same from the outside.
     """
     snapshot = snapshot_dir(model_id, root)
     if snapshot is None:
@@ -311,10 +292,10 @@ def is_downloaded(model_id: str, root: str | os.PathLike[str] | None = None) -> 
 def _real_files(base: Path) -> list[tuple[Path, int]]:
     """Real files under ``base``, deduplicated by resolved path.
 
-    Every entry of a snapshot is a symlink into a blob, so ``lstat`` would
-    report the length of the link target instead of the weight.  Each path is
-    resolved once and counted once: two snapshots pointing at one blob are one
-    blob, and the hub may also store one blob under two names.
+    Every entry of a snapshot is a symlink into a blob, so ``lstat`` would report the
+    length of the link target instead of the weight. Each path is resolved once and
+    counted once: two snapshots pointing at one blob are one blob, and the hub may store
+    one blob under two names.
     """
     seen: dict[str, int] = {}
     for folder, _dirs, files in os.walk(base, followlinks=False):
@@ -342,10 +323,9 @@ def _real_files(base: Path) -> list[tuple[Path, int]]:
 def size_of(model_id: str, root: str | os.PathLike[str] | None = None) -> int:
     """Real size of a catalogue entry in bytes.
 
-    For a cached repository this is the sum of the sizes of the files the
-    snapshots really point at, each counted once.  For a local path it is the
-    plain size of the directory the user keeps themselves -- those files are
-    real files, so the numbers agree.
+    For a cached repository, the sum of the sizes the snapshots really point at, each
+    counted once. For a local path, the plain size of the directory the user keeps
+    themselves - those files are real files, so the numbers agree.
     """
     snapshot = snapshot_dir(model_id, root)
     if snapshot is None:
@@ -359,9 +339,9 @@ def size_of(model_id: str, root: str | os.PathLike[str] | None = None) -> int:
 def referenced_blobs(model_id: str, root: str | os.PathLike[str] | None = None) -> set[Path]:
     """Blobs the snapshots of one catalogue entry point at.
 
-    Both blob locations count: the repository's own ``blobs/`` and the shared
-    ``<hub>/blobs/<2 hex>/`` store used by the Xet backend.  A path that is not
-    inside a ``blobs`` directory is not a blob and is left alone.
+    Both locations count: the repository's own ``blobs/`` and the shared
+    ``<hub>/blobs/<2 hex>/`` store used by the Xet backend. A path that is not inside a
+    ``blobs`` directory is not a blob and is left alone.
     """
     path = model_dir(model_id, root)
     if path is None:
@@ -383,9 +363,8 @@ def referenced_blobs(model_id: str, root: str | os.PathLike[str] | None = None) 
 def _other_referenced_blobs(hub: Path, keep: Path | None) -> set[Path]:
     """Every blob any *other* cached repository in the hub still points at.
 
-    The whole hub is scanned, not just the WayVoice catalogue: the same blob is
-    shared between models of the same family, and other applications keep their
-    downloads in the same cache.
+    The whole hub is scanned, not just the WayVoice catalogue: models of one family share
+    blobs, and other applications download into the same cache.
     """
     blobs: set[Path] = set()
     try:
@@ -430,17 +409,14 @@ def _sidecars(blob: Path) -> list[Path]:
 def _prune_repository(path: Path, needed: set[Path]) -> None:
     """Take a repository directory apart, keeping what others still need.
 
-    Used when the model itself has to disappear but some of its blobs turned
-    out to be shared: the hub keeps a shared blob either in the shared store or
-    in the private ``blobs/`` of whichever repository fetched it first, so a
-    private blob can outlive the model that downloaded it and a plain ``rmtree``
-    would leave another model with dangling links.
+    Used when the model has to disappear but some of its blobs turned out to be shared:
+    the hub keeps such a blob either in the shared store or in the private ``blobs/`` of
+    whichever repository fetched it first, so a private blob can outlive the model that
+    downloaded it and a plain ``rmtree`` would leave another model with dangling links.
 
-    So the directory is emptied rather than deleted: revisions and refs go (no
-    revision resolves any more), blobs nothing points at go, and the blobs in
-    ``needed`` stay exactly where they are.  Only a directory left completely
-    empty is removed -- anything left behind is a deliberate, documented outcome,
-    not a cleanup that failed.
+    The directory is emptied rather than deleted - revisions, refs and unreferenced blobs
+    go, the blobs in ``needed`` stay - and a directory left completely empty is removed.
+    Anything left behind is a deliberate outcome, not a cleanup that failed.
     """
     for name in ("snapshots", "refs", "trees"):
         target = path / name
@@ -472,10 +448,10 @@ def _prune_repository(path: Path, needed: set[Path]) -> None:
         except OSError:
             pass
     try:
-        # Whatever is left apart from the blob directory is not part of a usable
-        # cache entry any more.  ``blobs`` is skipped on purpose: it still holds
-        # the shared blobs another model links to, and sweeping it here is
-        # exactly the dangling symlink this whole dance exists to avoid.
+        # Whatever is left apart from the blob directory is not part of a usable cache
+        # entry any more. ``blobs`` is skipped on purpose: it still holds the shared
+        # blobs another model links to, and sweeping it here would create exactly the
+        # dangling symlink this whole dance exists to avoid.
         for entry in path.iterdir():
             if entry.name == "blobs" and entry.is_dir():
                 continue
@@ -507,22 +483,21 @@ def _refuse(model_id: str, key: str, detail: str = "") -> RefusedError:
 def _check_deletable(model_id: str, root: str | os.PathLike[str] | None) -> Path:
     """Resolve the directory to delete, or refuse with a reason.
 
-    Every refusal happens before any file is touched.  The checks are ordered
-    from "this is not ours to delete" to "this path is not what it claims to
-    be", because the first ones explain the decision to the user and the last
-    ones only protect against a doctored cache.
+    Every refusal happens before any file is touched, ordered from "this is not ours to
+    delete" to "this path is not what it claims to be": the first explain the decision to
+    the user, the last only protect against a doctored cache.
     """
     value = str(model_id or "")
     if not value.strip():
         raise _refuse(value, "store.refuse_unknown")
     if repo_id_for(value) is None:
-        # A local path, a relative path or nonsense.  WayVoice did not put
-        # those bytes there and does not own them.
+        # A local path, a relative path or nonsense. WayVoice did not put those bytes
+        # there and does not own them.
         raise _refuse(value, "store.refuse_local")
     if value not in CATALOG_IDS:
-        # A valid repository id, but not one this application offers.  The
-        # custom field accepts any repo id, and the cache cannot say who
-        # downloaded one, so WayVoice deletes only what it lists itself.
+        # A valid repository id, but not one this application offers. The custom
+        # field accepts any repo id and the cache cannot say who downloaded one, so
+        # WayVoice deletes only what it lists itself.
         raise _refuse(value, "store.refuse_not_in_catalogue")
     path = model_dir(value, root)
     if path is None:  # pragma: no cover - guarded by the checks above
@@ -544,47 +519,33 @@ def delete(
 ) -> dict[str, Any]:
     """Delete a cached model and the blobs only it needed.
 
-    The order of the steps is the whole point of this function:
+    The order is the point of this function:
 
-    1. **Decide, before touching anything.**  A local path, an id outside the
-       catalogue, a symlinked directory or a path that leaves the hub raises
-       :class:`RefusedError` -- no file has been removed at that point.
-    2. **Collect this model's blobs first.**  The blobs are shared, so the
-       answer to "may I delete this blob?" can only be given once it is known
-       that this model was the last snapshot pointing at it.
-    3. **Collect every other snapshot's blobs in the whole hub.**  Not just the
-       WayVoice catalogue: the same ``tokenizer.json`` is shared between models
-       of one family, and other applications download into the same cache.
-    4. **Empty the directory instead of deleting it, when some of its blobs are
-       still referenced.**  The hub stores a shared blob either in the shared
-       store or in the private ``blobs/`` of whichever repository fetched it
-       first, so a private blob can outlive the model that downloaded it --
-       ``rmtree`` would take it along and leave the other model with dangling
-       links.  The revisions and refs go, the unreferenced blobs go, and the
-       shared ones stay put; the directory disappears only if nothing is left.
-    5. **Remove only the blobs of step 2 that step 3 did not report**, and only
-       those inside the hub.  A blob another snapshot still uses stays, so no
-       dangling symlink is left behind anywhere.
-    6. **Report the real bytes freed**, measured on the files actually removed,
-       and separately the bytes that survived because another model uses them.
+    1. decide, before touching anything - a local path, an id outside the catalogue, a
+    symlinked directory or a path leaving the hub raises :class:`RefusedError`;
+    2. collect this model's own blobs, since "may I delete this blob?" can only be
+    answered once it is known that this model was the last snapshot pointing at it;
+    3. collect every other snapshot's blobs in the whole hub, not just the WayVoice
+    catalogue: one ``tokenizer.json`` is shared inside a family, and other
+    applications download into the same cache;
+    4. empty the directory instead of deleting it when some of its blobs are still
+    referenced - the shared ones stay put, the directory disappears only if nothing
+    is left;
+    5. remove only the blobs of step 2 that step 3 did not report, and only those inside
+    the hub, so no dangling symlink is left anywhere;
+    6. report the real bytes freed and, separately, the bytes that survived because
+    another model uses them.
 
-    Steps 2 and 3 must come before step 4 for the obvious reason: once the model
-    directory is gone, the only way to find out which blobs were shared is to
-    guess.  Guessing wrong means either a model that cannot be loaded any more
-    or a blob store that grows forever.
+    Steps 2 and 3 have to precede step 4: once the directory is gone, the only way to
+    find out which blobs were shared is to guess, and a wrong guess leaves either an
+    unloadable model or a blob store that grows forever.
 
-    Deleting a model that is not there frees nothing and says so with
-    ``message_key``: a second "Delete" on an already deleted model is a no-op
-    rather than an error, which is what keeps a double click from looking like a
-    failure.  A caller that would rather be told the model was never there
-    passes ``must_exist=True`` and gets the same refusal as every other
-    impossible request.
+    Deleting a model that is not there frees nothing and says so with ``message_key``, so
+    a second Delete is a no-op rather than an error; a caller that wants to be told passes
+    ``must_exist=True``.
 
-    Returns a dict with ``ok``, ``model_id``, ``freed_bytes`` (what the disk
-    really gets back), ``kept_bytes`` (what survives because another model links
-    to it), ``removed_dir``, ``removed_blobs``,
-    ``kept_blobs`` and, when nothing was there, a ``message_key`` for the UI to
-    translate.
+    Returns ``ok``, ``model_id``, ``freed_bytes``, ``kept_bytes``, ``removed_dir``,
+    ``removed_blobs``, ``kept_blobs`` and, when nothing was there, a ``message_key``.
     """
     path = _check_deletable(model_id, root)
     value = str(model_id)
@@ -606,23 +567,21 @@ def delete(
     hub = hub_root(root).resolve()
     others = _other_referenced_blobs(hub, keep=path)
     exclusive = own - others
-    #: Every blob inside this repository's directory that some *other* snapshot
-    #: still points at -- not only the ones this model's own snapshots used.
-    #: A repository directory also holds blobs of revisions that are no longer
-    #: there, and another model may be the one still using those.  They are the
-    #: whole difficulty of the hub layout: ``rmtree`` would take them with the
+    #: Every blob inside this repository's directory that some *other* snapshot still
+    #: points at - not only the ones this model's own snapshots used. A repository
+    #: directory also holds blobs of revisions that are no longer there, and another
+    #: model may be the one still using those: ``rmtree`` would take them with the
     #: directory and leave that model with dangling links.
     shared_inside = {blob for blob in others if _is_inside(blob, path)}
 
-    # Measured before anything is removed, because a repository's own blobs
-    # live inside the directory that step 5 deletes: asking the filesystem
-    # afterwards reports them as "already gone" and understates the freed space.
+    # Measured before anything is removed, because a repository's own blobs live inside
+    # the directory step 5 deletes: asking the filesystem afterwards reports them as
+    # "already gone" and understates the freed space.
     #
-    # Two different things are being counted and they must not be added up:
-    # what the disk really gets back, and what survives because another model
-    # links to it.  A relocated blob is in the second group -- its content lives
-    # on under the new name, so counting it as freed would promise the user
-    # space that did not become free.
+    # Two different things are counted and must not be added up: what the disk really
+    # gets back, and what survives because another model links to it. A relocated
+    # blob belongs to the second group - its content lives on under the new name, so
+    # counting it as freed would promise space that did not become free.
     freed: dict[Path, int] = {}
     kept_bytes = 0
     for blob in own | shared_inside:
@@ -660,9 +619,9 @@ def delete(
     # Before the directory goes: make every blob another model needs survive it.
     if shared_inside:
         # The model goes, but not the whole directory: the blobs in it are still
-        # somebody else's model files.  Removing them would break that model,
-        # and moving them to the shared store would leave the blob store growing
-        # with content nobody points at.
+        # somebody else's model files. Removing them would break that model, and
+        # moving them to the shared store would leave the blob store growing with
+        # content nobody points at.
         _prune_repository(path, needed=shared_inside)
         result["removed_dir"] = not path.exists()
     else:
@@ -697,9 +656,9 @@ def delete(
 def describe(model_id: str, root: str | os.PathLike[str] | None = None) -> dict[str, Any]:
     """Kind, state and size of any single model id.
 
-    Works for a catalogue entry, a free-form repository id and a local path,
-    which is what the settings window needs: it shows the row for whatever the
-    user typed in the custom field, not only for the presets.
+    Works for a catalogue entry, a free-form repository id and a local path, which is
+    what the settings window needs: it shows a row for whatever the user typed in the
+    custom field, not only for the presets.
     """
     preset = preset_for(model_id)
     label = str(preset["label"]) if preset is not None else display_name(model_id)
@@ -748,9 +707,9 @@ def _entry(model_id: str, label: str, root: str | os.PathLike[str] | None) -> di
 def inventory(root: str | os.PathLike[str] | None = None) -> list[dict[str, Any]]:
     """Every catalogue entry with its kind, state and size.
 
-    ``kind`` is ``repo`` for a cached repository, ``local`` for a user-owned
-    path and ``custom`` for the free-form entry, which is why a local model can
-    never be reported as "not downloaded" just because it is not in the hub.
+    ``kind`` is ``repo`` for a cached repository, ``local`` for a user-owned path and
+    ``custom`` for the free-form entry, which is why a local model is never reported as
+    "not downloaded" just because it is not in the hub.
     """
     return [_entry(str(item["id"]), str(item["label"]), root) for item in MODEL_PRESETS]
 
@@ -758,8 +717,8 @@ def inventory(root: str | os.PathLike[str] | None = None) -> list[dict[str, Any]
 def total_size(root: str | os.PathLike[str] | None = None) -> int:
     """Bytes taken by the catalogue models, shared blobs counted once.
 
-    Two models of the same family share ``tokenizer.json``; adding their sizes
-    would report more than the cache actually holds.
+    Two models of one family share ``tokenizer.json``, and adding their sizes would report
+    more than the cache actually holds.
     """
     seen: dict[str, int] = {}
     for item in inventory(root):
@@ -777,11 +736,10 @@ def total_size(root: str | os.PathLike[str] | None = None) -> int:
 def hub_size(root: str | os.PathLike[str] | None = None) -> int:
     """Bytes the whole hub cache occupies, models of other programs included.
 
-    :func:`total_size` deliberately counts only what this application
-    downloaded, but that number alone does not explain the disk: the same
-    directory holds other applications' models and blobs nobody references any
-    more.  A user comparing the settings window with a disk analyser should not
-    be left with two numbers that do not add up, so both are shown.
+    :func:`total_size` counts only what this application downloaded, which on its own does
+    not explain the disk: the same directory holds other applications' models and blobs
+    nobody references any more. Both numbers are shown, so the settings window and a disk
+    analyser can be compared.
     """
     hub = hub_root(root)
     if not hub.is_dir():
