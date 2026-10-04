@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.6.1 — 2026-10-04
+## 0.6.2 — 2026-10-05
 
 - The Debian package now ships its own `ydotool`, built from vendored sources, so automatic pasting works on distributions that do not package it — Debian 13 has none, in any component. A system's own copy is always preferred, the bundled one is a fallback, and a package built without a compiler simply has none.
 - Licence changed from GPL-3.0-only to **AGPL-3.0-or-later**, which is what allows the automatic-paste helper to be shipped with the application: `ydotool` is AGPL-3.0-or-later, and its source cannot be combined with GPL-3.0-only code. Updated accordingly: LICENSE, packaging metadata, AppStream data, the About dialog, and a machine-readable `copyright` file in the package (Debian policy 12.5).
@@ -10,6 +10,10 @@
 - A failed paste now says why. `ydotool` reports its errors on **stdout**, which was sent to `/dev/null`, so the one line naming the cause — `failed to connect socket …: No such file or directory` — was discarded before anyone could read it and the user was left with “ydotool exited with an error”. The reason is kept, and every failure is written to the service log, so “it does not paste” is a line in `journalctl --user -u wayvoice` rather than something to be described from memory.
 - Notifications no longer pile up: one dictation passes through three states (recording, transcribing, done) and each of them used to arrive as its own popup, so the notification center filled with three lines per dictation. Each dictation now owns one entry and the states update it in place, while the recognized text stays in the history until the next dictation starts — overwriting it would have been the other half of the same mistake.
 - The helper is asked whether it is *listening*, not whether its socket file exists. `ydotoold` is killed without cleaning up, so a socket left behind by a dead helper looks exactly like a working one — the check that says “nothing answers” is now a `connect()` to the socket, which the kernel refuses for a socket nobody serves.
+
+## 0.6.1 — 2026-10-04
+
+- Never released. The number was prepared, then replaced by 0.6.2 before it reached a release, so there is no 0.6.1 on GitHub.
 
 ## 0.6.0 — 2026-10-04
 
