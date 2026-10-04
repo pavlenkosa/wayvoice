@@ -31,8 +31,8 @@ from wayvoice.protocol import socket_path
 
 from support import isolate_engine, isolate_environment
 
-#: The real dispatcher, captured before any test patches the class: the tests
-#: below make one command slow and need every other one to behave normally.
+#: The real dispatcher, captured before any test patches the class: the tests below
+#: make one command slow and need every other one to behave normally.
 REAL_DISPATCH = WayVoiceDaemon.dispatch
 
 
@@ -137,8 +137,8 @@ class InlineAnswersTests(unittest.TestCase):
         self.assertEqual(len(replies), 1, "the slow command was never answered")
 
     def test_the_status_poll_is_answered_while_a_command_runs(self):
-        # The window's own numbers: 0.12 s, every 650 ms. A failure here is the
-        # window showing "starting" with a disabled microphone.
+        # The window's own numbers: 0.12 s, every 650 ms. A failure here is the window
+        # showing "starting" with a disabled microphone.
         def check():
             reply = _ask("status", 0.12)
             self.assertTrue(reply.get("ok"), f"the window would have seen: {reply}")
@@ -147,8 +147,8 @@ class InlineAnswersTests(unittest.TestCase):
         self._with_slow_command("start", check)
 
     def test_a_ping_is_answered_while_a_command_runs(self):
-        # The shortcut's liveness probe allows 0.2 s, and a slow answer here is
-        # what makes service.py believe the daemon is gone.
+        # The shortcut's liveness probe allows 0.2 s, and a slow answer here is what
+        # makes service.py believe the daemon is gone.
         self._with_slow_command("start", lambda: self.assertTrue(_ask("ping", 0.2).get("ok")))
 
     def test_a_stopping_daemon_does_not_stop_answering(self):
@@ -159,10 +159,8 @@ class InlineAnswersTests(unittest.TestCase):
         )
 
     def test_the_slow_command_still_gets_its_own_answer(self):
-        # Being slow must not mean being unanswered.  The reply has to reach the
-        # client that asked, on the connection it asked on - the whole point of
-        # moving the work to another thread is that the reply still travels back
-        # to the right place.
+        # Being slow must not mean being unanswered: the reply has to reach the client
+        # that asked, on the connection it asked on.
         blocker = SlowCommand("start")
         replies = []
         with mock.patch.object(
@@ -205,8 +203,8 @@ class CommandWorkerTests(unittest.TestCase):
         self.assertTrue(_ask("ping", 1.0).get("ok"), "the worker did not survive")
 
     def test_a_client_that_hangs_up_mid_command_does_not_break_the_worker(self):
-        # The reply goes to a socket nobody is on; the worker must move on to the
-        # next client rather than treat it as its own failure.
+        # The reply goes to a socket nobody is on; the worker must move on to the next
+        # client rather than treat it as its own failure.
         with mock.patch.object(
             daemon_mod.WayVoiceDaemon,
             "dispatch",
@@ -239,10 +237,9 @@ class NotifyTests(unittest.TestCase):
 
         def communicate(self, input=None, timeout=None):
             # The signature matters: subprocess.run() calls
-            # ``process.communicate(input, timeout=timeout)``, and a stub with
-            # fewer parameters raises TypeError inside notify(), which notify()
-            # then swallows - so the test would pass on code that does exactly
-            # what it is meant to catch.
+            # ``process.communicate(input, timeout=timeout)``, and a stub with fewer
+            # parameters raises TypeError inside notify(), which notify() swallows -
+            # so the test would pass on code it is meant to catch.
             self.wait(timeout)
 
         def poll(self):
@@ -253,9 +250,8 @@ class NotifyTests(unittest.TestCase):
             self.returncode = -9
 
         def __enter__(self):
-            # subprocess.run() does `with Popen(...) as process`; without this
-            # the fake raises inside notify(), which swallows it, and the test
-            # would be measuring its own broken stub instead of the code.
+            # subprocess.run() does `with Popen(...) as process`; without this the fake
+            # raises inside notify(), which swallows it.
             return self
 
         def __exit__(self, *_exc):
