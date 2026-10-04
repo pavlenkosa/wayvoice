@@ -34,32 +34,30 @@ from .notify import notify, reset_notification_id
 from .protocol import owner_lock_path, socket_path
 from .shortcut import label_for
 
-#: How long one client may take to send its request line.  Generous for a
-#: command of a few bytes over a unix socket, and short enough that a client
-#: which connects and then says nothing cannot hold the daemon: the accept loop
-#: serves one connection at a time, so a client that never finishes its line
-#: takes the hotkey down with it.
+#: How long one client may take to send its request line. Generous for a command of
+#: a few bytes over a unix socket, and short enough that a client which connects and
+#: then says nothing cannot hold the daemon: the accept loop serves one connection at a
+#: time, so such a client takes the hotkey down with it.
 CLIENT_TIMEOUT = 5.0
 
-#: Commands answered on the accept loop itself, because they are questions and
-#: must never queue behind work that takes time.  ``quit`` belongs here too: it
-#: only sets a flag, and answering it before anything else is what lets the
-#: window close cleanly.
+#: Commands answered on the accept loop itself, because they are questions and must
+#: not queue behind work that takes time. ``quit`` belongs here too: it only sets a
+#: flag, and answering it first is what lets the window close cleanly.
 INLINE_COMMANDS = frozenset({"ping", "status", "clear-status", "quit"})
 
-#: How many commands may be waiting for the worker at once.  A queue that grew
-#: without bound would turn a stuck command into a daemon that accepts requests
-#: and answers none of them.
+#: How many commands may wait for the worker at once. A queue that grew without
+#: bound would turn a stuck command into a daemon that accepts requests and answers
+#: none of them.
 COMMAND_QUEUE = 32
 
-#: How long the shutdown waits for the command worker to finish the command it
-#: is holding.  Long enough for a recorder to flush its WAV header, short enough
-#: that ``quit`` does not feel like a hang.
+#: How long the shutdown waits for the command worker to finish the command it is
+#: holding: long enough for a recorder to flush its WAV header, short enough that
+#: ``quit`` does not feel like a hang.
 COMMAND_DRAIN_TIMEOUT = 5.0
 
-#: Longest request the daemon reads.  Real commands are tens of bytes; anything
-#: bigger is a client that is broken or hostile, and reading it into memory
-#: would be its decision, not ours.
+#: Longest request the daemon reads. Real commands are tens of bytes; anything
+#: bigger is a client that is broken or hostile, and reading it into memory would be
+#: its decision, not ours.
 MAX_REQUEST_BYTES = 64 * 1024
 
 
@@ -78,11 +76,10 @@ def _close(conn: socket.socket) -> None:
 def _sweep_stale_recordings(max_age: float = 3600.0) -> int:
     """Remove recordings left behind by a daemon that was killed outright.
 
-    ``cancel()`` and the shutdown hook cover every orderly exit, but a SIGKILL
-    or a power loss leaves the file behind, and at 16 kHz mono that is 32 kB for
-    every second of speech nobody is ever going to transcribe again.  Only files
-    older than ``max_age`` are touched: a recording in progress cannot be older
-    than the longest limit the user can configure, so this cannot delete one.
+    ``cancel()`` and the shutdown hook cover every orderly exit, but a SIGKILL or a power
+    loss leaves the file behind, at 32 kB for every second of speech nobody will transcribe
+    again. Only files older than ``max_age`` are touched: a recording in progress cannot
+    be older than the longest limit the user can configure.
     """
     removed = 0
     cutoff = time.time() - max_age
@@ -120,41 +117,36 @@ class WayVoiceDaemon:
             "error": "", "warming": False,
         }
         self._prepare_thread: threading.Thread | None = None
-        #: Set before the thread starts and cleared when it ends.  A thread that
-        #: has been created but not started is not alive yet, so asking about the
-        #: thread alone let two callers through, and they started two downloads
-        #: of the same file.
+        #: Set before the thread starts and cleared when it ends. A thread that has
+        #: been created but not started is not alive yet, and asking about the thread
+        #: alone let two callers through, which started two downloads of one file.
         self._prepare_running = False
         self._prepare_cancel = threading.Event()
 
     def prepare_on_start(self) -> None:
         """Get ready for the first dictation, now that this daemon owns the session.
 
-        Called from :meth:`serve` *after* the ownership lock is held, and not
-        from ``__init__``.  A second daemon that is about to be refused must not
-        change anything first: preparing the engine writes a status file, and
-        warming the worker stops the running daemon's worker - the two disagree
-        about which model the session uses - and then starts one of its own,
-        leaving the pid file owned by a process that is about to exit.
+        Called from :meth:`serve` after the ownership lock is held, and not from ``__init__``:
+        a second daemon that is about to be refused must change nothing first. Preparing the
+        engine writes a status file, and warming the worker stops the running daemon's worker
+        before starting its own, leaving the pid file owned by a process about to exit.
         """
         _sweep_stale_recordings()
         cfg = load_config()
         engine = engine_from_config(cfg)
         if engine is not None and engine.needs_setup:
             self._prepare_engine(engine, engine_status(cfg))
-        # Warm the worker with the model that is already on disk: the first
-        # dictation of the session then costs the same as every one after it.
-        # Nothing is fetched here - a download is started when the user asks
-        # for it, by picking a model in the settings window.
+        # Warm the worker with the model that is already on disk, so the first
+        # dictation of the session costs the same as every one after it. Nothing is
+        # fetched here: a download starts when the user asks for one in the settings.
         self._start_model_prepare(cfg, download=False)
 
     @staticmethod
     def _prepare_engine(engine, status: dict) -> None:
         """Start the selected engine's setup, if it can be prepared at all.
 
-        An engine that needs no preparation (whisper.cpp, an external command)
-        is skipped: there is nothing to install, and asking for it anyway would
-        prepare a runtime nothing will ever use.
+        An engine that needs no preparation (whisper.cpp, an external command) is skipped:
+        asking anyway would prepare a runtime nothing will use.
         """
         if status.get("state") in {"missing", "error"}:
             request_engine_setup(engine)
@@ -165,23 +157,19 @@ class WayVoiceDaemon:
     def _start_model_prepare(self, cfg: dict | None = None, download: bool = True) -> str:
         """Get the selected model ready: fetch it if asked to, then warm it.
 
-        Returns the phase that was started - ``"downloading"`` or ``"warming"`` -
-        or ``""`` when nothing was started.  The phase is what was *started*,
-        read before the thread has had a chance to finish: a reply that reported
-        the state the background work had reached by then would be a race, and a
-        race that answers "ready" for a load that has just begun.  Only ever one run at a time: two
-        downloads of the same 3 GB file would fight over the same cache, and the
-        second one's progress would be the first one's failure.
+        Returns the phase that was *started* - ``"downloading"`` or ``"warming"`` - read
+        before the thread has had a chance to finish. Reporting the state the background work
+        had reached by then would be a race, and a race that answers "ready" for a load that
+        has just begun.
 
-        A model that is already there is never fetched - the daemon asks this on
-        every start, and the answer must not involve the network - so
-        ``download=False`` is what startup uses: warm what is on disk, fetch
-        nothing.
+        Only one run at a time: two downloads of the same 3 GB file would fight over the same
+        cache, and the second one's progress would be the first one's failure.
 
-        Asking to prepare a model that *is* on disk warms it. That used to be
-        reported as "already done", which left the user who had just picked a
-        different model looking at a first dictation that paid for loading it
-        with nothing having told them that was coming.
+        A model that is already on disk is never fetched - the daemon asks this on every start
+        and the answer must not involve the network - so ``download=False`` is what startup
+        uses. Asking to prepare a model that *is* on disk warms it rather than reporting
+        "already done", which used to leave someone who had just picked a different model
+        facing a slow first dictation with nothing having told them it was coming.
         """
         settings = cfg or load_config()
         engine = engine_from_config(settings)
@@ -189,8 +177,8 @@ class WayVoiceDaemon:
         if not state["supported"]:
             return ""
         if state["present"]:
-            # Nothing to fetch. Warming it is still the point of being asked, and
-            # needs a worker to warm into - the user may have turned it off.
+            # Nothing to fetch. Warming it is still the point of being asked, and it
+            # needs a worker to warm into - the user may have turned that off.
             if not settings.get("engine_worker", True):
                 return ""
             download = False
@@ -232,16 +220,15 @@ class WayVoiceDaemon:
     def _prepare_model_worker(self, cfg: dict, reported: dict, download: bool) -> None:
         """Fetch the model when asked to, then let the warm worker hold it.
 
-        Everything here happens on its own thread and must keep its hands off
-        the daemon's own locks: a dictation may be waiting on the hot key while
-        three gigabytes come down.
+        Runs on its own thread and keeps its hands off the daemon's locks: a dictation may be
+        waiting on the hot key while three gigabytes come down.
         """
         engine = engine_from_config(cfg)
 
         def on_progress(done: int, total: int) -> None:
             with self._lock:
-                # Never resurrect a download the user cancelled, and never
-                # overwrite the error of one that has already finished.
+                # Never resurrect a download the user cancelled, and never overwrite
+                # the error of one that has already finished.
                 if self._download.get("state") != "downloading":
                     return
                 self._download["done_bytes"] = int(done)
@@ -250,10 +237,9 @@ class WayVoiceDaemon:
         def on_warming() -> None:
             with self._lock:
                 if self._download.get("state") == "downloading":
-                    # Still the same wait from the user's side: the weights are
-                    # down and the model is going into memory. Reporting it only
-                    # in the final answer would leave the window sitting at 100%
-                    # for the whole of the load.
+                    # From the user's side this is the same wait: the weights are down and
+                    # the model is going into memory. Reporting it only in the final
+                    # answer would leave the window at 100% for the whole load.
                     self._download["warming"] = True
 
         result = prepare_model(
@@ -266,9 +252,8 @@ class WayVoiceDaemon:
                 "done_bytes": int(result.get("done") or 0),
                 "total_bytes": int(result.get("total") or 0),
                 "error": str(result.get("error") or ""),
-                # Whether the warm-up succeeded, not whether one is running:
-                # the reply is the end of the work, and a window that still said
-                # "preparing" after it finished would never stop.
+                # Whether the warm-up succeeded, not whether one is running: the reply
+                # ends the work, and a window still saying "preparing" would never stop.
                 "warming": False,
             }
             self._prepare_running = False
@@ -277,12 +262,10 @@ class WayVoiceDaemon:
     def _cancel_model_prepare(self) -> str:
         """Stop a running preparation; report which part was actually stopped.
 
-        The two halves are not the same thing to interrupt.  Cancelling a
-        download stops the transfer; the model is not going to be there.  What
-        follows the weights is a read into memory, which cannot be half-done and
-        takes no notice of the flag - saying "stopped" about that would be a
-        lie, and the window would keep waiting for something that finished
-        anyway.
+        The two halves are not alike. Cancelling a download stops the transfer and the model
+        is not going to be there; what follows the weights is a read into memory, which cannot
+        be half-done and takes no notice of the flag, so saying "stopped" about that would be
+        a lie the window would wait on.
         """
         with self._lock:
             download = dict(self._download)
@@ -307,8 +290,8 @@ class WayVoiceDaemon:
             "present": state["present"],
             "model": state["model"],
             "download": download,
-            # Warming is not a download, but from the user's side it is the same
-            # wait: the model is not in memory yet and dictation will be slow.
+            # Warming is not a download, but from the user's side it is the same wait:
+            # the model is not in memory yet and dictation will be slow.
             "warming": bool(download.get("warming")) or download.get("state") == "warming",
         }
 
@@ -369,15 +352,13 @@ class WayVoiceDaemon:
                 return {"ok": False, "error": est.get("message", "Recognition engine is not ready.")}
             model = self._model_report(cfg)
             if model["supported"] and not model["present"]:
-                # Recording into a dictation that cannot happen yet: the model
-                # would be fetched mid-transcription, which is a silent wait of
-                # minutes followed by a timeout.
+                # Recording into a dictation that cannot happen yet: the model would be
+                # fetched mid-transcription, a silent wait of minutes and then a
+                # timeout.
                 #
-                # Nothing is fetched here.  Pressing the key is not the same as
-                # agreeing to spend the bandwidth: the settings window asks
-                # before a download and the user may have said no, and a daemon
-                # that starts one anyway has turned that answer into a lie. So
-                # this says what is missing and where it can be fetched.
+                # Pressing the key is not agreeing to spend the bandwidth. The window
+                # asks before a download and the user may have said no, so this says
+                # what is missing and where it can be fetched.
                 return {
                     "ok": False,
                     "error": tr(
@@ -405,9 +386,9 @@ class WayVoiceDaemon:
                 return {"ok": True, "state": "recording"}
             except Exception as exc:
                 self.last_error = str(exc)
-                # The notification itself cannot raise (see notify.notify), and
-                # it must not be the last thing in the handler either: an
-                # exception here would escape start_recording entirely.
+                # The notification cannot raise (see notify.notify) and must not be the
+                # last thing in the handler either: an exception here would escape
+                # start_recording entirely.
                 notify("WayVoice", str(exc), enabled=cfg.get("notify", True))
                 return {"ok": False, "error": str(exc)}
 
@@ -449,9 +430,9 @@ class WayVoiceDaemon:
         try:
             thread.start()
         except Exception as exc:
-            # Without this the daemon would keep ``busy`` set forever: recording
-            # is refused, toggle turns into cancel, and only a restart of the
-            # daemon clears it. The temporary recording would leak as well.
+            # Without this the daemon would keep ``busy`` set forever: recording is
+            # refused, toggle turns into cancel, and only a restart clears it. The
+            # temporary recording would leak as well.
             self.busy = False
             self._busy_started = 0.0
             self._transcribe_cancel.clear()
@@ -464,20 +445,18 @@ class WayVoiceDaemon:
     def _language() -> str | None:
         """The user's language, for a reply that has no config in hand.
 
-        Some replies are refusals raised before anything has read the settings -
-        an unknown command, a request for a second dictation.  They are still
-        shown to the user, so they are still translated; the cost is one small
-        file read on a path that has just refused.
+        Some replies are refusals raised before anything has read the settings - an unknown
+        command, a request for a second dictation. They are still shown, so they are still
+        translated, at the cost of one small file read on a path that has just refused.
         """
         return load_config().get("ui_language")
 
     def request_shutdown(self) -> None:
         """Ask the serving loop to stop and clean up.
 
-        Public because a signal handler is the one caller that has no business
-        reaching into ``_shutdown``: setting the flag is the whole contract, and
-        everything the loop does afterwards - stopping the recorder, removing the
-        socket - happens in the ordinary way.
+        Public because a signal handler has no business reaching into ``_shutdown``: setting
+        the flag is the whole contract, and stopping the recorder and removing the socket
+        happens in the ordinary way afterwards.
         """
         self._shutdown.set()
 
@@ -501,11 +480,10 @@ class WayVoiceDaemon:
                 notify("WayVoice", self.last_warning, enabled=cfg.get("notify", True))
                 return
             try:
-                # Cancel means cancel. Recognition checks the flag while it
-                # decodes, but nothing between here and the injection looked at
-                # it: a cancel that arrived in the last milliseconds used to be
-                # ignored and the text was typed into whatever window the user
-                # had switched to in the meantime.
+                # Cancel means cancel. Recognition checks the flag while it decodes, but
+                # nothing between here and the injection looked at it, so a cancel in
+                # the last milliseconds used to be ignored and the text was typed into
+                # whatever window the user had switched to.
                 if self._transcribe_cancel.is_set():
                     self.last_text = ""
                     self.last_warning = tr(
@@ -638,14 +616,13 @@ class WayVoiceDaemon:
     def _command_loop(self, commands: "queue.Queue") -> None:
         """Serve the commands that may take time, one at a time.
 
-        One worker, not a pool: the hot key, the microphone button and the window
-        all expect their command to be finished before the next one starts, and
-        the daemon's own lock already enforces that.  What the worker buys is
-        that the accept loop - the thread that has to answer a status poll within
+        One worker, not a pool: the hot key, the microphone button and the window all expect a
+        command to finish before the next one starts, and the daemon's own lock enforces that.
+        What the worker buys is that the accept loop - which has to answer a status poll within
         0.12 s - is never the thread doing the waiting.
 
-        A command that raises must not take the worker with it: every client
-        waiting behind it would hang until it timed out.
+        A command that raises must not take the worker with it; every client behind it would
+        hang until it timed out.
         """
         while True:
             item = commands.get()
@@ -665,18 +642,14 @@ class WayVoiceDaemon:
     def _live_daemon(self, path: Path) -> bool:
         """Return whether another daemon already owns ``path``.
 
-        Without this check a second daemon would unlink the running daemon's
-        socket, bind one at the same path and the first one would be orphaned:
-        unreachable through the filesystem, yet still holding the microphone
-        and the Wayland clipboard.  Under systemd this could not happen because
-        the unit owned the lifetime, but :mod:`wayvoice.service` may now spawn
-        the daemon directly (Flatpak has no systemctl), so a double start has
-        to be refused here instead.
+        Without this a second daemon would unlink the running daemon's socket, bind one at the
+        same path and orphan the first: unreachable through the filesystem, yet still holding
+        the microphone and the clipboard. systemd's unit used to make that impossible, but
+        :mod:`wayvoice.service` may spawn the daemon directly, so the refusal belongs here.
 
-        A socket file that nobody answers on is a leftover from a crash and is
-        safe to replace, which is what the unlink below is for.  The probe is a
-        single real ``ping``: opening a connection and dropping it would only
-        teach the running daemon nothing while risking an EPIPE on its side.
+        A socket nobody answers on is a leftover from a crash and is safe to replace, which is
+        what the unlink below is for. The probe is a real ``ping``: opening a connection and
+        dropping it would learn nothing and risk an EPIPE on the running daemon's side.
         """
         if not path.exists():
             return False
@@ -781,11 +754,10 @@ class WayVoiceDaemon:
                     continue
                 command = data.decode("utf-8", "replace").strip()
                 if command in INLINE_COMMANDS:
-                    # The questions are answered here, on the loop, and cost a
-                    # fraction of a millisecond each.  Everything that can take
-                    # time goes to the command worker below, because the window
-                    # asks for the status every 650 ms with a 0.12 s deadline and
-                    # would otherwise call a busy daemon dead.
+                    # The questions are answered here, on the loop, and cost a fraction of a
+                    # millisecond each. Everything that can take time goes to the command
+                    # worker below, because the window asks for the status every 650 ms
+                    # with a 0.12 s deadline and would otherwise call a busy daemon dead.
                     try:
                         _send(conn, self.dispatch(command))
                     except OSError:
@@ -795,9 +767,9 @@ class WayVoiceDaemon:
                 try:
                     commands.put_nowait((conn, command))
                 except queue.Full:
-                    # More work than the daemon can be doing at once, which
-                    # means something is stuck.  The client is told so rather
-                    # than left waiting for a reply that would never come.
+                    # More work than the daemon can be doing at once, which means something
+                    # is stuck. The client is told so rather than left waiting for a
+                    # reply that would never come.
                     try:
                         _send(conn, {
                             "ok": False,
@@ -808,21 +780,20 @@ class WayVoiceDaemon:
                     _close(conn)
         finally:
             self._cancel_record_timer()
-            # Leaving a recording behind is not a cleanup detail: pw-record keeps
-            # the microphone open and keeps writing to /tmp, so a daemon that
-            # exits mid-dictation would hold the device until something kills
-            # that process by hand.
+            # Leaving a recording behind is not a cleanup detail: pw-record keeps the
+            # microphone open and keeps writing to /tmp, so a daemon that exits
+            # mid-dictation holds the device until something kills that process.
             try:
                 self.recorder.cancel()
             except Exception as exc:  # never let this stop the shutdown
                 print(f"WayVoice: could not stop the recorder: {exc}", file=sys.stderr)
             self._transcribe_cancel.set()
-            # A download that outlives the daemon would keep fetching a file
-            # nobody is waiting for, in a session that is going away.
+            # A download that outlived the daemon would keep fetching a file nobody is
+            # waiting for, in a session that is going away.
             self._prepare_cancel.set()
-            # Let the command worker finish what it is holding, and close
-            # whatever is still queued: those clients would otherwise wait for a
-            # reply from a daemon that is gone.
+            # Let the command worker finish what it is holding and close whatever is
+            # still queued: those clients would otherwise wait for a reply from a daemon
+            # that is gone.
             commands.put_nowait(None)
             worker.join(timeout=COMMAND_DRAIN_TIMEOUT)
             server.close()
@@ -838,19 +809,15 @@ def main() -> None:
 def _install_signal_handlers(daemon: WayVoiceDaemon) -> None:
     """Ask the daemon to stop when something signals it.
 
-    Without a handler, SIGTERM ended the process outright: no ``atexit`` hook,
-    no ``finally``, and the recorder - which runs in a session of its own so that
-    its WAV header can be finalised deliberately - left holding the microphone
-    with nobody left to stop it.  That is not a corner case: it is what systemd
-    sends on stop, and what :func:`wayvoice.service._force_stop_daemon` sends to
-    a daemon that ignored ``quit``.
+    Without a handler SIGTERM ended the process outright: no ``atexit`` hook, no
+    ``finally``, and the recorder - in a session of its own so that its WAV header is
+    finalised deliberately - left holding the microphone with nobody to stop it. That is
+    what systemd sends on stop, and what :func:`wayvoice.service._force_stop_daemon` sends
+    to a daemon that ignored ``quit``.
 
-    Setting the flag is all that is needed - the accept loop wakes within its own
-    timeout and the ordinary cleanup runs, recorder stopped and socket removed.
-
-    SIGHUP is included because losing the terminal is the same event from the
-    daemon's point of view.  SIGINT is not: it already raises, which unwinds
-    through that same ``finally``.
+    Setting the flag is all that is needed; the accept loop wakes within its own timeout
+    and the ordinary cleanup runs. SIGHUP counts as the same event, SIGINT does not: it
+    already raises and unwinds through that same ``finally``.
     """
     def request_stop(_signum, _frame):
         daemon.request_shutdown()
