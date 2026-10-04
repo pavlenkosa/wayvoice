@@ -26,7 +26,7 @@ from wayvoice import daemon as daemon_mod
 from wayvoice.daemon import CLIENT_TIMEOUT, MAX_REQUEST_BYTES, WayVoiceDaemon
 from wayvoice.protocol import owner_lock_path, socket_path
 
-from support import isolate_engine
+from support import isolate_engine, isolate_environment
 
 
 def _ping(path, timeout=2.0):
@@ -91,6 +91,7 @@ class _ServerFixture:
 class ServeRobustnessTests(unittest.TestCase):
     def setUp(self):
         isolate_engine(self)
+        isolate_environment(self)
         self.server = _ServerFixture(self)
         self.assertTrue(self.server.wait_until_serving(), "the daemon did not start")
         self.path = self.server.path
@@ -162,6 +163,7 @@ class OwnershipTests(unittest.TestCase):
 
     def setUp(self):
         isolate_engine(self)
+        isolate_environment(self)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         patch = mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": self.tmp.name})
@@ -217,6 +219,7 @@ class ShutdownTests(unittest.TestCase):
 
     def setUp(self):
         isolate_engine(self)
+        isolate_environment(self)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         patch = mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": self.tmp.name})
@@ -253,6 +256,7 @@ class NotifyTests(unittest.TestCase):
 
     def setUp(self):
         isolate_engine(self)
+        isolate_environment(self)
         from wayvoice import notify as notify_mod
 
         self.notify_mod = notify_mod

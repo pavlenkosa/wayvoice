@@ -4,6 +4,7 @@ import contextlib
 import fcntl
 import json
 import os
+import signal
 import socket
 import sys
 import tempfile
@@ -382,6 +383,16 @@ class WayVoiceDaemon:
             return {"ok": False, "error": str(exc)}
         return {"ok": True, "state": "transcribing"}
 
+    def request_shutdown(self) -> None:
+        """Ask the serving loop to stop and clean up.
+
+        Public because a signal handler is the one caller that has no business
+        reaching into ``_shutdown``: setting the flag is the whole contract, and
+        everything the loop does afterwards - stopping the recorder, removing the
+        socket - happens in the ordinary way.
+        """
+        self._shutdown.set()
+
     def toggle(self) -> dict:
         if self.recorder.recording:
             return self.stop_recording()
@@ -642,7 +653,41 @@ class WayVoiceDaemon:
 
 
 def main() -> None:
-    WayVoiceDaemon().serve()
+    daemon = WayVoiceDaemon()
+    _install_signal_handlers(daemon)
+    daemon.serve()
+
+
+def _install_signal_handlers(daemon: WayVoiceDaemon) -> None:
+    """Ask the daemon to stop when something signals it.
+
+    Without a handler, SIGTERM ended the process outright: no ``atexit`` hook,
+    no ``finally``, and the recorder - which runs in a session of its own so that
+    its WAV header can be finalised deliberately - left holding the microphone
+    with nobody left to stop it.  That is not a corner case: it is what systemd
+    sends on stop, and what :func:`wayvoice.service._force_stop_daemon` sends to
+    a daemon that ignored ``quit``.
+
+    Setting the flag is all that is needed - the accept loop wakes within its own
+    timeout and the ordinary cleanup runs, recorder stopped and socket removed.
+
+    SIGHUP is included because losing the terminal is the same event from the
+    daemon's point of view.  SIGINT is not: it already raises, which unwinds
+    through that same ``finally``.
+    """
+    def request_stop(_signum, _frame):
+        daemon.request_shutdown()
+
+    for name in ("SIGTERM", "SIGHUP"):
+        number = getattr(signal, name, None)
+        if number is None:
+            continue
+        try:
+            signal.signal(number, request_stop)
+        except (OSError, ValueError):
+            # Not the main thread, or a platform without that signal: the
+            # daemon then keeps the default disposition, as it always did.
+            pass
 
 
 if __name__ == "__main__":

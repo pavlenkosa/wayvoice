@@ -20,7 +20,7 @@ from wayvoice import daemon as daemon_mod
 from wayvoice.daemon import WayVoiceDaemon
 from wayvoice.engine import Engine
 
-from support import isolate_engine
+from support import isolate_engine, isolate_environment
 
 
 def make_engine(*, present: bool, states: list[str] | None = None, progress=None,
@@ -84,6 +84,7 @@ class DaemonCase(unittest.TestCase):
         self.addCleanup(self.patches.close)
         # A daemon reads the user's config, walks the user's model cache and
         # starts a warm worker for it; none of that belongs in a test run.
+        self.root = isolate_environment(self)
         isolate_engine(self)
 
     def patch(self, target: str, **kwargs):

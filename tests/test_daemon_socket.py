@@ -10,7 +10,7 @@ from unittest import mock
 
 from wayvoice.daemon import WayVoiceDaemon
 
-from support import isolate_engine
+from support import isolate_engine, isolate_environment
 from wayvoice.protocol import socket_path
 
 
@@ -59,6 +59,7 @@ class _FakeDaemonServer:
 class LiveDaemonProbeTests(unittest.TestCase):
     def setUp(self):
         isolate_engine(self)
+        isolate_environment(self)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.runtime = Path(self.tmp.name)
@@ -94,6 +95,7 @@ class ServeResilienceTests(unittest.TestCase):
 
     def setUp(self):
         isolate_engine(self)
+        isolate_environment(self)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         runtime = Path(self.tmp.name)
