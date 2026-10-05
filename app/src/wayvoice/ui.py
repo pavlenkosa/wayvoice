@@ -15,6 +15,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango
 
 from . import __version__
 from . import deps as deps_mod
+from . import injector
 from . import languages
 from . import pkgsys
 from . import service
@@ -634,9 +635,9 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         diag_btn.connect("clicked", self._copy_diagnostics)
         diag_row.add_suffix(diag_btn)
         diag_group.add(diag_row)
-        logs_row = Adw.ActionRow(title=self.t("settings.open_logs"), subtitle=self.t("settings.open_logs_sub"))
-        logs_btn = Gtk.Button(label=self.t("settings.open_logs"), valign=Gtk.Align.CENTER)
-        logs_btn.connect("clicked", self._show_logs_hint)
+        logs_row = Adw.ActionRow(title=self.t("settings.copy_logs"), subtitle=self.t("settings.copy_logs_sub"))
+        logs_btn = Gtk.Button(label=self.t("settings.copy_logs"), valign=Gtk.Align.CENTER)
+        logs_btn.connect("clicked", self._copy_logs)
         logs_row.add_suffix(logs_btn)
         diag_group.add(logs_row)
 
@@ -1640,14 +1641,69 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         return "\n".join(lines)
 
     def _copy_diagnostics(self, *_args):
-        display = Gdk.Display.get_default()
-        if display:
-            display.get_clipboard().set_text(self._diagnostics_text())
-        if hasattr(self, "toast"):
-            self.toast.add_toast(Adw.Toast(title=self.t("toast.diagnostics_copied")))
+        # Gdk.Display.get_default().get_clipboard() is the GTK3 clipboard, and on
+        # Wayland it silently accepts the text and never offers it: the button
+        # reported success and the clipboard stayed whatever it was. The same
+        # wl-copy path the dictation itself uses is what actually works here, and
+        # it is already tested in injector.py.
+        language = self.ui_lang
+        try:
+            injector.copy_to_clipboard(self._diagnostics_text(), language)
+        except injector.InjectionError as exc:
+            self._toast(self.t("toast.diagnostics_failed", detail=str(exc)))
+            return
+        self._toast(self.t("toast.diagnostics_copied"))
 
-    def _show_logs_hint(self, *_args):
-        self.toast.add_toast(Adw.Toast(title=self.t("toast.logs"), timeout=5))
+    def _copy_logs(self, *_args):
+        """Put the tail of the daemon's journal into the clipboard.
+
+        This button used to show a toast with the journalctl command and nothing
+        else, so "Open logs" opened nothing. A bug report needs the text, and the
+        clipboard is where the diagnostics button already puts it.
+        """
+        try:
+            report = self._journal_tail()
+        except (OSError, subprocess.SubprocessError) as exc:
+            self._toast(self.t("toast.logs_failed", detail=str(exc)))
+            return
+        if not report.strip():
+            self._toast(self.t("toast.logs_empty"))
+            return
+        try:
+            injector.copy_to_clipboard(report, self.ui_lang)
+        except injector.InjectionError as exc:
+            self._toast(self.t("toast.logs_failed", detail=str(exc)))
+            return
+        self._toast(self.t("toast.logs_copied"))
+
+    #: How much of the journal the button hands over. Enough for a bug report, small
+    #: enough that the clipboard owner is not holding a megabyte of text.
+    JOURNAL_LINES = 200
+    JOURNAL_TIMEOUT = 5.0
+
+    def _journal_tail(self) -> str:
+        command = ["journalctl", "--user", "-u", "wayvoice.service",
+                   "-n", str(self.JOURNAL_LINES), "--no-pager", "--output=short-iso"]
+        cp = subprocess.run(
+            command,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=self.JOURNAL_TIMEOUT,
+        )
+        if cp.returncode != 0:
+            # journalctl exits non-zero when the unit has never run, and says why on
+            # stderr; an empty stdout with no reason is the case worth reporting.
+            # SubprocessError rather than RuntimeError, so the caller has one family
+            # to catch for "the program did not give us the log".
+            detail = (cp.stderr or "").strip() or f"exit {cp.returncode}"
+            raise subprocess.SubprocessError(detail)
+        return cp.stdout or ""
+
+    def _toast(self, title: str, timeout: int = 3) -> None:
+        if hasattr(self, "toast"):
+            self.toast.add_toast(Adw.Toast(title=title, timeout=timeout))
 
     def _show_about(self, *_args):
         about = Adw.AboutWindow(transient_for=self, modal=True)

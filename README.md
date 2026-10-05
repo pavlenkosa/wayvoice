@@ -1,112 +1,187 @@
 <p align="center">
-  <img src="data/icons/hicolor/scalable/apps/io.github.stepan.WayVoice.svg" width="112" alt="WayVoice icon">
+  <img src="data/icons/hicolor/scalable/apps/io.github.stepan.WayVoice.svg" width="112" alt="WayVoice — offline voice typing for Linux">
 </p>
 
 <h1 align="center">WayVoice</h1>
 
 <p align="center">
-  Local voice typing for GNOME and Wayland.<br>
-  Press a hotkey, speak, and get text in the app you're already using.
+  <strong>Offline voice typing and speech-to-text for Linux, GNOME and Wayland.</strong><br>
+  Press a hotkey, speak naturally, and WayVoice turns your speech into text in the app you're already using.
 </p>
 
 <p align="center">
   <a href="https://github.com/stepan-pavlenko/wayvoice/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/stepan-pavlenko/wayvoice/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://github.com/stepan-pavlenko/wayvoice/releases"><img alt="Release" src="https://img.shields.io/github/v/release/stepan-pavlenko/wayvoice?display_name=tag&sort=semver"></a>
-  <img alt="Wayland" src="https://img.shields.io/badge/Wayland-native-ffbc00">
-  <img alt="GTK" src="https://img.shields.io/badge/GTK-4-4a86cf?logo=gtk&logoColor=white">
-  <img alt="License" src="https://img.shields.io/badge/license-GPL--3.0-green">
+  <a href="https://github.com/stepan-pavlenko/wayvoice/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/stepan-pavlenko/wayvoice?display_name=tag&sort=semver"></a>
+  <img alt="Linux" src="https://img.shields.io/badge/Linux-Wayland-ffbc00?logo=linux&logoColor=black">
+  <img alt="GTK 4" src="https://img.shields.io/badge/GTK-4-4a86cf?logo=gtk&logoColor=white">
+  <img alt="License" src="https://img.shields.io/github/license/stepan-pavlenko/wayvoice">
 </p>
 
-## What is WayVoice?
+<p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#recognition-engines">Recognition engines</a> ·
+  <a href="#command-line">CLI</a> ·
+  <a href="#privacy">Privacy</a>
+</p>
 
-WayVoice is a background voice-input utility for Linux. Start recording with a global hotkey, speak naturally, and WayVoice transcribes the audio locally and inserts the result into the focused application.
+## Voice typing for Linux that stays out of the way
 
-- Local speech recognition with **Faster-Whisper**, **whisper.cpp** or an external command
-- Works with **GNOME + Wayland**
-- Any of the **100 languages Whisper supports**, detected automatically or pinned
-- Automatic punctuation and spoken punctuation commands
-- Multilingual and language-specific models
-- The model stays warm between dictations, so only the first one pays for loading it
-- Model files on disk: size, free space and deletion
-- Missing dependencies are detected and can be installed from the settings
-- Runs from **Debian/Ubuntu packages** and as a **Flatpak**, with or without systemd
-- Configurable global hotkey
-- Recognition timeout and cancellation
-- GTK4 + libadwaita interface
-- RU / EN interface
-- Audio stays on your machine when using local engines
+WayVoice is an open-source **Linux dictation app** for system-wide voice input. Instead of opening a separate transcription window, you put the cursor where you want the text, press a global hotkey, speak, and continue working.
+
+Speech recognition can run locally with **Faster-Whisper** or **whisper.cpp**, so your recordings do not need to leave your computer. WayVoice is designed around **GNOME, GTK4/libadwaita and Wayland**, while keeping a simple clipboard fallback when automatic paste is not available.
+
+If you are looking for a Linux alternative to built-in voice typing on other desktop operating systems — especially one based on local Whisper speech recognition rather than a cloud service — that is the problem WayVoice is trying to solve.
+
+## Why WayVoice?
+
+- **Voice typing across applications** — browsers, editors, chats, IDEs and other places where you can paste text.
+- **Local speech-to-text** — use Faster-Whisper or whisper.cpp without sending recordings to a transcription API.
+- **Built for Wayland** — records through PipeWire tools, writes to the Wayland clipboard and can paste automatically with `ydotool`.
+- **100 Whisper languages** — use automatic language detection or pin a language manually.
+- **Spoken punctuation** — commands such as “comma”, “question mark”, “точка” and “запятая”.
+- **Fast repeat dictation** — Faster-Whisper can keep the selected model warm in memory between recordings.
+- **Model management in the UI** — download models, see disk usage and free space, cancel downloads and remove models you no longer need.
+- **GNOME-style interface** — GTK4 + libadwaita, with Russian and English UI.
+- **No forced downloads from the hotkey** — if a model is missing, WayVoice tells you instead of silently downloading gigabytes.
+- **Useful without automatic paste** — recognized text stays in the clipboard if simulated `Ctrl+V` is unavailable.
 
 ## Install
 
-Download the latest `.deb` from **Releases**, then install it:
+### Debian / Ubuntu
+
+Download the latest `.deb` package from [GitHub Releases](https://github.com/stepan-pavlenko/wayvoice/releases), then install it with APT:
 
 ```bash
 sudo apt install ./wayvoice_*_all.deb
 ```
 
-Open **WayVoice** from the GNOME application grid or run:
+Launch **WayVoice** from the application grid, or run:
 
 ```bash
 wayvoice-settings
 ```
 
-The Faster-Whisper runtime is installed into the user's WayVoice directory and model weights are downloaded on first use.
+The recognition runtime and model weights are downloaded only when they are needed and you choose to download them.
 
-## Usage
+### Flatpak and other distributions
 
-1. Choose the recognition engine and model.
-2. Set a global hotkey.
+The repository includes a Flatpak manifest at [`io.github.stepan.WayVoice.json`](io.github.stepan.WayVoice.json). WayVoice can run without systemd, which keeps the application usable in sandboxed environments as well.
+
+Prebuilt release assets are currently published on the [Releases](https://github.com/stepan-pavlenko/wayvoice/releases) page.
+
+## How it works
+
+1. Open WayVoice and choose a speech-recognition engine and model.
+2. Set the global dictation hotkey.
 3. Put the cursor into any text field.
 4. Press the hotkey and speak.
 5. Press it again to stop recording.
 
-WayVoice transcribes the recording and inserts the text into the active application. If automatic paste is unavailable, the result remains in the Wayland clipboard.
+WayVoice transcribes the recording and places the result into the active workflow. When automatic paste is available, the text is inserted for you. Otherwise, it remains in the Wayland clipboard so you can paste it normally.
 
-If the selected model is not on disk yet, the hot key says so and names the model — it does not start a download by itself. Fetch it from the settings window, where the model row offers it, or with `wayvoice model --download`.
+A model that is not yet installed is never downloaded just because you pressed the hotkey. Download it from Settings or from the command line:
+
+```bash
+wayvoice model --download
+```
+
+## Features at a glance
+
+| Area | What WayVoice provides |
+| --- | --- |
+| Dictation | Global hotkey, start/stop recording, cancellation and recognition timeout |
+| Speech recognition | Faster-Whisper, whisper.cpp or any external command |
+| Languages | All 100 languages supported by Whisper, with automatic detection |
+| Punctuation | Automatic punctuation plus spoken punctuation commands |
+| Wayland | PipeWire recording, Wayland clipboard and optional automatic paste |
+| Models | Download progress, cancellation, disk usage, free space and deletion |
+| Performance | Optional warm Faster-Whisper worker between dictations |
+| Desktop | GTK4, libadwaita, GNOME-style UI, RU/EN localization |
+| Privacy | Local engines keep recognition and recordings on your machine |
 
 ## Recognition engines
 
 ### Faster-Whisper
 
-The default option. Supports multilingual Whisper models, English-only models and compatible CTranslate2 community models.
+The recommended default. It supports multilingual Whisper models, English-only models and compatible CTranslate2 models.
 
-The model is kept in memory between dictations, and is loaded as soon as the daemon starts, so the first dictation of a session costs the same as the ones after it. That is memory spent for the whole session: measured on one machine, the resident size of the worker was about 0.6 GB for `small` and 1.6 GB for `medium`, and a large model costs more in proportion. Turn the warm worker off in the settings to free it; recognition then loads the model for each dictation instead, which is slower but leaves nothing behind between recordings.
+For faster repeated dictation, WayVoice can keep the model loaded between recordings. This uses more memory but avoids reloading the model every time. You can disable the warm worker in Settings if you prefer lower idle memory usage.
+
+On one test machine, the resident worker used roughly **0.6 GB** with the `small` model and **1.6 GB** with `medium`. Larger models require more memory.
 
 ### whisper.cpp
 
-Use a local `whisper-cli` binary together with a GGML/GGUF model.
+Use a local `whisper-cli` binary with a compatible GGML/GGUF model. This is useful if you already have a whisper.cpp setup or prefer its runtime.
 
 ### External command
 
-Hand the recording to any command that prints the recognized text to stdout. The template runs through `/bin/sh`, and `{audio}` is replaced with the path of the recording:
+WayVoice can hand the recorded audio to another program and use whatever that command prints to stdout as the recognized text.
 
-```
+Example:
+
+```text
 vosk-transcriber -i {audio}
 ```
 
-## Languages
+The command template runs through `/bin/sh`, and `{audio}` is replaced with the path to the recorded audio file.
 
-The recognition language defaults to automatic detection, which is what the engines do best: a pinned language does not fail loudly, it silently applies the wrong grammar to foreign speech.
+## Languages and spoken punctuation
 
-Every language Whisper knows is in the settings, under the name speakers of that language use for it. Spoken punctuation commands ("comma", "question mark", "точка", "запятая") are recognised in the language being spoken.
+Automatic language detection is the default. You can also pin one of the languages supported by Whisper when you know exactly what you will be speaking.
 
-## Models on disk
+Spoken punctuation is applied in the active recognition language, including English and Russian commands such as:
 
-Model weights live in the Hugging Face cache, which is shared with other programs. The settings show what the selected model occupies, what WayVoice's models occupy in total, and how much space the whole cache takes — plus how much is free on disk. A downloaded model can be deleted from the same row.
+- “comma”, “period”, “question mark”
+- “запятая”, “точка”, “вопросительный знак”
 
-Deleting a model never removes files another model is using: the weights are shared between models, and only what nothing points at any more is freed. A model provided as a local path is yours and is never deleted.
+This makes WayVoice useful for longer Linux voice dictation, not only short search queries or commands.
 
-The model can be a name from the catalogue, a full Hugging Face repository id such as `Systran/faster-whisper-large-v3`, or a path to a directory on disk. A local model is loaded straight from that directory and never reported as missing: WayVoice cannot fetch it, count it or delete it, so it neither offers to download it nor refuses to record because of it.
+## Models and storage
 
-A model that is not on disk is fetched when you choose it, not when you first use it — and because that costs gigabytes, choosing it asks first, naming the model and how much space it takes. A model that is already on disk is only loaded into memory, which costs nothing but time. Either way the download shows its progress and can be cancelled, and pressing the hot key while one runs says so instead of recording something that cannot be recognised yet. Starting WayVoice never downloads anything by itself — the model it already has is loaded into memory so that the first dictation is as fast as the rest.
+Faster-Whisper model files live in the Hugging Face cache, which may be shared with other applications.
 
-## Missing dependencies
+WayVoice shows:
 
-WayVoice needs `pw-record`, `wl-copy` and `notify-send` at runtime. Automatic pasting additionally needs `ydotool`, the program that presses `Ctrl+V` — Wayland gives an application no supported way to do that itself. The settings list what is missing and can install it through the system package manager — nothing is installed unless you ask, and nothing is attempted for a package your repositories do not carry: on Debian 13 there is no `ydotool` package at all, and the settings say so instead of running a command that cannot succeed. It has been in Debian's `main` since the package was rewritten (1.0.4), and in `trixie-backports`; where a system has neither, the Debian package builds its own copy from the vendored sources and ships it in `/usr/lib/wayvoice/ydotool/`. A system's own `ydotool` always wins over that copy, so the packaged one only runs where there is no other.
+- whether the selected model is available locally;
+- the model's size on disk;
+- total space used by WayVoice models;
+- total shared cache size;
+- free disk space;
+- download progress and cancellation.
 
-Without `ydotool`, dictation still works: the recognized text goes to the Wayland clipboard and you paste it yourself.
+Deleting a model from WayVoice does not blindly erase shared files that another cached model still uses.
 
-## Useful commands
+You can select a model from the built-in catalogue, enter a full Hugging Face repository id such as `Systran/faster-whisper-large-v3`, or point WayVoice at a local model directory.
+
+## Wayland clipboard and automatic paste
+
+Wayland intentionally prevents normal applications from pretending to be your keyboard. Because of that, WayVoice separates **recognition** from **automatic paste**.
+
+Core runtime tools include:
+
+- `pw-record` for microphone recording;
+- `wl-copy` for the Wayland clipboard;
+- `notify-send` for desktop notifications;
+- `ydotool` for optional automatic `Ctrl+V`.
+
+If `ydotool` is unavailable, dictation still works — the recognized text is copied to the clipboard.
+
+The Debian package also includes a bundled `ydotool` fallback for systems that do not provide a suitable package. A system-installed copy is preferred when available.
+
+## Privacy
+
+With a local recognition engine selected, WayVoice does **not** send your recordings to a cloud transcription service.
+
+Network access is used to download the speech-recognition runtime and model files when you explicitly request them. Recognition itself runs locally.
+
+That makes WayVoice suitable for people who want **private offline speech-to-text on Linux** without routing everyday dictation through a third-party API.
+
+## Command line
+
+The GUI covers normal daily use, but WayVoice also provides a small CLI.
+
+### Dictation and status
 
 ```bash
 wayvoice toggle
@@ -116,24 +191,53 @@ wayvoice engine-status
 wayvoice settings
 ```
 
-Models, from the command line — the same thing the settings window does, for a machine without a display:
+### Model management
 
 ```bash
-wayvoice model                          # what is selected, and whether it is ready
-wayvoice model --download               # fetch the selected model, with progress
-wayvoice model --cancel                 # stop a download that is running
+wayvoice model
+wayvoice model --download
+wayvoice model --cancel
 ```
 
-Service log:
+### Service log
 
 ```bash
 journalctl --user -u wayvoice -f
 ```
 
-## Privacy
+## Troubleshooting
 
-WayVoice does not send recordings to a cloud service when a local recognition engine is selected. Network access is used for two things and nothing else: downloading the recognition runtime, and downloading model files. The Flatpak build grants network access for exactly this reason — recognition itself never touches the network.
+**The hotkey works, but text is not pasted automatically**
+
+Check the clipboard first. If the recognized text is there, speech recognition succeeded and only automatic paste is unavailable. Check whether `ydotool` is installed and usable on your system.
+
+**WayVoice says the model is missing**
+
+Open Settings and download the selected model, or run:
+
+```bash
+wayvoice model --download
+```
+
+**Recognition takes a long time on the first use**
+
+The model may still need to be downloaded or loaded into memory. Keeping the Faster-Whisper worker warm makes later dictations faster.
+
+**Need more detail?**
+
+See the [changelog](CHANGELOG.md), open an [issue](https://github.com/stepan-pavlenko/wayvoice/issues), or inspect the service log shown above.
+
+## Development and contributing
+
+Contributions, bug reports and testing on different Linux/Wayland setups are welcome.
+
+- [Contributing guide](CONTRIBUTING.md)
+- [Changelog](CHANGELOG.md)
+- [Security policy](SECURITY.md)
+- [Releases](https://github.com/stepan-pavlenko/wayvoice/releases)
 
 ## License
 
-WayVoice is licensed under the **GNU Affero General Public License v3.0 or later** (SPDX: `AGPL-3.0-or-later`). The stronger copyleft is what lets the automatic-paste helper be shipped with the application: `ydotool` is AGPL-3.0-or-later, and its source cannot be combined with GPL-3.0-only code. See [LICENSE](LICENSE) and [third_party/ydotool](third_party/ydotool/README.wayvoice.md).
+WayVoice is licensed under the **GNU Affero General Public License v3.0 or later** (`AGPL-3.0-or-later`).
+
+See [LICENSE](LICENSE) and [third_party/ydotool](third_party/ydotool/README.wayvoice.md) for details.
