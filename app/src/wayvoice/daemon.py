@@ -331,7 +331,7 @@ class WayVoiceDaemon:
             cfg = load_config()
             seconds = int(cfg.get("max_recording_sec", 120))
             self.last_warning = tr("daemon.recording_limit", cfg.get("ui_language"), seconds=seconds)
-        notify("WayVoice", self.last_warning, enabled=cfg.get("notify", True))
+        notify(self.last_warning, enabled=cfg.get("notify", True))
         self.stop_recording()
 
     def start_recording(self) -> dict:
@@ -382,14 +382,14 @@ class WayVoiceDaemon:
                 # a new entry: without it the next recording would overwrite the
                 # transcript of the last one.
                 reset_notification_id()
-                notify("WayVoice", tr("daemon.recording_started", cfg.get("ui_language")), enabled=cfg.get("notify", True), replace=False)
+                notify(tr("daemon.recording_started", cfg.get("ui_language")), enabled=cfg.get("notify", True), replace=False)
                 return {"ok": True, "state": "recording"}
             except Exception as exc:
                 self.last_error = str(exc)
                 # The notification cannot raise (see notify.notify) and must not be the
                 # last thing in the handler either: an exception here would escape
                 # start_recording entirely.
-                notify("WayVoice", str(exc), enabled=cfg.get("notify", True))
+                notify(str(exc), enabled=cfg.get("notify", True))
                 return {"ok": False, "error": str(exc)}
 
     def cancel(self) -> dict:
@@ -399,7 +399,7 @@ class WayVoiceDaemon:
                 self._cancel_record_timer()
                 self.recorder.cancel()
                 self._record_started = 0.0
-                notify("WayVoice", tr("daemon.recording_cancelled", cfg.get("ui_language")), enabled=cfg.get("notify", True))
+                notify(tr("daemon.recording_cancelled", cfg.get("ui_language")), enabled=cfg.get("notify", True))
                 reset_notification_id()
                 return {"ok": True, "state": "idle"}
             if self.busy:
@@ -470,14 +470,14 @@ class WayVoiceDaemon:
     def _transcribe_worker(self, wav: Path) -> None:
         cfg = load_config()
         try:
-            notify("WayVoice", tr("daemon.transcribing", cfg.get("ui_language")), enabled=cfg.get("notify", True))
+            notify(tr("daemon.transcribing", cfg.get("ui_language")), enabled=cfg.get("notify", True))
             text = transcribe(wav, cfg, self._transcribe_cancel)
             self.last_text = text.strip()
             self.last_error = ""
             self.last_warning = ""
             if not text.strip():
                 self.last_warning = tr("daemon.no_speech", cfg.get("ui_language"))
-                notify("WayVoice", self.last_warning, enabled=cfg.get("notify", True))
+                notify(self.last_warning, enabled=cfg.get("notify", True))
                 return
             try:
                 # Cancel means cancel. Recognition checks the flag while it decodes, but
@@ -490,7 +490,6 @@ class WayVoiceDaemon:
                         "daemon.recognition_cancelled", cfg.get("ui_language")
                     )
                     notify(
-                        "WayVoice",
                         self.last_warning,
                         enabled=cfg.get("notify", True),
                     )
@@ -498,25 +497,25 @@ class WayVoiceDaemon:
                 result = inject(text, cfg)
                 if result.warning:
                     self.last_warning = result.warning
-                    notify("WayVoice", result.warning, enabled=cfg.get("notify", True))
+                    notify(result.warning, enabled=cfg.get("notify", True))
                 else:
-                    notify("WayVoice", tr("daemon.text_inserted", cfg.get("ui_language")), text.strip()[:160], enabled=cfg.get("notify", True))
+                    notify(tr("daemon.text_inserted", cfg.get("ui_language")), text.strip()[:160], enabled=cfg.get("notify", True))
             except InjectionError as exc:
                 self.last_error = str(exc)
-                notify("WayVoice", str(exc), enabled=cfg.get("notify", True))
+                notify(str(exc), enabled=cfg.get("notify", True))
         except TranscriptionCancelled:
             self.last_error = ""
             self.last_warning = tr("daemon.recognition_cancelled", cfg.get("ui_language"))
-            notify("WayVoice", self.last_warning, enabled=cfg.get("notify", True))
+            notify(self.last_warning, enabled=cfg.get("notify", True))
         except TranscriptionTimeout:
             timeout = int(cfg.get("transcription_timeout_sec", 90))
             self.last_error = ""
             self.last_warning = tr("daemon.recognition_timeout", cfg.get("ui_language"), seconds=timeout)
-            notify("WayVoice", self.last_warning, enabled=cfg.get("notify", True))
+            notify(self.last_warning, enabled=cfg.get("notify", True))
         except Exception as exc:
             traceback.print_exc()
             self.last_error = str(exc)
-            notify("WayVoice", str(exc), enabled=cfg.get("notify", True))
+            notify(str(exc), enabled=cfg.get("notify", True))
         finally:
             wav.unlink(missing_ok=True)
             # The result is the last thing this notification says. It stays in the
