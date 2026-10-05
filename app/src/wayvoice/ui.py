@@ -216,6 +216,10 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         # is (row, button, spinner) and is refreshed from deps.status_all().
         self._dep_rows = {}
         self._dep_installing = set()
+        #: The "Copy logs" button's work is on a thread, and the flag is what
+        #: stops a second click from starting another one.
+        self._logs_copying = False
+        self._logs_button = None
         self._dep_last_refresh = 0.0
         # Model-files row: the cache is walked off the main loop, so a refresh
         # can be in flight while the user changes the selection.
@@ -788,9 +792,6 @@ class WayVoiceWindow(Adw.ApplicationWindow):
             row[0].set_subtitle(self._clip_subtitle(message))
         self.toast.add_toast(Adw.Toast(title=self.t("toast.deps_failed"), timeout=6))
         return GLib.SOURCE_REMOVE
-
-    def _toast(self, text: str, timeout: int = 4):
-        self.toast.add_toast(Adw.Toast(title=self._clip_subtitle(text, 160), timeout=timeout))
 
     @staticmethod
     def _nearest_index(values, value):
@@ -1654,27 +1655,66 @@ class WayVoiceWindow(Adw.ApplicationWindow):
             return
         self._toast(self.t("toast.diagnostics_copied"))
 
-    def _copy_logs(self, *_args):
+    def _copy_logs(self, button=None) -> None:
         """Put the tail of the daemon's journal into the clipboard.
 
         This button used to show a toast with the journalctl command and nothing
         else, so "Open logs" opened nothing. A bug report needs the text, and the
         clipboard is where the diagnostics button already puts it.
+
+        ``journalctl`` takes as long as the journal takes - measured at the full
+        five-second timeout when it stalls - and running it inside the click handler
+        stopped the window redrawing and answering the keyboard for all of it. It goes
+        to a thread now, the same rule this file already follows for gsettings,
+        systemctl and clipboard work.
         """
-        try:
-            report = self._journal_tail()
-        except (OSError, subprocess.SubprocessError) as exc:
-            self._toast(self.t("toast.logs_failed", detail=str(exc)))
+        if self._logs_copying:
             return
-        if not report.strip():
+        self._logs_copying = True
+        self._logs_button = button
+        if button is not None:
+            button.set_sensitive(False)
+
+        def worker() -> None:
+            try:
+                report = self._journal_tail()
+            except (OSError, subprocess.SubprocessError) as exc:
+                GLib.idle_add(self._copy_logs_finished, str(exc))
+                return
+            if not report.strip():
+                GLib.idle_add(self._copy_logs_finished, None, True)
+                return
+            try:
+                injector.copy_to_clipboard(report, self.ui_lang)
+            except injector.InjectionError as exc:
+                GLib.idle_add(self._copy_logs_finished, str(exc))
+                return
+            GLib.idle_add(self._copy_logs_finished, None)
+
+        try:
+            threading.Thread(target=worker, daemon=True).start()
+        except RuntimeError as exc:
+            # No thread could be started. Nothing has begun, so nothing has to be
+            # undone - but the button must not stay greyed out, which is what happens
+            # when the flag is set before start() and never cleared.
+            self._logs_copying = False
+            self._logs_button = None
+            if button is not None:
+                button.set_sensitive(True)
+            self._toast(self.t("toast.logs_failed", detail=str(exc)))
+
+    def _copy_logs_finished(self, problem, empty: bool = False) -> bool:
+        button, self._logs_button = self._logs_button, None
+        self._logs_copying = False
+        if button is not None:
+            button.set_sensitive(True)
+        if problem is not None:
+            self._toast(self.t("toast.logs_failed", detail=problem))
+        elif empty:
             self._toast(self.t("toast.logs_empty"))
-            return
-        try:
-            injector.copy_to_clipboard(report, self.ui_lang)
-        except injector.InjectionError as exc:
-            self._toast(self.t("toast.logs_failed", detail=str(exc)))
-            return
-        self._toast(self.t("toast.logs_copied"))
+        else:
+            self._toast(self.t("toast.logs_copied"))
+        return GLib.SOURCE_REMOVE
 
     #: How much of the journal the button hands over. Enough for a bug report, small
     #: enough that the clipboard owner is not holding a megabyte of text.
@@ -1702,8 +1742,17 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         return cp.stdout or ""
 
     def _toast(self, title: str, timeout: int = 3) -> None:
+        """Show a toast.
+
+        The title is clipped: an ``Adw.Toast`` does not wrap, so a refusal that quotes
+        the manager's output stretches across the whole window. The clipping used to
+        live in a *second* ``_toast`` defined earlier in the class, which the later
+        definition silently replaced - so no caller's text was ever clipped and the
+        default timeout was 3 s instead of 4.
+        """
         if hasattr(self, "toast"):
-            self.toast.add_toast(Adw.Toast(title=title, timeout=timeout))
+            self.toast.add_toast(
+                Adw.Toast(title=self._clip_subtitle(title, 160), timeout=timeout))
 
     def _show_about(self, *_args):
         about = Adw.AboutWindow(transient_for=self, modal=True)

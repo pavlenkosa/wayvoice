@@ -16,6 +16,8 @@ the text into the clipboard.
 
 import importlib.util
 import subprocess
+import threading
+import time
 import unittest
 from unittest import mock
 
@@ -57,10 +59,20 @@ class DiagnosticsButtonTests(unittest.TestCase):
         self.window.ui_lang = "en"
         self.window.t = lambda key, **kwargs: tr(key, "en", **kwargs)
         self.window.toast = FakeToast()
+        self.window._logs_copying = False
+        self.window._logs_button = None
         self.copied = []
         patcher = mock.patch.object(
             injector, "copy_to_clipboard",
             side_effect=lambda text, language=None: self.copied.append(text),
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        # The journal is read on a thread now, so the answer comes back through
+        # GLib.idle_add. There is no main loop here, so it is run where it lands.
+        patcher = mock.patch.object(
+            ui.GLib, "idle_add",
+            side_effect=lambda callback, *args, **kwargs: callback(*args, **kwargs),
         )
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -69,6 +81,12 @@ class DiagnosticsButtonTests(unittest.TestCase):
         )
         patcher.start()
         self.addCleanup(patcher.stop)
+
+    def _wait(self):
+        """Join the worker, so the assertions see a finished run."""
+        for thread in threading.enumerate():
+            if thread is not threading.current_thread():
+                thread.join(timeout=10)
 
     def test_the_report_goes_to_a_clipboard_that_works(self):
         # The regression: the GTK3 clipboard accepts text on Wayland and never
@@ -123,6 +141,8 @@ class LogsButtonTests(unittest.TestCase):
         self.window.ui_lang = "en"
         self.window.t = lambda key, **kwargs: tr(key, "en", **kwargs)
         self.window.toast = FakeToast()
+        self.window._logs_copying = False
+        self.window._logs_button = None
         self.copied = []
         patcher = mock.patch.object(
             injector, "copy_to_clipboard",
@@ -130,6 +150,20 @@ class LogsButtonTests(unittest.TestCase):
         )
         patcher.start()
         self.addCleanup(patcher.stop)
+        # The journal is read on a thread now, so the answer comes back through
+        # GLib.idle_add. There is no main loop here, so it is run where it lands.
+        patcher = mock.patch.object(
+            ui.GLib, "idle_add",
+            side_effect=lambda callback, *args, **kwargs: callback(*args, **kwargs),
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _wait(self):
+        """Join the worker, so the assertions see a finished run."""
+        for thread in threading.enumerate():
+            if thread is not threading.current_thread():
+                thread.join(timeout=10)
 
     def _journal(self, stdout="2026-10-05 01:00:00 line\n", returncode=0, stderr=""):
         cp = subprocess.CompletedProcess(["journalctl"], returncode, stdout, stderr)
@@ -138,6 +172,7 @@ class LogsButtonTests(unittest.TestCase):
     def test_the_journal_lands_in_the_clipboard(self):
         with self._journal():
             self.window._copy_logs()
+        self._wait()
         self.assertEqual(self.copied, ["2026-10-05 01:00:00 line\n"])
         self.assertEqual(self.window.toast.titles, [tr("toast.logs_copied", "en")])
 
@@ -153,6 +188,7 @@ class LogsButtonTests(unittest.TestCase):
 
         with mock.patch.object(ui.subprocess, "run", side_effect=record):
             self.window._copy_logs()
+        self._wait()
         self.assertIn("--no-pager", seen["cmd"])
         self.assertIn("wayvoice.service", seen["cmd"])
         self.assertIs(seen["kwargs"].get("check"), False)
@@ -161,6 +197,7 @@ class LogsButtonTests(unittest.TestCase):
     def test_an_empty_journal_is_said_rather_than_copied(self):
         with self._journal(stdout="   \n"):
             self.window._copy_logs()
+        self._wait()
         self.assertEqual(self.copied, [])
         self.assertEqual(self.window.toast.titles, [tr("toast.logs_empty", "en")])
 
@@ -169,6 +206,7 @@ class LogsButtonTests(unittest.TestCase):
         # reason on stderr; a silent empty clipboard would be a dead button again.
         with self._journal(returncode=1, stderr="Unit wayvoice.service could not be found."):
             self.window._copy_logs()
+        self._wait()
         self.assertEqual(self.copied, [])
         self.assertEqual(len(self.window.toast.titles), 1)
         self.assertIn("could not be found", self.window.toast.titles[0])
@@ -176,6 +214,7 @@ class LogsButtonTests(unittest.TestCase):
     def test_a_missing_journalctl_is_reported_not_raised(self):
         with mock.patch.object(ui.subprocess, "run", side_effect=FileNotFoundError("journalctl")):
             self.window._copy_logs()
+        self._wait()
         self.assertEqual(self.copied, [])
         self.assertEqual(len(self.window.toast.titles), 1)
 
@@ -185,6 +224,115 @@ class LogsButtonTests(unittest.TestCase):
             side_effect=subprocess.TimeoutExpired("journalctl", 5),
         ):
             self.window._copy_logs()
+        self._wait()
+        self.assertEqual(len(self.window.toast.titles), 1)
+
+
+@needs_window
+class ToastClippingTests(unittest.TestCase):
+    """An ``Adw.Toast`` does not wrap, so a long title stretches across the window.
+
+    The clipping used to live in a *second* ``_toast`` defined earlier in the class,
+    which the later definition silently replaced - so nothing was ever clipped, and
+    the default timeout was 3 s instead of 4. The two definitions coexisted for a
+    while without a symptom, because a short title looks identical either way.
+    """
+
+    def setUp(self):
+        self.window = ui.WayVoiceWindow.__new__(ui.WayVoiceWindow)
+        self.window.toast = FakeToast()
+        self.window.t = lambda key, **kwargs: tr(key, "en", **kwargs)
+
+    def test_a_long_title_is_clipped(self):
+        self.window._toast("refused: " + "E: broken package " * 60)
+        (title,) = self.window.toast.titles
+        self.assertLessEqual(len(title), 200, f"{len(title)} characters in one toast")
+
+    def test_a_short_title_is_left_alone(self):
+        self.window._toast("Copied.")
+        self.assertEqual(self.window.toast.titles, ["Copied."])
+
+    def test_only_one_definition_of_toast_exists(self):
+        import ast
+
+        with open(ui.__file__, encoding="utf-8") as handle:
+            tree = ast.parse(handle.read())
+        twice = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            count = sum(1 for item in node.body
+                        if isinstance(item, ast.FunctionDef) and item.name == "_toast")
+            if count > 1:
+                twice.append(f"{node.name} x{count}")
+        self.assertEqual(twice, [], "the later definition silently replaces the earlier")
+
+
+@needs_window
+class MainLoopTests(unittest.TestCase):
+    """Nothing slow may run inside a GTK signal handler."""
+
+    def setUp(self):
+        self.window = ui.WayVoiceWindow.__new__(ui.WayVoiceWindow)
+        self.window.ui_lang = "en"
+        self.window.t = lambda key, **kwargs: tr(key, "en", **kwargs)
+        self.window.toast = FakeToast()
+        self.window._logs_copying = False
+        self.window._logs_button = None
+        patcher = mock.patch.object(
+            ui.GLib, "idle_add",
+            side_effect=lambda callback, *args, **kwargs: callback(*args, **kwargs),
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(injector, "copy_to_clipboard")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_the_journal_is_not_read_on_the_calling_thread(self):
+        # journalctl took the full five-second timeout when it stalled, inside the
+        # click handler: the window stopped redrawing and stopped answering the
+        # keyboard for all of it.
+        import threading
+
+        where = []
+        clicked_on = threading.current_thread()
+
+        def slow(*_args, **_kwargs):
+            where.append(threading.current_thread())
+            time.sleep(0.05)
+            return subprocess.CompletedProcess(["journalctl"], 0, "line\n", "")
+
+        with mock.patch.object(ui.subprocess, "run", side_effect=slow):
+            self.window._copy_logs()
+            for thread in threading.enumerate():
+                if thread is not threading.current_thread():
+                    thread.join(timeout=10)
+        self.assertTrue(where, "journalctl never ran at all")
+        for thread in where:
+            self.assertIsNot(thread, clicked_on,
+                             "journalctl ran on the thread that got the click")
+        self.assertFalse(self.window._logs_copying, "the button stayed disabled")
+
+    def test_a_second_click_does_not_start_a_second_read(self):
+        reads = []
+
+        def record(*_args, **_kwargs):
+            reads.append(1)
+            return subprocess.CompletedProcess(["journalctl"], 0, "line\n", "")
+
+        with mock.patch.object(ui.subprocess, "run", side_effect=record):
+            # Hold the flag the way a running read does.
+            self.window._logs_copying = True
+            self.window._copy_logs()
+        self.assertEqual(reads, [], "a second read started while one was in flight")
+
+    def test_a_thread_that_cannot_start_leaves_the_button_usable(self):
+        button = mock.Mock()
+        with mock.patch.object(ui.threading, "Thread", side_effect=RuntimeError("no threads")):
+            self.window._copy_logs(button)
+        self.assertFalse(self.window._logs_copying)
+        button.set_sensitive.assert_called_with(True)
         self.assertEqual(len(self.window.toast.titles), 1)
 
 
