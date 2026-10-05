@@ -72,30 +72,102 @@ def _spoken_punctuation(text: str, language: str | None = "auto") -> str:
         out = pattern.sub(repl, out)
     return out
 
+#: Tokens whose punctuation belongs to the token, not to the sentence.
+#:
+#: Splitting inside them is what produced "цена 3. 5 евро", "встреча в 12: 30",
+#: "версия 1. 2. 3", "https: //example. Com/page" and "файл report. Pdf" - that
+#: is, every dictated number, time, version, address, file name and e-mail came
+#: out broken, and dictating those is most of what the application is for.
+_INTACT = (
+    re.compile(r"\S+://\S+"),                 # https://example.com/page
+    re.compile(r"\S+@\S+\.\S+"),              # someone@example.com
+    re.compile(r"\S*[/\\]\S*\.\S+"),          # /home/u/report.pdf, src/a.txt
+    re.compile(r"[0-9][0-9.,:/-]*[0-9]"),     # 3.5, 12:30, 1.2.3, 10-20
+    # A name with an extension, but only in Latin script: "report.pdf" is one word,
+    # while "конец.начало" is two Russian words that the recognizer ran together -
+    # and fixing that is what this function is for. Requiring Latin is what tells
+    # the two apart without a list of every extension in the world.
+    re.compile(r"[A-Za-z0-9_+-]+(\.[A-Za-z0-9_+-]+)*\.[A-Za-z]{1,6}\.?"),
+)
+
+#: Extensions protected whatever the rest of the name is written in. A short list
+#: instead of "any letters", because in Russian "отчёт.pdf" is one word and
+#: "конец.начало" is two, and only a known extension tells them apart.
+_EXTENSIONS = frozenset((
+    "pdf", "txt", "md", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "csv", "tsv",
+    "json", "yaml", "yml", "toml", "ini", "conf", "log", "rtf", "odt",
+    "py", "js", "ts", "tsx", "jsx", "sh", "bash", "c", "h", "cpp", "hpp", "rs", "go",
+    "zip", "tar", "gz", "bz2", "xz", "7z", "deb", "rpm", "apk", "iso",
+    "jpg", "jpeg", "png", "gif", "svg", "webp", "bmp", "tiff",
+    "mp3", "mp4", "wav", "ogg", "flac", "mkv", "mov", "avi", "webm",
+    "html", "htm", "css", "sql", "db", "sqlite",
+))
+
+_EXTENSION_AT_END = re.compile(r"^.+\.([A-Za-z0-9]{1,6})\.?$")
+
+
+def _is_intact(token: str) -> bool:
+    if any(pattern.fullmatch(token) for pattern in _INTACT):
+        return True
+    # A name in any script, as long as the extension is one people actually use.
+    match = _EXTENSION_AT_END.match(token)
+    return bool(match) and match.group(1).lower() in _EXTENSIONS
+
+
 def _spacing(text: str) -> str:
-    # spaces before punctuation
+    # Spaces before punctuation.
     text = re.sub(r"[ \t]+([,.;:!?])", r"\1", text)
-    # exactly one space after punctuation, except before newline/end
-    text = re.sub(r"([,;:])(?=[^\s\n])", r"\1 ", text)
-    text = re.sub(r"([.!?])(?=[^\s\n])", r"\1 ", text)
+    # One space after punctuation, except before a newline or the end. Splitting
+    # runs per token rather than over the whole text, because a token is the unit
+    # that is either one word or several.
+    parts = re.split(r"(\s+)", text)
+    for index in range(0, len(parts), 2):
+        token = parts[index]
+        if not token or _is_intact(token):
+            continue
+        token = re.sub(r"([,;:])(?=\S)", r"\1 ", token)
+        token = re.sub(r"([.!?])(?=\S)", r"\1 ", token)
+        parts[index] = token
+    text = "".join(parts)
     text = re.sub(r"[ \t]*\n[ \t]*", "\n", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = re.sub(r"[ \t]{2,}", " ", text)
     return text.strip()
 
 def _capitalize_sentences(text: str) -> str:
-    chars = list(text)
+    """Capitalize the first letter of each sentence.
+
+    Runs per token for the same reason as :func:`_spacing`: inside "example.com" or
+    "report.pdf" a full stop is part of the word, and capitalizing after it turned a
+    dictated address into "example.Com" and a file name into "report.Pdf".
+    """
+    parts = re.split(r"(\s+)", text)
     capitalize_next = True
-    for i, ch in enumerate(chars):
-        if capitalize_next and ch.isalpha():
-            chars[i] = ch.upper()
-            capitalize_next = False
-        if ch in ".!?\n":
-            capitalize_next = True
-        elif not ch.isspace() and ch not in "\"'«„(":
-            if ch not in ".!?":
+    for index in range(0, len(parts), 2):
+        token = parts[index]
+        if not token:
+            continue
+        intact = _is_intact(token)
+        chars = list(token)
+        for position, ch in enumerate(chars):
+            if intact:
+                # Left alone entirely - including its first letter, so that a
+                # sentence starting with a URL does not become "Https://" - but it
+                # does consume the flag, or the word after it would be capitalized.
                 capitalize_next = False
-    return "".join(chars)
+                continue
+            if capitalize_next and ch.isalpha():
+                chars[position] = ch.upper()
+                capitalize_next = False
+            if ch in ".!?":
+                capitalize_next = True
+            elif ch not in "\"'«„(":
+                capitalize_next = False
+        parts[index] = "".join(chars)
+        # A newline ends a sentence whether or not a token follows it.
+        if index + 1 < len(parts) and "\n" in parts[index + 1]:
+            capitalize_next = True
+    return "".join(parts)
 
 def normalize(
     text: str,
