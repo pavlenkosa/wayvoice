@@ -27,6 +27,12 @@ HELPER_RETRY_INTERVAL = 60.0
 #: Where ydotool 0.1.8 puts its socket, having no honour for XDG_RUNTIME_DIR.
 LEGACY_SOCKET = "/tmp/.ydotool_socket"
 
+#: The name ydotoold itself uses inside XDG_RUNTIME_DIR - both the packaged unit
+#: and a distribution's, which is why this has to be looked for as well. Checked
+#: against the vendored sources: Daemon/ydotoold.c falls back to /tmp only when
+#: XDG_RUNTIME_DIR is unset, and Client/ydotool.c reads YDG_RUNTIME_DIR.
+DEFAULT_SOCKET_NAME = ".ydotool_socket"
+
 
 class InjectionError(RuntimeError):
     pass
@@ -164,15 +170,22 @@ def ydotool_command() -> str | None:
 def ydotool_socket() -> Path | None:
     """Where the helper's socket is, or ``None`` when there is none anywhere.
 
+    Three places, in the order the client itself would find them:
+
+    1. the socket the packaged unit creates, ``$XDG_RUNTIME_DIR/wayvoice-ydotool.sock``;
+    2. ``$XDG_RUNTIME_DIR/.ydotool_socket`` - where a distribution's own ydotoold
+       listens. Skipping this one is how a system that already runs ydotoold ended
+       up with a second one started here, competing for the same ``/dev/uinput``;
+    3. ``/tmp/.ydotool_socket``, which is the same path the daemon falls back to
+       when ``XDG_RUNTIME_DIR`` is not set at all.
+
     A missing socket and a socket nobody answers on need different things - a start
     and a restart - and look the same until you connect.
     """
     runtime = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}")
-    custom = runtime / "wayvoice-ydotool.sock"
-    if custom.exists():
-        return custom
-    # ydotool 0.1.8 hardcodes this path instead of honouring XDG_RUNTIME_DIR, so
-    # the literal is a fallback for that version and not an installation prefix.
+    for candidate in (runtime / "wayvoice-ydotool.sock", runtime / DEFAULT_SOCKET_NAME):
+        if candidate.exists():
+            return candidate
     legacy = Path(LEGACY_SOCKET)
     if legacy.exists():
         return legacy
@@ -256,7 +269,6 @@ def paste_with_ydotool(mode: str, language: str | None = None) -> tuple[bool, st
         detail = describe_missing("ydotool", language)
         return False, tr("injector.ydotool_missing", language, detail=detail)
 
-    env = _ydotool_env()
     if mode == "terminal":
         seq = ["29:1", "42:1", "47:1", "47:0", "42:0", "29:0"]
     else:
@@ -265,7 +277,14 @@ def paste_with_ydotool(mode: str, language: str | None = None) -> tuple[bool, st
     # Raise the helper before typing into somebody's document. Typing into the void
     # fails with a message about a socket, which says nothing about the one command
     # that would have fixed it.
+    #
+    # The environment is read *after* this, not before. YDOTOOL_SOCKET is only set
+    # when a socket already exists, so building the environment first meant the very
+    # first dictation after an install had no YDOTOOL_SOCKET at all - and the client
+    # then went looking in $XDG_RUNTIME_DIR/.ydotool_socket, which is not where the
+    # packaged unit listens. The symptom was "works from the second dictation on".
     started = ensure_helper_running()
+    env = _ydotool_env()
 
     time.sleep(0.08)
     try:
