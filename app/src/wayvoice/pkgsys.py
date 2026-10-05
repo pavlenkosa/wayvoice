@@ -23,19 +23,84 @@ a command that is bound to fail.
 
 from __future__ import annotations
 
+import fcntl
 import os
 import shutil
 import signal
 import subprocess
+import sys
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from . import deps
 from .i18n import tr
+from .protocol import runtime_dir
 
 # Longest tail of the package manager output that is handed back to the caller.
 _OUTPUT_TAIL_LINES = 12
 _OUTPUT_MAX_CHARS = 900
 
+#: Serialises installs across processes - the settings window and the command line
+#: can both be asked to install, and they are separate processes.
+#:
+#: The window guards only against starting the *same* dependency twice, so clicking
+#: Install on two different missing dependencies ran two managers at once. The loser
+#: fails with "Unable to acquire dpkg frontend lock", one dependency stays missing,
+#: and the message says nothing about the other install that is still going.
+#:
+#: ``flock`` rather than a lock file the callers have to remember: it is released when
+#: the process dies, so a crashed install cannot wedge the next one.
+_INSTALL_LOCK_NAME = "wayvoice-pkgsys.lock"
+
+#: Seconds to wait for another install to finish before giving up on the lock.
+_INSTALL_LOCK_WAIT = 2.0
+
+
+def _install_lock_path() -> Path:
+    return runtime_dir() / _INSTALL_LOCK_NAME
+
+
+@contextmanager
+def _install_lock(wait: float = _INSTALL_LOCK_WAIT):
+    """Hold the cross-process install lock; yield whether we are the one holding it.
+
+    ``flock`` rather than a lock file the callers have to remember about: it is
+    released when the process dies, so a crashed or killed install cannot wedge the
+    next one.
+
+    A runtime directory that cannot be written to yields ``True`` - going ahead
+    without the serialisation is better than refusing to install, and the reason goes
+    to the journal.
+    """
+    try:
+        path = _install_lock_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handle = open(path, "a+", encoding="utf-8")  # noqa: SIM115 - released below
+    except OSError as exc:
+        print(f"WayVoice: no install lock at {_install_lock_path()}: {exc}",
+              file=sys.stderr)
+        yield True
+        return
+    try:
+        deadline = time.monotonic() + wait
+        while True:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    yield False
+                    return
+                time.sleep(0.1)
+        yield True
+    finally:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        handle.close()
 
 @dataclass(frozen=True)
 class Manager:
@@ -274,10 +339,9 @@ def install_packages(
     This function is never called implicitly; it must be triggered by an
     explicit user request.
     """
-    argv = dry_run_command(packages)
-    if argv is None:
-        return False, tr("pkgsys.no_packages", language)
     if not packages:
+        return False, tr("pkgsys.no_packages", language)
+    if dry_run_command(packages) is None:
         return False, tr("pkgsys.no_packages", language)
 
     # One package the repositories do not have must not cancel the rest. Asked for
@@ -296,8 +360,6 @@ def install_packages(
     wanted = [name for name in packages if name not in skipped]
     if not wanted:
         return False, tr("pkgsys.package_unavailable", language, package=skipped[0])
-    argv = dry_run_command(wanted)
-    packages = wanted
 
     elevated: list[str] = []
     if requires_privilege():
@@ -306,17 +368,46 @@ def install_packages(
             return False, tr("pkgsys.need_root", language)
         elevated = [pkexec]
 
-    command = [*elevated, *argv]
+    command = [*elevated, *dry_run_command(wanted)]
+    with _install_lock() as ours:
+        if not ours:
+            return False, tr("pkgsys.install_busy", language)
+        ok, message = _run_manager(command, wanted, timeout, language)
+    if ok and skipped:
+        # The install worked; say plainly that something in the request did not, or
+        # the row in the window stays missing and the user has no idea why.
+        message += " " + tr("pkgsys.package_skipped", language,
+                             packages=", ".join(skipped))
+    return ok, message
+
+
+def _run_manager(
+    command: list[str],
+    packages: list[str],
+    timeout: float,
+    language: str | None,
+) -> tuple[bool, str]:
+    """Run one package manager and report what it said."""
     try:
         proc = subprocess.Popen(
             command,
+            # Nothing may read from the user's terminal: a maintainer script that asks
+            # a debconf question would otherwise wait for an answer nobody can type,
+            # which is a wait for the full timeout and then a killed dpkg.
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            env=_manager_env(),
             # Its own session, so the timeout below can take down the whole tree.
             # Killing only pkexec leaves apt-get holding /var/lib/dpkg/lock, and the
             # next attempt fails with "Could not get lock", which says nothing about
             # the timeout that caused it.
+            #
+            # The session also means a Ctrl-C in `wayvoice deps --install` never
+            # reaches the manager: there is no handler for KeyboardInterrupt, so
+            # Python unwinds while apt-get carries on holding the dpkg lock. The
+            # handler below kills the tree on the way out.
             start_new_session=True,
         )
     except OSError as exc:
@@ -338,13 +429,14 @@ def install_packages(
             seconds=_seconds(timeout),
             detail=detail,
         )
-    ok, message = _result(proc.returncode, packages, stdout, stderr, language)
-    if ok and skipped:
-        # The install worked; say plainly that something in the request did not, or
-        # the row in the window stays missing and the user has no idea why.
-        message += " " + tr("pkgsys.package_skipped", language,
-                             packages=", ".join(skipped))
-    return ok, message
+    except BaseException:
+        # Includes KeyboardInterrupt and SystemExit. The manager is in a session of
+        # its own and would keep running, holding the dpkg lock against every later
+        # attempt, while this process leaves with a traceback.
+        _kill_tree(proc)
+        raise
+    return _result(proc.returncode, packages, stdout, stderr, language)
+
 
 
 def _seconds(timeout: float) -> int:
@@ -352,21 +444,62 @@ def _seconds(timeout: float) -> int:
     return max(1, int(round(float(timeout))))
 
 
+def _manager_env() -> dict[str, str]:
+    """The environment a package manager is started with.
+
+    Two things are forced rather than inherited:
+
+    * ``DEBIAN_FRONTEND=noninteractive``, because without it a maintainer script
+      that asks a debconf question waits for an answer nobody can type - in a
+      service that is a wait for the full timeout followed by a killed dpkg.
+    * ``LC_ALL=C``, because apt translates its output. The availability check
+      already does this; the output shown to the user did not, so a Russian apt
+      answered in Russian inside an English sentence.
+    """
+    env = dict(os.environ)
+    env["DEBIAN_FRONTEND"] = "noninteractive"
+    env["LC_ALL"] = "C"
+    env["LANG"] = "C"
+    return env
+
+
+def _group_alive(pgid: int) -> bool:
+    """Whether any process is left in the group."""
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        # EPERM means it exists and belongs to somebody else; that is not "gone".
+        return True
+    return True
+
+
 def _kill_tree(proc) -> None:
-    """Terminate a package manager and everything it started."""
+    """Terminate a package manager and everything it started.
+
+    Escalation follows the *group*, not the process it was given. Waiting for the
+    direct child to exit and then returning meant a grandchild that ignored SIGTERM
+    - dpkg, which does - never saw the SIGKILL, and it survived holding the dpkg
+    lock: exactly the "Could not get lock" this function exists to prevent.
+    """
     for sig in (signal.SIGTERM, signal.SIGKILL):
         try:
             os.killpg(proc.pid, sig)
         except OSError:
             try:
-                proc.kill() if sig == signal.SIGKILL else proc.terminate()
+                proc.kill() if sig is signal.SIGKILL else proc.terminate()
             except OSError:
                 return
-        try:
-            proc.wait(timeout=3.0)
-            return
-        except subprocess.TimeoutExpired:
-            continue
+        deadline = time.monotonic() + 3.0
+        while _group_alive(proc.pid) and time.monotonic() < deadline:
+            time.sleep(0.1)
+        if not _group_alive(proc.pid):
+            break
+    try:
+        proc.wait(timeout=3.0)
+    except subprocess.TimeoutExpired:
+        pass
 
 
 def _result(
