@@ -53,7 +53,7 @@ If you are looking for a Linux alternative to built-in voice typing on other des
 Download the latest `.deb` package from [GitHub Releases](https://github.com/stepan-pavlenko/wayvoice/releases), then install it with APT:
 
 ```bash
-sudo apt install ./wayvoice_*_all.deb
+sudo apt install ./wayvoice_*_amd64.deb
 ```
 
 Launch **WayVoice** from the application grid, or run:

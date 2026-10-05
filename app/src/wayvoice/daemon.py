@@ -392,7 +392,19 @@ class WayVoiceDaemon:
                 }
             if self.recorder.recording:
                 return {"ok": True, "state": "recording"}
+            # Read the limit before the microphone opens AND before engine/model preflight.
+            # A hand-edited config can hold anything, and this used to be parsed *after*
+            # the recorder was running: the ValueError arrived with pw-record already
+            # holding the device and no timer to close it, so the recording continued
+            # until the next keypress - which then transcribed minutes of room noise.
+            # This validation must happen before any engine/model readiness check, so
+            # a malformed config is reported even when the engine is not prepared.
             cfg = load_config()
+            try:
+                max_seconds = _recording_limit(cfg)
+            except ValueError as exc:
+                self.last_error = str(exc)
+                return {"ok": False, "error": str(exc)}
             est = engine_status(cfg)
             if est.get("state") != "ready":
                 engine = engine_from_config(cfg)
@@ -415,16 +427,6 @@ class WayVoiceDaemon:
                         model=model["model"],
                     ),
                 }
-            # Read the limit before the microphone opens. A hand-edited config can
-            # hold anything, and this used to be parsed *after* the recorder was
-            # running: the ValueError arrived with pw-record already holding the
-            # device and no timer to close it, so the recording continued until the
-            # next keypress - which then transcribed minutes of room noise.
-            try:
-                max_seconds = _recording_limit(cfg)
-            except ValueError as exc:
-                self.last_error = str(exc)
-                return {"ok": False, "error": str(exc)}
             try:
                 self.last_error = ""
                 self.last_warning = ""

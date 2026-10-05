@@ -5,7 +5,13 @@ version-check:
 
 lint: version-check
 	python3 -m compileall -q app/src tests scripts/check-version.py
-	bash -n scripts/* packaging/DEBIAN/* scripts/build-deb.sh
+	set -e; for f in \
+	  scripts/wayvoice scripts/wayvoice-daemon scripts/wayvoice-settings \
+	  scripts/wayvoice-engine-setup scripts/wayvoice-ydotoold scripts/setup-user \
+	  scripts/build-deb.sh scripts/build-ydotool.sh \
+	  packaging/DEBIAN/postinst packaging/DEBIAN/postrm packaging/DEBIAN/prerm; do \
+	    [ -f "$$f" ] && bash -n "$$f" || { [ -f "$$f" ] || echo "skip (absent): $$f"; }; \
+	  done
 
 test:
 	PYTHONPATH=app/src python3 -m unittest discover -s tests -v

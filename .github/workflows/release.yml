@@ -193,6 +193,10 @@ jobs:
           test -n "$DEB"
           PACKAGE_VERSION="$(dpkg-deb -f "$DEB" Version)"
           test "$PACKAGE_VERSION" = "${{ steps.version.outputs.version }}"
+          # Bundled native binaries mean the package must advertise the build
+          # host's architecture rather than 'all'.
+          PACKAGE_ARCH="$(dpkg-deb -f "$DEB" Architecture)"
+          test "$PACKAGE_ARCH" = "$(dpkg --print-architecture)"
           dpkg-deb --info "$DEB"
           dpkg-deb --contents "$DEB" > /dev/null
 

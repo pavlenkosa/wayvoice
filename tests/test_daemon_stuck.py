@@ -30,6 +30,9 @@ from wayvoice import audio, daemon as daemon_mod
 from wayvoice.audio import AudioRecorder
 from wayvoice.daemon import WayVoiceDaemon
 
+# Import support module for test isolation
+from tests import support
+
 
 class DaemonCase(unittest.TestCase):
     """Base that owns the patches, so a test body is only about the daemon."""
@@ -192,6 +195,10 @@ class RecordingLimitTests(DaemonCase):
     """A limit that cannot be read is refused before the microphone opens."""
 
     def setUp(self):
+        # Isolate environment to prevent interference with real config
+        support.isolate_environment(self)
+        support.isolate_engine(self)
+        
         patcher = mock.patch("wayvoice.daemon.load_config", return_value={
             **CONFIG, "max_recording_sec": "two minutes"})
         patcher.start()
@@ -236,6 +243,9 @@ class RecordingLimitTests(DaemonCase):
         self.assertTrue(stop.called, "the recording was never closed")
 
     def test_a_good_value_still_works(self):
+        support.isolate_environment(self)
+        support.isolate_engine(self)
+        
         patcher = mock.patch("wayvoice.daemon.load_config", return_value=dict(CONFIG))
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -246,6 +256,28 @@ class RecordingLimitTests(DaemonCase):
         self.addCleanup(d._cancel_record_timer)
         self.assertIsNotNone(d._record_timer)
         recorder.start.assert_called_once()
+
+    def test_config_validation_occurs_before_engine_preflight(self):
+        """Regression test: config validation must occur before engine preflight."""
+        # Patch engine_status to return "missing" state to simulate engine not ready
+        # but keep the malformed max_recording_sec config
+        with mock.patch("wayvoice.daemon.engine_status", return_value={"state": "missing", "message": "Faster-Whisper is not prepared"}):
+            recorder = mock.Mock(recording=False)
+            d = _daemon(self, recorder)
+            
+            # This should fail with config error, not engine error
+            reply = d.start_recording()
+            
+            # Should fail with config validation error (not engine error)
+            self.assertFalse(reply["ok"])
+            self.assertIn("max_recording_sec", str(reply.get("error") or ""))
+            
+            # The recorder.start should never be called
+            self.assertFalse(recorder.start.called, "recorder.start was called despite config error")
+            
+            # Engine preparation should not be triggered
+            # We check this by verifying _prepare_engine was not called
+            self.assertFalse(d._prepare_engine.called, "_prepare_engine was called despite config error")
 
 
 class StaleRecordingSweeperTests(DaemonCase):

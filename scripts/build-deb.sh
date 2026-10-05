@@ -5,7 +5,13 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="$(PYTHONPATH="$ROOT/app/src" python3 -c 'from wayvoice import __version__; print(__version__)')"
 PKG="$ROOT/build/pkg"
 DIST="$ROOT/dist"
-OUT="$DIST/wayvoice_${VERSION}_all.deb"
+# The package bundles natively compiled binaries (the ydotool helper), so it can
+# never be Architecture: all: ELF objects only run on the architecture they were
+# built for. The build host's dpkg architecture is what the compiler targets
+# here, so it is what the control file and the artifact name advertise.
+DEB_ARCH="$(dpkg --print-architecture)"
+OUT_NAME="wayvoice_${VERSION}_${DEB_ARCH}.deb"
+OUT="$DIST/$OUT_NAME"
 
 rm -rf "$PKG"
 mkdir -p \
@@ -68,7 +74,7 @@ Package: wayvoice
 Version: $VERSION
 Section: utils
 Priority: optional
-Architecture: all
+Architecture: ${DEB_ARCH}
 Maintainer: WayVoice Project <noreply@localhost>
 License: AGPL-3.0-or-later
 Depends: python3 (>= 3.11), python3-venv, python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1, libadwaita-1-0, pipewire-bin, wl-clipboard, libnotify-bin
@@ -91,5 +97,11 @@ find "$PKG/usr/lib/wayvoice/app" -type d -name __pycache__ -prune -exec rm -rf {
 (cd "$PKG" && find usr -type f -print0 | sort -z | xargs -0 -r md5sum) > "$PKG/DEBIAN/md5sums"
 
 dpkg-deb --build --root-owner-group "$PKG" "$OUT"
-sha256sum "$OUT" > "$OUT.sha256"
+# The checksum file is meant for `sha256sum -c` inside dist/, so it must name
+# the artifact by its basename; an absolute path would pin the file to this
+# machine's directory layout and break verification everywhere else.
+(
+    cd "$DIST"
+    sha256sum "$OUT_NAME" > "$OUT_NAME.sha256"
+)
 echo "$OUT"

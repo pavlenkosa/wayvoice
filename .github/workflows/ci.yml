@@ -76,6 +76,10 @@ jobs:
           PACKAGE_VERSION="$(dpkg-deb -f dist/*.deb Version)"
           PROJECT_VERSION="$(python scripts/check-version.py)"
           test "$PACKAGE_VERSION" = "$PROJECT_VERSION"
+          # The package bundles natively compiled binaries, so it advertises the
+          # build host's architecture rather than 'all'.
+          PACKAGE_ARCH="$(dpkg-deb -f dist/*.deb Architecture)"
+          test "$PACKAGE_ARCH" = "$(dpkg --print-architecture)"
 
       - name: Upload Debian package
         uses: actions/upload-artifact@v4

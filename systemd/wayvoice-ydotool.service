@@ -2,6 +2,12 @@
 Description=WayVoice ydotool virtual keyboard
 After=graphical-session.target
 PartOf=graphical-session.target
+# Prevent restarting the ydotool wrapper too frequently, which is a fallback
+# when the package was built without a compiler. The wrapper exits 78 (EX_CONFIG)
+# when there is nothing to exec, which is not restarted. Other failures are
+# limited to 5 starts in 60 seconds.
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -28,8 +34,6 @@ ExecStart=/bin/sh -c 'exec "$(command -v ydotoold || command -v wayvoice-ydotool
 Restart=on-failure
 RestartPreventExitStatus=78
 RestartSec=2
-StartLimitIntervalSec=60
-StartLimitBurst=5
 
 [Install]
 WantedBy=default.target

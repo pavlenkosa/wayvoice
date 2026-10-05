@@ -38,6 +38,22 @@ def setting(name: str) -> list[str]:
     return [part.strip() for part in match.group(1).split()] if match else []
 
 
+def _section_of(name: str) -> str:
+    """The section the directive lives in, or "" when it is absent.
+
+    Parsing is line-based because the unit files here have no mid-line section
+    markers: a directive belongs to the section header most recently seen above it.
+    """
+    section = ""
+    for line in unit_text().splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            section = stripped[1:-1]
+        elif re.match(rf"{re.escape(name)}=", stripped):
+            return section
+    return ""
+
+
 class WrapperWithoutTheBundledBinaryTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -72,8 +88,16 @@ class WrapperWithoutTheBundledBinaryTests(unittest.TestCase):
         self.assertEqual(setting("Restart"), ["on-failure"])
 
     def test_a_start_limit_bounds_the_remaining_cases(self):
-        self.assertTrue(setting("StartLimitBurst"))
-        self.assertTrue(setting("StartLimitIntervalSec"))
+        # systemd only reads StartLimit* from [Unit]; the same keys in [Service] are
+        # unknown keys and are silently ignored (verified with systemd-analyze verify
+        # and systemctl show on systemd 257: the effective interval fell back to 10 s).
+        section = _section_of("StartLimitIntervalSec")
+        self.assertEqual(section, "Unit",
+                         "StartLimitIntervalSec outside [Unit] is ignored by systemd")
+        self.assertEqual(_section_of("StartLimitBurst"), "Unit",
+                         "StartLimitBurst outside [Unit] is ignored by systemd")
+        self.assertEqual(setting("StartLimitIntervalSec"), ["60"])
+        self.assertEqual(setting("StartLimitBurst"), ["5"])
 
 
 class ConditionTests(unittest.TestCase):

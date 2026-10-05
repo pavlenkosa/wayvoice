@@ -11,3 +11,6 @@ dist/
 # flatpak-builder working directories (the manifest itself is tracked)
 build-dir/
 .flatpak-builder/
+/docs
+/scripts/opencode*
+PROFILE_CONTENTS.txt
