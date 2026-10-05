@@ -16,7 +16,7 @@ from pathlib import Path
 
 from . import __version__
 from .audio import AudioRecorder
-from .config import config_error, load_config
+from .config import DEFAULTS as _CONFIG_DEFAULTS, config_error, load_config
 from .engine import (
     DEFAULT_ENGINE,
     TranscriptionCancelled,
@@ -71,6 +71,27 @@ def _close(conn: socket.socket) -> None:
         conn.close()
     except OSError:
         pass
+
+
+def _recording_limit(cfg: dict[str, Any]) -> int:
+    """How many seconds one recording may last, or ``ValueError``.
+
+    The value comes out of a JSON file a person can edit, and the two places that
+    read it are the line that opens the microphone and a timer thread. A
+    ``ValueError`` from ``int()`` in the second one kills the timer, so the limit
+    never fires; in the first it arrives with the recorder already running. Both
+    want the same thing - a number, or a refusal that names the setting.
+    """
+    raw = cfg.get("max_recording_sec", _CONFIG_DEFAULTS["max_recording_sec"])
+    try:
+        seconds = int(raw)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"max_recording_sec must be a number of seconds, not {raw!r}"
+        ) from None
+    # The floor is here rather than at the two call sites, so the warning the user
+    # is shown and the timer that is armed cannot disagree about the limit.
+    return max(5, seconds)
 
 
 def _sweep_stale_recordings(max_age: float = 3600.0) -> int:
@@ -329,7 +350,14 @@ class WayVoiceDaemon:
             if not self.recorder.recording:
                 return
             cfg = load_config()
-            seconds = int(cfg.get("max_recording_sec", 120))
+            try:
+                seconds = _recording_limit(cfg)
+            except ValueError:
+                # The start path refuses a limit it cannot read, so by the time this
+                # timer fires the value has only just become bad. Falling back to the
+                # default is the point: an exception here would kill the timer thread
+                # and the recording would never be closed at all.
+                seconds = max(5, int(_CONFIG_DEFAULTS["max_recording_sec"]))
             self.last_warning = tr("daemon.recording_limit", cfg.get("ui_language"), seconds=seconds)
         notify(self.last_warning, enabled=cfg.get("notify", True))
         self.stop_recording()
@@ -366,6 +394,16 @@ class WayVoiceDaemon:
                         model=model["model"],
                     ),
                 }
+            # Read the limit before the microphone opens. A hand-edited config can
+            # hold anything, and this used to be parsed *after* the recorder was
+            # running: the ValueError arrived with pw-record already holding the
+            # device and no timer to close it, so the recording continued until the
+            # next keypress - which then transcribed minutes of room noise.
+            try:
+                max_seconds = _recording_limit(cfg)
+            except ValueError as exc:
+                self.last_error = str(exc)
+                return {"ok": False, "error": str(exc)}
             try:
                 self.last_error = ""
                 self.last_warning = ""
@@ -373,7 +411,6 @@ class WayVoiceDaemon:
                 self.recorder.start()
                 self._record_started = time.monotonic()
                 self._cancel_record_timer()
-                max_seconds = max(5, int(cfg.get("max_recording_sec", 120)))
                 self._record_timer = threading.Timer(max_seconds, self._auto_stop_recording)
                 self._record_timer.daemon = True
                 self._record_timer.start()
@@ -517,15 +554,25 @@ class WayVoiceDaemon:
             self.last_error = str(exc)
             notify(str(exc), enabled=cfg.get("notify", True))
         finally:
-            wav.unlink(missing_ok=True)
-            # The result is the last thing this notification says. It stays in the
-            # history, and the next dictation starts a new entry instead of
-            # overwriting a transcript the user may still be reading.
-            reset_notification_id()
+            # The state reset comes first and the unlink cannot raise into it.
+            # ``missing_ok=True`` covers exactly one exception, and this used to be
+            # the other way round: a PermissionError here escaped the finally, so
+            # ``busy`` stayed set and the daemon refused every hot-key press until
+            # somebody restarted it - after the text had already been delivered.
             with self._lock:
                 self.busy = False
                 self._busy_started = 0.0
                 self._transcribe_cancel.clear()
+            # The result is the last thing this notification says. It stays in the
+            # history, and the next dictation starts a new entry instead of
+            # overwriting a transcript the user may still be reading.
+            reset_notification_id()
+            try:
+                wav.unlink(missing_ok=True)
+            except OSError as exc:
+                # A leftover recording is swept at the next start; it is not worth
+                # turning into an error state after the text is already inserted.
+                print(f"WayVoice: could not remove {wav}: {exc}", file=sys.stderr)
 
     def dispatch(self, command: str) -> dict:
         command = command.strip().lower()
@@ -778,25 +825,48 @@ class WayVoiceDaemon:
                         pass
                     _close(conn)
         finally:
-            self._cancel_record_timer()
-            # Leaving a recording behind is not a cleanup detail: pw-record keeps the
-            # microphone open and keeps writing to /tmp, so a daemon that exits
-            # mid-dictation holds the device until something kills that process.
-            try:
-                self.recorder.cancel()
-            except Exception as exc:  # never let this stop the shutdown
-                print(f"WayVoice: could not stop the recorder: {exc}", file=sys.stderr)
-            self._transcribe_cancel.set()
-            # A download that outlived the daemon would keep fetching a file nobody is
-            # waiting for, in a session that is going away.
-            self._prepare_cancel.set()
-            # Let the command worker finish what it is holding and close whatever is
-            # still queued: those clients would otherwise wait for a reply from a daemon
-            # that is gone.
+            self._stop_work()
+            self._drain_commands(commands, worker, server, path)
+
+    def _stop_work(self) -> None:
+        """Let go of everything the daemon is holding, on the way out.
+
+        The recognizer is told to stop *first*. It used to be told last, after the
+        recorder had been cancelled - and cancelling deletes the file that
+        ``stop_to_wav()`` handed to the transcription thread, so every ``quit`` or
+        SIGTERM during a dictation deleted the audio out from under the engine and
+        produced a ``FileNotFoundError`` where the user should have seen a cancelled
+        recognition.
+        """
+        self._cancel_record_timer()
+        self._transcribe_cancel.set()
+        # A download that outlived the daemon would keep fetching a file nobody is
+        # waiting for, in a session that is going away.
+        self._prepare_cancel.set()
+        # Leaving a recording behind is not a cleanup detail: pw-record keeps the
+        # microphone open and keeps writing to /tmp, so a daemon that exits
+        # mid-dictation holds the device until something kills that process.
+        try:
+            self.recorder.cancel()
+        except Exception as exc:  # never let this stop the shutdown
+            print(f"WayVoice: could not stop the recorder: {exc}", file=sys.stderr)
+
+    def _drain_commands(self, commands: "queue.Queue", worker: threading.Thread,
+                        server: socket.socket, path: Path) -> None:
+        """Close the socket after the command worker, and never because of the queue.
+
+        ``put_nowait(None)`` is the one line here that can fail: the enqueue path
+        handles a full queue explicitly, and the shutdown path did not. A full queue
+        therefore raised out of the ``finally``, leaving the socket file behind and
+        the queued clients without a reply.
+        """
+        try:
             commands.put_nowait(None)
-            worker.join(timeout=COMMAND_DRAIN_TIMEOUT)
-            server.close()
-            path.unlink(missing_ok=True)
+        except queue.Full:
+            pass
+        worker.join(timeout=COMMAND_DRAIN_TIMEOUT)
+        server.close()
+        path.unlink(missing_ok=True)
 
 
 def main() -> None:

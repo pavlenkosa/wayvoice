@@ -74,12 +74,15 @@ class AudioRecorder:
         raise RuntimeError(err or "Не удалось открыть микрофон через PipeWire.")
 
     def cancel(self) -> None:
+        """Stop the recorder and remove the recording nobody ever took.
+
+        A file that ``stop_to_wav()`` has already handed out is *not* removed here.
+        It belongs to the transcription thread, and this runs first on the way out -
+        so deleting it turned every quit or SIGTERM during a dictation into a
+        ``FileNotFoundError`` inside the recognizer. If that thread never runs, the
+        recording is swept at the next start.
+        """
         proc, path = self._proc, self._path
-        # A recording handed out by stop_to_wav() is still ours until the caller
-        # deletes it. The transcription thread unlinks it in a finally, and if this
-        # daemon dies first nothing else ever would; keeping the path lets the
-        # shutdown path clean it up.
-        finished = self._finished
         self._proc = None
         self._path = None
         self._finished = None
@@ -98,8 +101,6 @@ class AudioRecorder:
                     pass
         if path:
             path.unlink(missing_ok=True)
-        if finished:
-            finished.unlink(missing_ok=True)
 
     def stop_to_wav(self) -> Path:
         proc, path = self._proc, self._path
