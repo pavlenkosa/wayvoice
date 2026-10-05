@@ -343,6 +343,26 @@ def size_of(model_id: str, root: str | os.PathLike[str] | None = None) -> int:
     return sum(size for _, size in _real_files(snapshot))
 
 
+def _snapshot_links(snapshot: Path) -> Iterable[Path]:
+    """Every file inside one snapshot, including the ones in subdirectories.
+
+    A snapshot is not always a flat list of links: a repository with an ``onnx/`` or a
+    ``subfolder/`` keeps real subdirectories inside ``snapshots/<revision>/``, and those
+    are files the model needs like any other. Reading only the top level - which is
+    what ``iterdir()`` gives - made a blob referenced from one of those subdirectories
+    look unreferenced, and deleting it left that model with a dangling link.
+
+    Symlinked directories are not followed, so a snapshot cannot send the walk into a
+    loop or out of the cache.
+    """
+    try:
+        for base, _dirs, files in os.walk(snapshot, followlinks=False):
+            for name in files:
+                yield Path(base) / name
+    except OSError:
+        return
+
+
 def referenced_blobs(model_id: str, root: str | os.PathLike[str] | None = None) -> set[Path]:
     """Blobs the snapshots of one catalogue entry point at.
 
@@ -355,7 +375,7 @@ def referenced_blobs(model_id: str, root: str | os.PathLike[str] | None = None) 
         return set()
     blobs: set[Path] = set()
     for snapshot in _iter_snapshot_dirs(path):
-        for entry in snapshot.iterdir() if snapshot.is_dir() else ():
+        for entry in _snapshot_links(snapshot):
             try:
                 if not entry.is_symlink() and not entry.is_file():
                     continue
@@ -388,7 +408,7 @@ def _other_referenced_blobs(hub: Path, keep: Path | None) -> set[Path]:
         except OSError:
             continue
         for snapshot in snapshots:
-            for item in snapshot.iterdir():
+            for item in _snapshot_links(snapshot):
                 try:
                     if not item.is_symlink() and not item.is_file():
                         continue
@@ -422,8 +442,15 @@ def _prune_repository(path: Path, needed: set[Path]) -> None:
     downloaded it and a plain ``rmtree`` would leave another model with dangling links.
 
     The directory is emptied rather than deleted - revisions, refs and unreferenced blobs
-    go, the blobs in ``needed`` stay - and a directory left completely empty is removed.
-    Anything left behind is a deliberate outcome, not a cleanup that failed.
+    go, the blobs in ``needed`` stay where they are, because another repository's
+    snapshot links to them *by that path* - and a directory left completely empty is
+    removed. Anything left behind is a deliberate outcome, not a cleanup that failed.
+
+    The keep test is per *file*, not per entry of ``blobs/``: a blob lives at
+    ``blobs/<2 hex>/<name>``, so the entries of ``blobs/`` are the two-hex directories.
+    Comparing those against the blob paths - which is what this used to do - never
+    matched, and the branch that exists to protect another model's files deleted the
+    very files it was asked to keep.
     """
     for name in ("snapshots", "refs", "trees"):
         target = path / name
@@ -434,22 +461,33 @@ def _prune_repository(path: Path, needed: set[Path]) -> None:
                 pass
     blobs = path / "blobs"
     if blobs.is_dir():
-        try:
-            entries = sorted(blobs.iterdir())
-        except OSError:
-            entries = []
-        for entry in entries:
-            base = Path(os.path.realpath(entry)) if entry.is_symlink() else entry
-            if base in needed:
-                continue
-            for victim in (entry, *_sidecars(entry)):
-                try:
-                    if victim.is_dir() and not victim.is_symlink():
-                        shutil.rmtree(victim)
-                    else:
-                        victim.unlink()
-                except OSError:
+        # Bottom-up, so a directory can be removed once it is empty and nothing kept is
+        # inside it.
+        for base, dirs, files in os.walk(blobs, topdown=False, followlinks=False):
+            here = Path(base)
+            for name in files:
+                victim = here / name
+                base_path = Path(os.path.realpath(victim))
+                if base_path in needed:
                     continue
+                for doomed in (victim, *_sidecars(base_path)):
+                    try:
+                        doomed.unlink()
+                    except OSError:
+                        continue
+            for name in dirs:
+                victim = here / name
+                if victim.is_symlink():
+                    # A link to a directory is never one of the kept blobs.
+                    try:
+                        victim.unlink()
+                    except OSError:
+                        pass
+            if here != blobs:
+                try:
+                    here.rmdir()
+                except OSError:
+                    pass
         try:
             blobs.rmdir()
         except OSError:
@@ -458,7 +496,7 @@ def _prune_repository(path: Path, needed: set[Path]) -> None:
         # Whatever is left apart from the blob directory is not part of a usable cache
         # entry any more. ``blobs`` is skipped on purpose: it still holds the shared
         # blobs another model links to, and sweeping it here would create exactly the
-        # dangling symlink this whole dance exists to avoid.
+        # dangling link this whole dance exists to avoid.
         for entry in path.iterdir():
             if entry.name == "blobs" and entry.is_dir():
                 continue
@@ -570,6 +608,13 @@ def delete(
             "message_key": "store.nothing_to_delete",
         }
 
+    # Both sides of every comparison below have to be the same kind of path. ``path``
+    # used to come straight from the configured cache root while ``hub`` was resolved,
+    # so with a symlink anywhere on the way - ``HF_HUB_CACHE=~/models-hf`` pointing at
+    # another disk, ``~/.cache`` a link - ``keep=path`` matched no repository at all,
+    # our own model counted as "another one", and every number in the answer was wrong:
+    # ``freed_bytes`` was 0 for a deletion that freed everything.
+    path = Path(os.path.realpath(path))
     own = referenced_blobs(value, root)
     hub = hub_root(root).resolve()
     others = _other_referenced_blobs(hub, keep=path)
