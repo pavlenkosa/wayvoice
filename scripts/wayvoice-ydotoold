@@ -15,11 +15,18 @@ set -eu
 here="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 daemon="$here/../lib/wayvoice/ydotool/ydotoold"
 
+# 78 is EX_CONFIG from sysexits.h, and it is not an arbitrary choice:
+# wayvoice-ydotool.service restarts on failure, and this wrapper is installed whether
+# or not the bundled binary was built. Exiting 1 made the unit restart every two
+# seconds for the rest of the session, printing the same three lines each time, on a
+# package that is working as intended - auto-paste simply falls back to the clipboard.
+# The unit lists this code in RestartPreventExitStatus, so the wrapper is asked whether
+# it can run and then stays quiet.
 if [ ! -x "$daemon" ]; then
     echo "wayvoice-ydotoold: this package was built without a compiler, so the" >&2
     echo "bundled helper is not there. Install the distribution's ydotool, or" >&2
     echo "paste from the clipboard - both work." >&2
-    exit 1
+    exit 78
 fi
 
 exec "$daemon" "$@"

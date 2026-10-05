@@ -12,14 +12,24 @@ Environment=PATH=/usr/local/bin:/usr/bin:/bin
 #
 # Skip (do not fail) when neither exists: a package built without a compiler has
 # no bundled copy, and auto-paste degrades to the clipboard. A PATH lookup keeps
-# this independent of the installation prefix, unlike ConditionPathExists.
+# this independent of the installation prefix, unlike ConditionPathExists. It
+# cannot tell a wrapper that will run from one that will not - hence the exit code
+# the wrapper uses and RestartPreventExitStatus below.
 ExecCondition=/bin/sh -c 'command -v ydotoold >/dev/null || command -v wayvoice-ydotoold >/dev/null'
 # A distribution's own ydotoold wins over the bundled one: it is the copy that
 # gets security updates, and two daemons fighting over /dev/uinput would be a
 # miserable thing to debug.
 ExecStart=/bin/sh -c 'exec "$(command -v ydotoold || command -v wayvoice-ydotoold)" --socket-path=%t/wayvoice-ydotool.sock --socket-perm=0600'
+# Restarting on failure is right for a daemon that dies, and wrong for a package that
+# was built without a compiler: wayvoice-ydotoold is installed either way and exits 78
+# (EX_CONFIG) when there is nothing to exec, which used to mean a restart every two
+# seconds until logout. That code is not restarted, and the start limit below covers
+# any other failure that would otherwise repeat for ever.
 Restart=on-failure
+RestartPreventExitStatus=78
 RestartSec=2
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Install]
 WantedBy=default.target
