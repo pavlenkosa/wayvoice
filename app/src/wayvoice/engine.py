@@ -7,6 +7,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -17,6 +18,7 @@ from typing import Any, Callable
 
 from . import fw_worker
 from . import languages
+from .config import number
 from .i18n import tr
 from . import __version__
 from . import service
@@ -616,7 +618,7 @@ def _worker_settings(cfg: dict[str, Any]) -> dict[str, Any]:
     return {
         "model": str(cfg.get("model", "small")),
         "device": str(cfg.get("device", "auto")),
-        "beam_size": int(cfg.get("beam_size", 5)),
+        "beam_size": number(cfg, "beam_size", 5),
         "vad": bool(cfg.get("vad_filter", True)),
     }
 
@@ -717,10 +719,20 @@ def stop_worker() -> bool:
         worker_pid_path().unlink()
     except OSError:
         pass
-    # The worker removes its socket on the way out; a leftover file belongs to
-    # nobody and makes every later connection fail. A socket that still answers is
-    # left alone - it belongs to a live worker.
-    if stopped or _worker_ping() is None:
+    # The socket is unlinked only when nothing answers on it.
+    #
+    # ``stopped`` says that a pid which looked like a worker was signalled - not
+    # that the worker this socket belongs to is gone. With a stale pid file (a
+    # recycled pid, a cleared XDG_STATE_HOME, a pid file already consumed by an
+    # earlier call) the sequence was: fail to identify the running worker, unlink
+    # its pid file, start a second one that cannot bind because the first still
+    # holds the socket, write the second one's pid, then stop *that* one - and
+    # ``stopped`` being true unlinked the first worker's live socket. It kept
+    # running, holding the model and several gigabytes of RAM, invisible to
+    # _worker_ping() - which gives up on a path that does not exist. Every dictation
+    # then quietly fell back to loading the model from scratch, with no error
+    # anywhere.
+    if _worker_ping() is None:
         try:
             worker_socket_path().unlink(missing_ok=True)
         except OSError:
@@ -763,11 +775,11 @@ def _start_worker(cfg: dict[str, Any]) -> bool:
         "--socket", str(worker_socket_path()),
         "--model", _worker_settings(cfg)["model"],
         "--device", str(cfg.get("device", "auto")),
-        "--beam-size", str(int(cfg.get("beam_size", 5))),
+        "--beam-size", str(number(cfg, "beam_size", 5)),
     ]
     if cfg.get("vad_filter", True):
         args.append("--vad")
-    args += ["--idle-timeout", str(max(0.0, float(cfg.get("engine_worker_idle_sec", 900))))]
+    args += ["--idle-timeout", str(max(0.0, number(cfg, "engine_worker_idle_sec", 900)))]
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
     env["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
@@ -932,7 +944,7 @@ def _transcribe_via_worker(audio: Path, cfg: dict[str, Any], cancel_event: Event
     reply = _worker_transcribe(
         payload,
         request_id,
-        float(cfg.get("transcription_timeout_sec", 90)),
+        number(cfg, "transcription_timeout_sec", 90),
         cancel_event,
     )
     if reply.get("cancelled"):
@@ -979,7 +991,7 @@ def _transcribe_faster(audio: Path, cfg: dict[str, Any], cancel_event: Event | N
         "--model", str(cfg.get("model", "small")),
         "--language", _language(cfg),
         "--device", str(cfg.get("device", "auto")),
-        "--beam-size", str(int(cfg.get("beam_size", 5))),
+        "--beam-size", str(number(cfg, "beam_size", 5)),
     ]
     if cfg.get("vad_filter", True):
         args.append("--vad")
@@ -988,7 +1000,7 @@ def _transcribe_faster(audio: Path, cfg: dict[str, Any], cancel_event: Event | N
     env["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
     cp = _run_cancelable(
         args,
-        timeout=float(cfg.get("transcription_timeout_sec", 90)),
+        timeout=number(cfg, "transcription_timeout_sec", 90),
         cancel_event=cancel_event,
         env=env,
     )
@@ -1030,7 +1042,7 @@ def _transcribe_whisper_cpp(audio: Path, cfg: dict[str, Any], cancel_event: Even
         args.append("-ng")
     cp = _run_cancelable(
         args,
-        timeout=float(cfg.get("transcription_timeout_sec", 90)),
+        timeout=number(cfg, "transcription_timeout_sec", 90),
         cancel_event=cancel_event,
     )
     if cp.returncode != 0:
@@ -1046,7 +1058,7 @@ def _transcribe_custom(audio: Path, cfg: dict[str, Any], cancel_event: Event | N
     rendered = template.replace("{audio}", shlex.quote(str(audio)))
     cp = _run_cancelable(
         ["/bin/sh", "-lc", rendered],
-        timeout=float(cfg.get("transcription_timeout_sec", 90)),
+        timeout=number(cfg, "transcription_timeout_sec", 90),
         cancel_event=cancel_event,
     )
     if cp.returncode != 0:

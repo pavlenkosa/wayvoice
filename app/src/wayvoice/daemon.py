@@ -16,7 +16,7 @@ from pathlib import Path
 
 from . import __version__
 from .audio import AudioRecorder
-from .config import DEFAULTS as _CONFIG_DEFAULTS, config_error, load_config
+from .config import DEFAULTS as _CONFIG_DEFAULTS, config_error, load_config, number
 from .engine import (
     DEFAULT_ENGINE,
     TranscriptionCancelled,
@@ -263,22 +263,43 @@ class WayVoiceDaemon:
                     # answer would leave the window at 100% for the whole load.
                     self._download["warming"] = True
 
-        result = prepare_model(
-            engine, cfg, on_progress, self._prepare_cancel, on_warming, download
-        )
-        with self._lock:
-            self._download = {
-                "state": str(result.get("state") or "ready"),
-                "model": reported.get("model", ""),
-                "done_bytes": int(result.get("done") or 0),
-                "total_bytes": int(result.get("total") or 0),
-                "error": str(result.get("error") or ""),
-                # Whether the warm-up succeeded, not whether one is running: the reply
-                # ends the work, and a window still saying "preparing" would never stop.
-                "warming": False,
-            }
-            self._prepare_running = False
-            self._prepare_thread = None
+        try:
+            result = prepare_model(
+                engine, cfg, on_progress, self._prepare_cancel, on_warming, download
+            )
+        except TranscriptionCancelled:
+            # A cancelled preparation is not a failure: "cancelled" is a state the
+            # engine's own contract lists, and the window shows it as such.
+            result = {"state": "cancelled"}
+        except Exception as exc:
+            # prepare_model is documented to answer with a dict, but a value it does
+            # not expect - a hand-edited config, a helper that died in a way it does
+            # not recognise - raises instead. Without this the thread ended there,
+            # and because _prepare_running was only cleared on the success path it
+            # stayed set: the settings button and `wayvoice model --download` were
+            # then refused for the rest of the session, and the window's spinner
+            # turned over a download that was not happening.
+            traceback.print_exc()
+            result = {"state": "error", "error": str(exc)}
+        finally:
+            with self._lock:
+                if not isinstance(result, dict):
+                    result = {"state": "error", "error": str(result)}
+                self._download = {
+                    "state": str(result.get("state") or "ready"),
+                    "model": reported.get("model", ""),
+                    "done_bytes": int(result.get("done") or 0),
+                    "total_bytes": int(result.get("total") or 0),
+                    "error": str(result.get("error") or ""),
+                    # Whether the warm-up succeeded, not whether one is running: the
+                    # reply ends the work, and a window still saying "preparing"
+                    # would never stop.
+                    "warming": False,
+                }
+                # In the finally, so that no path out of this thread can leave the
+                # daemon permanently unable to start another preparation.
+                self._prepare_running = False
+                self._prepare_thread = None
 
     def _cancel_model_prepare(self) -> str:
         """Stop a running preparation; report which part was actually stopped.
@@ -545,7 +566,7 @@ class WayVoiceDaemon:
             self.last_warning = tr("daemon.recognition_cancelled", cfg.get("ui_language"))
             notify(self.last_warning, enabled=cfg.get("notify", True))
         except TranscriptionTimeout:
-            timeout = int(cfg.get("transcription_timeout_sec", 90))
+            timeout = number(cfg, "transcription_timeout_sec", 90)
             self.last_error = ""
             self.last_warning = tr("daemon.recognition_timeout", cfg.get("ui_language"), seconds=timeout)
             notify(self.last_warning, enabled=cfg.get("notify", True))

@@ -20,7 +20,7 @@ from . import languages
 from . import pkgsys
 from . import service
 from .cli import request
-from .config import load_config, save_config
+from .config import load_config, number, save_config
 from .engine import (
     DEFAULT_ENGINE,
     engine_from_config,
@@ -614,11 +614,11 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         page.add(safety_group)
         self.timeout = Adw.ComboRow(title=self.t("settings.timeout"), subtitle=self.t("settings.timeout_sub"))
         self.timeout.set_model(Gtk.StringList.new([self._duration_label(x) for x in TIMEOUT_VALUES]))
-        self.timeout.set_selected(self._nearest_index(TIMEOUT_VALUES, int(self.cfg.get("transcription_timeout_sec", 90))))
+        self.timeout.set_selected(self._nearest_index(TIMEOUT_VALUES, number(self.cfg, "transcription_timeout_sec", 90)))
         safety_group.add(self.timeout)
         self.max_recording = Adw.ComboRow(title=self.t("settings.max_recording"), subtitle=self.t("settings.max_recording_sub"))
         self.max_recording.set_model(Gtk.StringList.new([self._duration_label(x) for x in RECORD_VALUES]))
-        self.max_recording.set_selected(self._nearest_index(RECORD_VALUES, int(self.cfg.get("max_recording_sec", 120))))
+        self.max_recording.set_selected(self._nearest_index(RECORD_VALUES, number(self.cfg, "max_recording_sec", 120)))
         safety_group.add(self.max_recording)
 
         interface_group = Adw.PreferencesGroup(title=self.t("settings.interface"))
@@ -1482,7 +1482,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         elif busy:
             state = "busy"
             elapsed = int(float(reply.get("busy_seconds") or 0))
-            limit = int(load_config().get("transcription_timeout_sec", 90))
+            limit = number(load_config(), "transcription_timeout_sec", 90)
             self.mic_button.set_sensitive(True)
             self.status_pill.set_text(self.t("status.transcribing"))
             self.hero_state.set_text(self.t("hero.transcribing"))

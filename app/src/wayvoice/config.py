@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+import sys
 import os
 from pathlib import Path
 from typing import Any
@@ -90,3 +91,29 @@ def save_config(data: dict[str, Any]) -> None:
         encoding="utf-8",
     )
     tmp.replace(path)
+
+
+def number(cfg: dict, key: str, default):
+    """Read a numeric setting, falling back to ``default`` when it is not one.
+
+    ``config.json`` is a file a person can edit and ``load_config`` copies it over
+    the defaults without looking at the types, so every conversion of a value from it
+    needs a floor. Without one, a single ``"beam_size": null`` raises somewhere deep
+    in the engine - or, worse, in the settings window, where an exception during
+    construction means no window at all, and an exception inside a GLib timeout means
+    the timer is gone for the rest of the session.
+
+    The type of ``default`` decides the type of the answer, so an integer setting
+    comes back as an integer.
+    """
+    value = cfg.get(key, default)
+    try:
+        if isinstance(default, bool):
+            return bool(value)
+        if isinstance(default, int):
+            return int(value)
+        return float(value)
+    except (TypeError, ValueError):
+        print(f"WayVoice: {key}={value!r} is not a number, using {default!r}",
+              file=sys.stderr)
+        return default
