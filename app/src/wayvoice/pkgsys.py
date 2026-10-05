@@ -279,12 +279,25 @@ def install_packages(
         return False, tr("pkgsys.no_packages", language)
     if not packages:
         return False, tr("pkgsys.no_packages", language)
-    for name in packages:
-        if package_available(name) is False:
-            # Checked before anything is started, and before a password prompt:
-            # there is nothing to install, and a dialog that cannot succeed is worse
-            # than an answer.
-            return False, tr("pkgsys.package_unavailable", language, package=name)
+
+    # One package the repositories do not have must not cancel the rest. Asked for
+    # all of them - which is what "install everything missing" does, and what
+    # `wayvoice deps --install-all` does - this used to return on the first name
+    # apt knows nothing about, before the manager was started at all. On a system
+    # where the distribution ships no ydotool package, that left pipewire-bin,
+    # wl-clipboard and libnotify-bin uninstalled while the user was told only about
+    # ydotool.
+    #
+    # Availability is checked before anything is started, and before a password
+    # prompt: there is nothing to install for those names, and a dialog that
+    # cannot succeed is worse than an answer. "None" - meaning "not known" - is not
+    # treated as unavailable, so an unrefreshed package index still gets the try.
+    skipped = [name for name in packages if package_available(name) is False]
+    wanted = [name for name in packages if name not in skipped]
+    if not wanted:
+        return False, tr("pkgsys.package_unavailable", language, package=skipped[0])
+    argv = dry_run_command(wanted)
+    packages = wanted
 
     elevated: list[str] = []
     if requires_privilege():
@@ -325,7 +338,13 @@ def install_packages(
             seconds=_seconds(timeout),
             detail=detail,
         )
-    return _result(proc.returncode, packages, stdout, stderr, language)
+    ok, message = _result(proc.returncode, packages, stdout, stderr, language)
+    if ok and skipped:
+        # The install worked; say plainly that something in the request did not, or
+        # the row in the window stays missing and the user has no idea why.
+        message += " " + tr("pkgsys.package_skipped", language,
+                             packages=", ".join(skipped))
+    return ok, message
 
 
 def _seconds(timeout: float) -> int:
