@@ -92,6 +92,13 @@ FETCH_PATTERNS: list[str] = [
 CATALOG_IDS: list[str] = [str(item["id"]) for item in MODEL_PRESETS]
 
 #: The catalogue entry that holds whatever the user typed by hand.
+#: The three kinds of entry :func:`describe` returns.  The settings window compares
+#: against these, so they are named here rather than spelled out there: a literal in
+#: another module is a value that can drift away from the one it is compared to.
+KIND_REPO = "repo"
+KIND_LOCAL = "local"
+KIND_CUSTOM = "custom"
+
 CUSTOM_ID = "__custom__"
 
 
@@ -674,7 +681,7 @@ def _entry(model_id: str, label: str, root: str | os.PathLike[str] | None) -> di
         return {
             "id": CUSTOM_ID,
             "label": label,
-            "kind": "custom",
+            "kind": KIND_CUSTOM,
             "repo_id": None,
             "path": None,
             "downloaded": False,
@@ -686,7 +693,7 @@ def _entry(model_id: str, label: str, root: str | os.PathLike[str] | None) -> di
         return {
             "id": model_id,
             "label": label,
-            "kind": "local",
+            "kind": KIND_LOCAL,
             "repo_id": None,
             "path": str(path),
             "downloaded": present and any(True for _ in _weight_files(path)),
@@ -696,7 +703,7 @@ def _entry(model_id: str, label: str, root: str | os.PathLike[str] | None) -> di
     return {
         "id": model_id,
         "label": label,
-        "kind": "repo",
+        "kind": KIND_REPO,
         "repo_id": repo_id,
         "path": str(path) if path is not None else None,
         "downloaded": is_downloaded(model_id, root),

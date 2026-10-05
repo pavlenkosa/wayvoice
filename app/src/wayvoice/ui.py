@@ -841,7 +841,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
             # the model, and nothing would have said so.
             self._ask_daemon_to_prepare_model()
             return
-        if str(entry.get("kind") or "") != "hub":
+        if str(entry.get("kind") or "") != model_store.KIND_REPO:
             # A local path or a name nothing can fetch: there is nothing to ask about,
             # and the daemon says so for itself.
             self._ask_daemon_to_prepare_model()
@@ -994,7 +994,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         phase = str(download.get("state") or "idle")
         model_id = str(entry.get("id") or "")
         wanted = (
-            str(entry.get("kind") or "") == "hub"
+            str(entry.get("kind") or "") == model_store.KIND_REPO
             and not entry.get("downloaded")
             and phase in {"idle", "error", "ready"}
             and str(download.get("model") or "") in {"", model_id}
@@ -1007,7 +1007,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         model_id = str(entry.get("id") or "")
         if not model_id:
             return
-        if str(entry.get("kind") or "") != "hub":
+        if str(entry.get("kind") or "") != model_store.KIND_REPO:
             # A local path cannot be fetched and its row says so in its own subtitle; a
             # button here would report success and change nothing.
             self._toast(self.t("store.refuse_local"))

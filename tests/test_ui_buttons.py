@@ -14,6 +14,7 @@ is the one already known to work, and the logs button reads the journal and puts
 the text into the clipboard.
 """
 
+import importlib.util
 import subprocess
 import unittest
 from unittest import mock
@@ -208,7 +209,11 @@ class LogRowWordingTests(unittest.TestCase):
             )
 
     def test_no_string_promises_a_command_instead_of_an_action(self):
-        with open(ui.__file__, encoding="utf-8") as handle:
+        # find_spec rather than ui.__file__: this class runs without GTK, where the
+        # import of wayvoice.ui fails and ui is None. Locating the file does not
+        # import it, so the check works on CI as well as on a desktop.
+        origin = importlib.util.find_spec("wayvoice.ui").origin
+        with open(origin, encoding="utf-8") as handle:
             source = handle.read()
         self.assertNotIn("toast.logs\"", source, "the old log toast key is still used")
 

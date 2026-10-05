@@ -11,6 +11,7 @@ without its constructor, because that one starts threads and talks to a daemon.
 
 import unittest
 
+from wayvoice import model_store
 from wayvoice.i18n import tr
 
 try:
@@ -224,7 +225,8 @@ class FetchButtonTests(unittest.TestCase):
                 "download": base}
 
     def _entry(self, **entry):
-        base = {"id": "medium", "kind": "hub", "downloaded": False, "size_bytes": 1500}
+        base = {"id": "medium", "kind": model_store.KIND_REPO,
+                "downloaded": False, "size_bytes": 1500}
         base.update(entry)
         self.window._model_entry = base
 
@@ -292,7 +294,8 @@ class ChoosingAModelTests(unittest.TestCase):
         )
 
     def _decide(self, **entry):
-        base = {"id": "medium", "kind": "hub", "downloaded": False, "size_bytes": 1500}
+        base = {"id": "medium", "kind": model_store.KIND_REPO,
+                "downloaded": False, "size_bytes": 1500}
         base.update(entry)
         self.window._decide_what_to_do_about_the_selected_model(base)
 
