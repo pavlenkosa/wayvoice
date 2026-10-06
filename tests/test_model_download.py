@@ -276,15 +276,22 @@ class DownloadTests(unittest.TestCase):
     def test_a_hub_model_without_the_fetcher_is_an_error_not_unsupported(self):
         # A damaged install can lose model_fetch.py while the runtime is fine.
         # "unsupported" would hide the row and the button for a model that a
-        # repaired setup would fetch; the answer names what to run instead.
+        # repaired install would fetch; the answer names what to do instead.
+        # The runtime is pinned to a fake that *has* its interpreter, so this
+        # is the missing-fetcher branch and not the missing-runtime one: which
+        # branch runs must not depend on what this machine has prepared.
+        runtime = Path(self.tmp.name) / "runtime"
+        (runtime / "bin").mkdir(parents=True)
+        (runtime / "bin" / "python").touch()
         with mock.patch.object(engine, "model_is_present", return_value=False):
             with mock.patch.object(engine, "_model_download_args", return_value=None):
                 with mock.patch.object(
                         model_store, "repo_id_for",
                         return_value="Systran/faster-whisper-small"):
-                    result = engine.download_model("small", language="en")
+                    with mock.patch.object(engine, "faster_runtime", return_value=runtime):
+                        result = engine.download_model("small", language="en")
         self.assertEqual(result["state"], "error")
-        self.assertIn("setup", result["error"].lower())
+        self.assertIn("reinstall", result["error"].lower())
 
     def test_a_model_that_cannot_be_fetched_never_starts_a_process(self):
         with mock.patch.object(engine, "model_is_present", return_value=False):

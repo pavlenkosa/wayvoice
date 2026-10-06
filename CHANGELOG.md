@@ -4,7 +4,7 @@
 
 - CI and release runs at the 0.6.4 commit were red: a new test class carried no skip guard for machines without GTK bindings and errored instead of skipping. The class now skips like every other UI test, and the release gate runs the suite a second time with `gi` blocked, so the class of mistake fails the gate locally before it fails a release.
 - The toast tests for daemon refusals no longer race the worker thread that carries the reply.
-- A Hub model whose download helper is missing from a damaged install is reported as an error naming the repair (`wayvoice engine-setup`) instead of "this model cannot be downloaded", which hid the row and the button again.
+- A Hub model whose download helper is missing from a damaged install is reported as an error naming the repair (reinstall the package) instead of "this model cannot be downloaded", which hid the row and the button again.
 - While the model loads into memory, the main window says "Preparing" rather than quoting a finished transfer at 100%.
 
 ## 0.6.4 — 2026-10-07

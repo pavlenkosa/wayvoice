@@ -204,7 +204,10 @@ def download_model(
                     "total": 0,
                 }
             # The runtime is there, so the fetcher itself is gone: a damaged
-            # or partial install. The setup writes the helper back.
+            # install. The fetcher is a package file, so only reinstalling the
+            # package (or the Flatpak image) restores it - the engine setup
+            # builds the runtime, not the package files, and would answer
+            # "ready" without touching anything.
             return {
                 "state": "error",
                 "error": tr("engine.download_missing_helper", language),
