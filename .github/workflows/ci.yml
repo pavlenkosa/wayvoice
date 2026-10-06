@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
   workflow_dispatch:
 
@@ -90,3 +90,21 @@ jobs:
             dist/*.deb.sha256
           if-no-files-found: error
           retention-days: 14
+
+  flatpak-manifest:
+    name: Flatpak manifest assertions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The Flatpak build itself stays a manual, networked validation (see
+      # docs/PROJECT_TASKS.md P1.2); this job pins the manifest's structure so a
+      # regression that loses the wayvoice module, the wl-clipboard pin, the
+      # launch command or a permission the app cannot work without fails CI
+      # instead of shipping unnoticed. The same script backs the local release
+      # gate, so local truth and CI truth are one file.
+      - name: Check manifest structure
+        run: python3 scripts/check-flatpak-manifest.py

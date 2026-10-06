@@ -10,7 +10,7 @@ lint: version-check
 	  scripts/wayvoice-engine-setup scripts/wayvoice-ydotoold scripts/setup-user \
 	  scripts/build-deb.sh scripts/build-ydotool.sh \
 	  packaging/DEBIAN/postinst packaging/DEBIAN/postrm packaging/DEBIAN/prerm; do \
-	    [ -f "$$f" ] && bash -n "$$f" || { [ -f "$$f" ] || echo "skip (absent): $$f"; }; \
+	    if [ -f "$$f" ]; then bash -n "$$f"; else echo "skip (absent): $$f"; fi; \
 	  done
 
 test:
