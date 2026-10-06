@@ -245,12 +245,33 @@ class DownloadTests(unittest.TestCase):
         self.assertEqual(result["state"], "error")
 
     def test_a_model_that_cannot_be_fetched_says_so(self):
-        # No runtime, a local path, or a missing helper script: all three mean
-        # "there is nothing this daemon can download", not "download failed".
+        # A local path (no repo) means "there is nothing this daemon can
+        # download", not "download failed" - and it is a property of the model,
+        # so the answer is "unsupported".
         with mock.patch.object(engine, "model_is_present", return_value=False):
             with mock.patch.object(engine, "_model_download_args", return_value=None):
-                result = engine.download_model("small")
+                with mock.patch.object(model_store, "repo_id_for", return_value=None):
+                    result = engine.download_model("small", language="en")
         self.assertEqual(result["state"], "unsupported")
+
+    def test_a_hub_model_without_a_runtime_is_a_setup_step_away(self):
+        # No runtime with a hub model selected used to answer "unsupported" -
+        # "this model cannot be downloaded" - which is a lie about the model:
+        # the fetcher exists, the runtime that would run it does not. The
+        # window hid the row, the button came back, and nothing said why. The
+        # answer names the missing setup instead.
+        with mock.patch.object(engine, "model_is_present", return_value=False):
+            with mock.patch.object(engine, "_model_download_args", return_value=None):
+                with mock.patch.object(
+                        model_store, "repo_id_for",
+                        return_value="Systran/faster-whisper-small"):
+                    with mock.patch.object(
+                            engine, "faster_runtime",
+                            return_value=Path(self.tmp.name) / "no-runtime"):
+                        result = engine.download_model("small", language="en")
+        self.assertEqual(result["state"], "error")
+        self.assertIn("runtime", result["error"].lower())
+        self.assertIn("setup", result["error"].lower())
 
     def test_a_model_that_cannot_be_fetched_never_starts_a_process(self):
         with mock.patch.object(engine, "model_is_present", return_value=False):
@@ -375,9 +396,10 @@ class PrepareTests(unittest.TestCase):
 
         with mock.patch.object(engine, "model_is_present", return_value=False):
             with mock.patch.object(engine, "_model_download_args", side_effect=capture):
-                reply = engine.ENGINES["faster-whisper"].model_download(
-                    {"model": "medium"}, None, None
-                )
+                with mock.patch.object(model_store, "repo_id_for", return_value=None):
+                    reply = engine.ENGINES["faster-whisper"].model_download(
+                        {"model": "medium"}, None, None
+                    )
         self.assertEqual(asked, ["medium"])
         self.assertEqual(reply["state"], "unsupported")
 

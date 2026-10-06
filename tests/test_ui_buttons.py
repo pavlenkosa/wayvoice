@@ -21,7 +21,7 @@ import time
 import unittest
 from unittest import mock
 
-from wayvoice import injector
+from wayvoice import injector, model_store
 from wayvoice.i18n import tr
 
 try:
@@ -42,6 +42,46 @@ class FakeToast:
     def add_toast(self, toast):
         # Adw.Toast exposes its text through get_title(), not as an attribute.
         self.titles.append(toast.get_title())
+
+
+class FakeRow:
+    def __init__(self):
+        self.title = ""
+        self.subtitle = ""
+        self.visible = None
+
+    def set_title(self, text):
+        self.title = text
+
+    def set_subtitle(self, text):
+        self.subtitle = text
+
+    def set_visible(self, value):
+        self.visible = value
+
+
+class FakeBar:
+    def __init__(self):
+        self.fraction = None
+        self.pulses = 0
+
+    def set_fraction(self, value):
+        self.fraction = float(value)
+
+    def pulse(self):
+        self.pulses += 1
+
+
+class FakeButton:
+    def __init__(self):
+        self.sensitive = None
+        self.visible = None
+
+    def set_sensitive(self, value):
+        self.sensitive = bool(value)
+
+    def set_visible(self, value):
+        self.visible = bool(value)
 
 
 class FakeClipboard:
@@ -364,6 +404,99 @@ class LogRowWordingTests(unittest.TestCase):
         with open(origin, encoding="utf-8") as handle:
             source = handle.read()
         self.assertNotIn("toast.logs\"", source, "the old log toast key is still used")
+
+
+class DownloadErrorTests(unittest.TestCase):
+    """A download the daemon refused to start must not look like a dead button.
+
+    The bug: selecting a Hub model without the Faster-Whisper runtime and pressing
+    Download made the daemon answer with an error the window swallowed - no row,
+    no toast, the fetch button hidden until the next poll - so the press did
+    nothing visible at all.
+    """
+
+    def setUp(self):
+        self.window = ui.WayVoiceWindow.__new__(ui.WayVoiceWindow)
+        self.window.ui_lang = "en"
+        self.window.t = lambda key, **kwargs: tr(key, "en", **kwargs)
+        self.window.model_download_row = FakeRow()
+        self.window.model_download_bar = FakeBar()
+        self.window.model_download_cancel_btn = FakeButton()
+        self.window.model_fetch_btn = FakeButton()
+        self.window._model_entry = {}
+        self.window._download_report = {}
+        self.window.toast = FakeToast()
+        # GLib.idle_add runs its callback at once, so the reply is handled on
+        # this thread the way the main loop would - without a running loop.
+        patcher = mock.patch.object(
+            ui.GLib, "idle_add",
+            side_effect=lambda callback, *args, **kwargs: callback(*args, **kwargs),
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _entry(self, **entry):
+        base = {"id": "small", "kind": model_store.KIND_REPO,
+                "downloaded": False, "size_bytes": 1500}
+        base.update(entry)
+        self.window._model_entry = base
+
+    def test_error_state_leaves_row_visible_with_error_subtitle(self):
+        # The row is the only place a failed download explains itself; hiding it
+        # turned an error into silence.
+        self.window._apply_download_state({
+            "supported": True, "present": False, "model": "small",
+            "download": {"state": "error", "model": "small",
+                         "error": "The Faster-Whisper runtime is not prepared"},
+        })
+        self.assertTrue(self.window.model_download_row.visible)
+        self.assertIn("runtime is not prepared", self.window.model_download_row.subtitle)
+
+    def test_refresh_fetch_button_shows_button_after_error_for_same_model(self):
+        # A download that failed may succeed on the second press: the network
+        # came back, the disk filled up - the button has to return.
+        self.window._download_report = {
+            "download": {"state": "error", "model": "small", "error": "404"}
+        }
+        self._entry()
+        self.window._refresh_fetch_button()
+        self.assertTrue(self.window.model_fetch_btn.visible)
+
+    def test_a_daemon_refusal_becomes_a_toast(self):
+        # The press went to the daemon, the daemon refused, and nothing said so:
+        # exactly the "the button does nothing" report. The refusal names its
+        # reason in the same field every daemon reply uses.
+        with mock.patch.object(ui, "request",
+                               return_value={"ok": False, "error": "refused: busy"}):
+            self.window._ask_daemon_to_prepare_model()
+        self.assertEqual(self.window.toast.titles, ["refused: busy"])
+
+    def test_a_daemon_that_does_not_answer_says_so(self):
+        # request() already answers with a dict when the daemon is gone; it is
+        # handled like any other refusal instead of vanishing with the thread.
+        with mock.patch.object(ui, "request",
+                               return_value={"ok": False, "error": "no answer"}):
+            self.window._ask_daemon_to_prepare_model()
+        self.assertEqual(self.window.toast.titles, ["no answer"])
+
+    def test_a_local_folder_is_not_toasted_on_every_selection(self):
+        # A local path is a perfectly good model: its row already says "not
+        # downloadable", and the daemon's not_applicable refusal repeats it.
+        # Toasting that on every selection would be noise, not information.
+        with mock.patch.object(
+                ui, "request",
+                return_value={"ok": False, "error": "no download", "state": "not_applicable"}):
+            self.window._ask_daemon_to_prepare_model()
+        self.assertEqual(self.window.toast.titles, [])
+
+    def test_a_download_offer_still_appears_for_a_missing_hub_model(self):
+        # The normal case, kept honest after the rework: a Hub model that is not
+        # on disk, with nothing running, offers the download.
+        self._entry()
+        self.window._apply_download_state({"supported": True, "present": False,
+                                           "model": "small",
+                                           "download": {"state": "idle"}})
+        self.assertTrue(self.window.model_fetch_btn.visible)
 
 
 if __name__ == "__main__":

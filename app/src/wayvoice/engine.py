@@ -152,7 +152,13 @@ def _model_download_args(model_id: str) -> list[str] | None:
 
     repo = model_store.repo_id_for(model_id)
     runtime_python = faster_runtime() / "bin/python"
-    if repo is None or not runtime_python.exists():
+    # Return None for local directories or when there's no runtime to fetch with
+    if repo is None:
+        return None
+    if not runtime_python.exists():
+        # This is a hub model but no runtime is prepared - we can't download it,
+        # but it's not fundamentally unsupported. Return None to indicate this.
+        # The caller (download_model) will detect this condition and return an error.
         return None
     fetch = script_path("model_fetch.py")
     if not fetch.exists():
@@ -182,6 +188,20 @@ def download_model(
         return result
     args = _model_download_args(model_id)
     if args is None:
+        from . import model_store
+        if model_store.repo_id_for(model_id) is not None \
+                and not (faster_runtime() / "bin/python").exists():
+            # A hub model the daemon could fetch if the tooling were there: the
+            # runtime that runs the fetcher is missing, which is a setup step
+            # away, not a property of the model. "unsupported" would tell the
+            # user this model can never be downloaded - a lie the window would
+            # repeat for every model until the runtime is prepared.
+            return {
+                "state": "error",
+                "error": tr("engine.download_needs_runtime", language),
+                "done": 0,
+                "total": 0,
+            }
         return {
             "state": "unsupported",
             "error": tr("engine.download_unsupported", language, model=model_id),

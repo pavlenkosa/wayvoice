@@ -906,7 +906,11 @@ class WayVoiceWindow(Adw.ApplicationWindow):
 
         def run() -> None:
             try:
-                request("prepare-model", timeout=5.0)
+                reply = request("prepare-model", timeout=5.0)
+                # What the reply means is the user's business, and GTK is
+                # touched on the main loop only: hand it over, decide there.
+                if isinstance(reply, dict):
+                    GLib.idle_add(self._handle_prepare_model_reply, reply)
             except Exception as exc:
                 print(
                     f"WayVoice: could not ask the daemon to prepare the model: {exc}",
@@ -914,6 +918,24 @@ class WayVoiceWindow(Adw.ApplicationWindow):
                 )
 
         threading.Thread(target=run, daemon=True).start()
+
+    def _handle_prepare_model_reply(self, reply: dict) -> None:
+        """Say why the daemon refused to prepare the model, as a toast.
+
+        A refusal the window swallowed looked exactly like a button that does
+        nothing: the row kept its old state and no word explained the press.
+        One refusal stays silent on purpose: ``not_applicable`` is the daemon's
+        word for a value that is not a Hub repository at all, and the model row
+        already says that about a local folder - repeating it as a toast on
+        every selection would be noise.
+        """
+        if reply.get("ok"):
+            return
+        if str(reply.get("state") or "") == "not_applicable":
+            return
+        error = str(reply.get("error") or "")
+        if error:
+            self._toast(error)
 
     def _sync_model_ui(self):
         if not hasattr(self, "model"):
@@ -994,9 +1016,13 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         download = report.get("download") if isinstance(report.get("download"), dict) else {}
         phase = str(download.get("state") or "idle")
         model_id = str(entry.get("id") or "")
+        # Check if the model is a repo model (hub model) and not downloaded
+        is_repo_model = str(entry.get("kind") or "") == model_store.KIND_REPO
+        is_not_downloaded = not entry.get("downloaded")
+        # Determine if button should be visible
         wanted = (
-            str(entry.get("kind") or "") == model_store.KIND_REPO
-            and not entry.get("downloaded")
+            is_repo_model
+            and is_not_downloaded
             and phase in {"idle", "error", "ready"}
             and str(download.get("model") or "") in {"", model_id}
         )
