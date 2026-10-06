@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.4 — 2026-10-07
+
+- **Fixed: the Download button silently did nothing when the Faster-Whisper runtime was not prepared.** The daemon answered "this model cannot be downloaded" — a statement about the model, not about the missing setup — and the window had no answer for it: the row and the button disappeared, no word explained the press. A missing runtime is now an error whose message says what to do (Settings or `wayvoice engine-setup`), the failed row stays visible, the button returns for the same model, and a synchronous refusal from the daemon appears as a toast. A local folder keeps its quiet "not downloadable" subtitle.
+- **Fixed: the main window kept saying "Press and speak" while the model was being downloaded or loaded.** The settings window painted its progress row, but the hero invited a dictation the hot key could not serve yet — starting one answered "model missing". While the daemon fetches the weights the hero names the model and its progress (size, percent), and while they load into memory it says so; the pill reads "Preparing".
+
 ## 0.6.3 — 2026-10-06
 
 - The Debian package declares the architecture it was built for (`amd64` and friends) instead of `all`, matching the ydotool binaries it bundles; release artifacts and CI assertions follow the new `wayvoice_<version>_<arch>.deb` naming. CI now also asserts the manifest structure of the Flatpak build (its full build remains a manual, networked validation), and `make lint` checks real shell files again.
