@@ -49,6 +49,8 @@ def main() -> None:
         data = json.loads(MANIFEST.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         fail(f"not valid JSON: {exc}")
+    if not isinstance(data, dict):
+        fail(f"top level is a {type(data).__name__}, not an object")
 
     if data.get("id") != "io.github.stepan.WayVoice":
         fail(f"id is {data.get('id')!r}")

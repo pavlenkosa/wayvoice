@@ -74,6 +74,16 @@ class ManifestCheckerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("pinned", result.stderr)
 
+    def test_a_lost_wl_clipboard_module_is_caught(self):
+        result = run_checker(mutate(drop_module="wl-clipboard"))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("wl-clipboard", result.stderr)
+
+    def test_a_non_object_top_level_is_caught_not_a_traceback(self):
+        result = run_checker(json.dumps(["a", "list"]))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("not an object", result.stderr)
+
     def test_a_lost_permission_is_caught(self):
         result = run_checker(
             mutate(drop_finish_arg="--filesystem=xdg-run/pipewire-0"))
