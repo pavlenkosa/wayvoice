@@ -2,8 +2,14 @@
 <component type="desktop-application">
   <id>io.github.stepan.WayVoice</id>
   <name>WayVoice</name>
+  <developer id="io.github.pavlenkosa">
+    <name translate="no">Stepan Pavlenko</name>
+  </developer>
+  <update_contact>i@pavlenkosa.ru</update_contact>
   <summary>Local voice dictation for GNOME and Wayland</summary>
   <summary xml:lang="ru">Локальный голосовой ввод для GNOME и Wayland</summary>
+  <url type="homepage">https://github.com/pavlenkosa/wayvoice</url>
+  <url type="bugtracker">https://github.com/pavlenkosa/wayvoice/issues</url>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>AGPL-3.0-or-later</project_license>
   <description>
