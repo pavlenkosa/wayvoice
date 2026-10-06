@@ -1145,6 +1145,11 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         report = model_report if isinstance(model_report, dict) else {}
         download = report.get("download") if isinstance(report.get("download"), dict) else {}
         state = str(download.get("state") or "idle")
+        # The daemon reports the load into memory inside "downloading" with
+        # ``warming`` set: the weights are down and the wait is no longer a
+        # transfer, which the settings row already words differently.
+        if state == "downloading" and download.get("warming"):
+            state = "warming"
         if state not in {"downloading", "warming"}:
             return None
         model_id = str(download.get("model") or "")

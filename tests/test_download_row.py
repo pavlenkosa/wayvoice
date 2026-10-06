@@ -411,6 +411,18 @@ class HeroPreparationTests(unittest.TestCase):
         self.assertIn("Preparing Medium", caption[0])
         self.assertIn("loaded into memory", caption[1])
 
+    def test_a_warm_up_inside_downloading_does_not_say_100_percent(self):
+        # The daemon reports the load into memory as "downloading" with
+        # ``warming`` set, and the bytes stand at 100%. The settings row words
+        # this phase as "Preparing"; the hero must not keep quoting a transfer
+        # that has already finished.
+        caption = self._caption_for(self._report(
+            state="downloading", model="medium",
+            done_bytes=1500, total_bytes=1500, warming=True))
+        self.assertIn("Preparing Medium", caption[0])
+        self.assertIn("loaded into memory", caption[1])
+        self.assertNotIn("100%", caption[1])
+
     def test_an_error_is_not_quoted_every_poll(self):
         # The error's place is the settings row and the toast; the hero would
         # otherwise repeat it every 650 ms for the rest of the session.

@@ -189,16 +189,25 @@ def download_model(
     args = _model_download_args(model_id)
     if args is None:
         from . import model_store
-        if model_store.repo_id_for(model_id) is not None \
-                and not (faster_runtime() / "bin/python").exists():
-            # A hub model the daemon could fetch if the tooling were there: the
-            # runtime that runs the fetcher is missing, which is a setup step
-            # away, not a property of the model. "unsupported" would tell the
-            # user this model can never be downloaded - a lie the window would
-            # repeat for every model until the runtime is prepared.
+        if model_store.repo_id_for(model_id) is not None:
+            # A hub model the daemon could fetch if the tooling were there.
+            # "unsupported" would tell the user this model can never be
+            # downloaded, and the window would hide the row and the button for
+            # it; naming what is missing keeps both visible.
+            if not (faster_runtime() / "bin/python").exists():
+                # The runtime that runs the fetcher is a setup step away, not
+                # a property of the model.
+                return {
+                    "state": "error",
+                    "error": tr("engine.download_needs_runtime", language),
+                    "done": 0,
+                    "total": 0,
+                }
+            # The runtime is there, so the fetcher itself is gone: a damaged
+            # or partial install. The setup writes the helper back.
             return {
                 "state": "error",
-                "error": tr("engine.download_needs_runtime", language),
+                "error": tr("engine.download_missing_helper", language),
                 "done": 0,
                 "total": 0,
             }

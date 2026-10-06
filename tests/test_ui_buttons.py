@@ -406,6 +406,7 @@ class LogRowWordingTests(unittest.TestCase):
         self.assertNotIn("toast.logs\"", source, "the old log toast key is still used")
 
 
+@needs_window
 class DownloadErrorTests(unittest.TestCase):
     """A download the daemon refused to start must not look like a dead button.
 
@@ -465,28 +466,39 @@ class DownloadErrorTests(unittest.TestCase):
     def test_a_daemon_refusal_becomes_a_toast(self):
         # The press went to the daemon, the daemon refused, and nothing said so:
         # exactly the "the button does nothing" report. The refusal names its
-        # reason in the same field every daemon reply uses.
-        with mock.patch.object(ui, "request",
-                               return_value={"ok": False, "error": "refused: busy"}):
-            self.window._ask_daemon_to_prepare_model()
+        # reason in the same field every daemon reply uses. Called directly:
+        # the real path crosses a worker thread, and asserting on it from here
+        # would race the thread instead of testing the handler.
+        self.window._handle_prepare_model_reply({"ok": False, "error": "refused: busy"})
         self.assertEqual(self.window.toast.titles, ["refused: busy"])
+
+    def test_the_reply_is_marshalled_to_the_main_loop(self):
+        # The request runs on a worker thread; GTK is touched from the main loop
+        # only. The marshalling is a source shape the runtime cannot observe
+        # cheaply, so it is pinned the way the single-_toast rule is.
+        origin = importlib.util.find_spec("wayvoice.ui").origin
+        with open(origin, encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertIn("GLib.idle_add(self._handle_prepare_model_reply, reply)", source)
 
     def test_a_daemon_that_does_not_answer_says_so(self):
         # request() already answers with a dict when the daemon is gone; it is
         # handled like any other refusal instead of vanishing with the thread.
-        with mock.patch.object(ui, "request",
-                               return_value={"ok": False, "error": "no answer"}):
-            self.window._ask_daemon_to_prepare_model()
+        self.window._handle_prepare_model_reply({"ok": False, "error": "no answer"})
         self.assertEqual(self.window.toast.titles, ["no answer"])
 
     def test_a_local_folder_is_not_toasted_on_every_selection(self):
         # A local path is a perfectly good model: its row already says "not
         # downloadable", and the daemon's not_applicable refusal repeats it.
         # Toasting that on every selection would be noise, not information.
-        with mock.patch.object(
-                ui, "request",
-                return_value={"ok": False, "error": "no download", "state": "not_applicable"}):
-            self.window._ask_daemon_to_prepare_model()
+        self.window._handle_prepare_model_reply(
+            {"ok": False, "error": "no download", "state": "not_applicable"})
+        self.assertEqual(self.window.toast.titles, [])
+
+    def test_a_successful_reply_is_not_toasted(self):
+        # The daemon accepted the preparation; the download row reports the
+        # progress itself, and a toast would only duplicate it.
+        self.window._handle_prepare_model_reply({"ok": True, "state": "downloading"})
         self.assertEqual(self.window.toast.titles, [])
 
     def test_a_download_offer_still_appears_for_a_missing_hub_model(self):
