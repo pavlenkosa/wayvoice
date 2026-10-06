@@ -345,5 +345,90 @@ class ChoosingAModelTests(unittest.TestCase):
         )
 
 
+class FakeLabel:
+    def __init__(self):
+        self.text = ""
+
+    def set_text(self, value):
+        self.text = str(value)
+
+
+class FakeIcon:
+    def __init__(self):
+        self.icon_name = ""
+
+    def set_from_icon_name(self, name):
+        self.icon_name = name
+
+
+@needs_window
+class HeroPreparationTests(unittest.TestCase):
+    """The main window says what the daemon is doing to the model.
+
+    While the settings window painted its download row, the hero kept saying
+    "press and speak" for the whole wait - an invitation the hot key could not
+    honour yet, since starting a dictation now answers "model missing".
+    """
+
+    def setUp(self):
+        self.window = ui.WayVoiceWindow.__new__(ui.WayVoiceWindow)
+        self.window.ui_lang = "en"
+        self.window.t = lambda key, **kwargs: tr(key, "en", **kwargs)
+        self.window._selected_model_id = lambda: "medium"
+        self.window.status_pill = FakeLabel()
+        self.window.hero_state = FakeLabel()
+        self.window.hero_caption = FakeLabel()
+        self.window.mic_icon = FakeIcon()
+
+    def _report(self, **download):
+        base = {"state": "idle", "model": "", "done_bytes": 0,
+                "total_bytes": 0, "error": "", "warming": False}
+        base.update(download)
+        return {"supported": True, "present": False, "model": "medium",
+                "download": base}
+
+    def _caption_for(self, report):
+        return self.window._hero_preparation_caption(report)
+
+    def test_a_download_is_painted_with_progress(self):
+        caption = self._caption_for(self._report(
+            state="downloading", model="medium", done_bytes=500, total_bytes=1500))
+        self.assertIsNotNone(caption)
+        self.assertIn("Downloading Medium", caption[0])
+        self.assertIn("33%", caption[1])
+        self.window._show_hero_preparation(*caption)
+        self.assertEqual(self.window.status_pill.text, "Preparing")
+        self.assertEqual(self.window.hero_state.text, "Downloading Medium")
+        self.assertEqual(self.window.mic_icon.icon_name, "folder-download-symbolic")
+
+    def test_a_download_without_bytes_yet_says_connecting(self):
+        caption = self._caption_for(self._report(
+            state="downloading", model="medium", total_bytes=0))
+        self.assertIn("connecting", caption[1])
+
+    def test_a_warm_up_names_the_phase(self):
+        caption = self._caption_for(self._report(state="warming", model="medium"))
+        self.assertIn("Preparing Medium", caption[0])
+        self.assertIn("loaded into memory", caption[1])
+
+    def test_an_error_is_not_quoted_every_poll(self):
+        # The error's place is the settings row and the toast; the hero would
+        # otherwise repeat it every 650 ms for the rest of the session.
+        caption = self._caption_for(self._report(
+            state="error", model="medium", error="404"))
+        self.assertIsNone(caption)
+
+    def test_work_on_another_model_is_not_shown(self):
+        # The user has already moved the selector away; painting the old
+        # download would describe a model this window does not name.
+        caption = self._caption_for(self._report(
+            state="downloading", model="small", done_bytes=1, total_bytes=2))
+        self.assertIsNone(caption)
+
+    def test_idle_reports_nothing(self):
+        self.assertIsNone(self._caption_for(self._report()))
+        self.assertIsNone(self._caption_for({}))
+
+
 if __name__ == "__main__":
     unittest.main()

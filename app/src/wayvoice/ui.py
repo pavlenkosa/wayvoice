@@ -1133,6 +1133,58 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         except Exception as exc:
             print(f"WayVoice: could not stop the download: {exc}", file=sys.stderr)
 
+    def _hero_preparation_caption(self, model_report) -> tuple[str, str, str] | None:
+        """What the main window should say about a model being fetched or loaded.
+
+        Reads the same report the settings window paints its download row from.
+        Returns ``None`` when the hero has nothing preparation-shaped to say: no
+        report, work on a different model than the one selected here, or an
+        error - an error belongs to the settings row and the toast, and quoting
+        it in the hero would repeat it every 650 ms.
+        """
+        report = model_report if isinstance(model_report, dict) else {}
+        download = report.get("download") if isinstance(report.get("download"), dict) else {}
+        state = str(download.get("state") or "idle")
+        if state not in {"downloading", "warming"}:
+            return None
+        model_id = str(download.get("model") or "")
+        if not model_id or model_id != str(self._selected_model_id() or ""):
+            # Work on a model other than the one this window names: painting it
+            # here would describe a download the user may have already abandoned
+            # by selecting something else.
+            return None
+        if state == "warming":
+            return (
+                self.t("hero.warming", model=display_name(model_id)),
+                self.t("store.warming_sub"),
+                "folder-download-symbolic",
+            )
+        done = int(download.get("done_bytes") or 0)
+        total = int(download.get("total_bytes") or 0)
+        if total > 0 and done > 0:
+            caption = self.t(
+                "store.download_progress",
+                done=model_store.human_size(done, self.ui_lang),
+                total=model_store.human_size(total, self.ui_lang),
+                percent=int(min(100, done * 100 / total)),
+            )
+        elif total > 0:
+            caption = self.t("store.download_unknown")
+        else:
+            caption = self.t("store.download_unknown")
+        return (
+            self.t("hero.downloading", model=display_name(model_id)),
+            caption,
+            "folder-download-symbolic",
+        )
+
+    def _show_hero_preparation(self, title: str, caption: str, icon: str) -> None:
+        """Paint the hero from a preparation report, pill included."""
+        self.status_pill.set_text(self.t("status.preparing"))
+        self.hero_state.set_text(title)
+        self.hero_caption.set_text(caption)
+        self.mic_icon.set_from_icon_name(icon)
+
     def _refresh_model_state(self) -> None:
         """Recompute the model row, off the GTK main loop.
 
@@ -1515,20 +1567,30 @@ class WayVoiceWindow(Adw.ApplicationWindow):
             self.hero_state.set_text(self.t("hero.transcribing"))
             self.hero_caption.set_text(f"{self.t('hero.cancel_hint')}  ·  {elapsed}/{limit}s")
             self.mic_icon.set_from_icon_name("process-stop-symbolic")
-        elif est == "ready":
-            state = "ready"
-            self.mic_button.set_sensitive(True)
-            self.status_pill.set_text(self.t("status.ready"))
-            self.hero_state.set_text(self.t("hero.record"))
-            self.hero_caption.set_text(f"{self.t('shortcut.global')}: {shortcut}")
-            self.mic_icon.set_from_icon_name("audio-input-microphone-symbolic")
         else:
-            state = "offline"
-            self.mic_button.set_sensitive(False)
-            self.status_pill.set_text(self.t("status.engine"))
-            self.hero_state.set_text(self.t("hero.not_ready"))
-            self.hero_caption.set_text(str(engine.get("message") or self.t("hero.open_settings")))
-            self.mic_icon.set_from_icon_name("emblem-system-symbolic")
+            preparation = self._hero_preparation_caption(reply.get("model"))
+            if preparation is not None:
+                # The daemon is fetching or loading the model. The settings window
+                # paints its row, but this window used to keep saying "press and
+                # speak" for the whole wait - an invitation the hot key cannot
+                # honour yet, since starting now answers "model missing".
+                state = "busy"
+                self.mic_button.set_sensitive(True)
+                self._show_hero_preparation(*preparation)
+            elif est == "ready":
+                state = "ready"
+                self.mic_button.set_sensitive(True)
+                self.status_pill.set_text(self.t("status.ready"))
+                self.hero_state.set_text(self.t("hero.record"))
+                self.hero_caption.set_text(f"{self.t('shortcut.global')}: {shortcut}")
+                self.mic_icon.set_from_icon_name("audio-input-microphone-symbolic")
+            else:
+                state = "offline"
+                self.mic_button.set_sensitive(False)
+                self.status_pill.set_text(self.t("status.engine"))
+                self.hero_state.set_text(self.t("hero.not_ready"))
+                self.hero_caption.set_text(str(engine.get("message") or self.t("hero.open_settings")))
+                self.mic_icon.set_from_icon_name("emblem-system-symbolic")
 
         self._set_state_style(state)
         # Missing blocking dependencies are reported as a warning, below a real error and
