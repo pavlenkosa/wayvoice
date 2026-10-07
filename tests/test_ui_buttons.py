@@ -495,11 +495,52 @@ class DownloadErrorTests(unittest.TestCase):
             {"ok": False, "error": "no download", "state": "not_applicable"})
         self.assertEqual(self.window.toast.titles, [])
 
-    def test_a_successful_reply_is_not_toasted(self):
-        # The daemon accepted the preparation; the download row reports the
-        # progress itself, and a toast would only duplicate it.
+    def test_a_successful_reply_confirms_the_start_at_once(self):
+        # The daemon accepted the preparation. The next status poll can be a
+        # full interval away and a fetch reports its first bytes later still,
+        # so silence read as "the button did nothing". The window now confirms
+        # the start immediately: a toast naming the model that was asked for
+        # and an optimistic row in the accepted state, which the first real
+        # state report then corrects.
+        self._entry()
+        self.window._prepare_requested_model = "small"
+        self.window._handle_prepare_model_reply({"ok": True, "state": "downloading"})
+        self.assertEqual(
+            self.window.toast.titles, [self.window.t("toast.prepare_started", model="Small")])
+        download = self.window._download_report["download"]
+        self.assertEqual(download["state"], "downloading")
+        self.assertEqual(download["model"], "small")
+
+    def test_a_successful_warm_reply_paints_warming_not_downloading(self):
+        # Weights already on disk: the accepted work is a load into memory, and
+        # an optimistic "downloading" would announce a fetch that never happens.
+        self._entry()
+        self.window._prepare_requested_model = "small"
+        self.window._model_entry["downloaded"] = True
+        self.window._handle_prepare_model_reply({"ok": True, "state": "warming"})
+        self.assertEqual(self.window._download_report["download"]["state"], "warming")
+
+    def test_the_optimistic_row_is_not_painted_for_a_foreign_model(self):
+        # The selection changed between the press and the answer: painting the
+        # accepted work next to the newly selected model would be a lie the
+        # first poll would have to correct, so the confirmation names and
+        # paints the model the press was about, not the current selection.
+        self._entry()
+        self.window._prepare_requested_model = "small"
+        self.window._model_entry["id"] = "medium"
+        self.window._handle_prepare_model_reply({"ok": True, "state": "downloading"})
+        self.assertEqual(
+            self.window.toast.titles, [self.window.t("toast.prepare_started", model="Small")])
+        self.assertEqual(self.window._download_report["download"]["model"], "small")
+
+    def test_a_reply_for_a_press_this_window_never_made_is_ignored(self):
+        # A window that never asked has no right to paint an optimistic state:
+        # the attribute is only set by the ask path, and a handler invoked
+        # without it would draw a download from thin air.
+        self._entry()
         self.window._handle_prepare_model_reply({"ok": True, "state": "downloading"})
         self.assertEqual(self.window.toast.titles, [])
+        self.assertNotIn("download", self.window._download_report)
 
     def test_a_download_offer_still_appears_for_a_missing_hub_model(self):
         # The normal case, kept honest after the rework: a Hub model that is not
@@ -513,3 +554,46 @@ class DownloadErrorTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PollWiringTests(unittest.TestCase):
+    """The window must start its status polls in the constructor.
+
+    These timers were once found living inside a just-added callback method:
+    the class compiled, the tests of individual handlers passed, and the
+    window would simply never have started polling. Source-shape is the only
+    guard that cannot be fooled by that. These tests need no GTK: they read
+    the source file, and the run with gi blocked is exactly when they matter.
+    """
+
+    #: The source file these tests read. Resolved without importing ui, so the
+    #: gi-blocked CI-parity run (where ``ui`` is None) still guards the wiring.
+    @classmethod
+    def setUpClass(cls):
+        import pathlib
+
+        cls.ui_source = (
+            pathlib.Path(__file__).resolve().parent.parent
+            / "app" / "src" / "wayvoice" / "ui.py"
+        ).read_text(encoding="utf-8")
+
+    def test_the_status_polls_are_scheduled_from_the_constructor(self):
+        import ast
+
+        tree = ast.parse(self.ui_source)
+        init = next(
+            node for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "WayVoiceWindow"
+            for node in node.body if isinstance(node, ast.FunctionDef) and node.name == "__init__"
+        )
+        calls = [
+            ast.unparse(node)
+            for node in ast.walk(init) if isinstance(node, ast.Call)
+        ]
+        self.assertIn("GLib.timeout_add(650, self._poll_status)", calls)
+        self.assertIn("GLib.timeout_add(900, self._poll_engine_settings)", calls)
+
+    def test_the_save_button_answers_only_on_the_settings_page(self):
+        self.assertIn('self.stack.get_visible_child_name() == "settings"', self.ui_source)
+        # The old bottom-of-page save row is gone; the header button replaced it.
+        self.assertNotIn("actions.add(save)", self.ui_source)

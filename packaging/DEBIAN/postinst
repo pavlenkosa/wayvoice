@@ -9,6 +9,34 @@ if command -v systemctl >/dev/null 2>&1; then
     if command -v ydotoold >/dev/null 2>&1 || command -v wayvoice-ydotoold >/dev/null 2>&1; then
         systemctl --global enable wayvoice-ydotool.service >/dev/null 2>&1 || true
     fi
+    # An upgrade used to leave the running daemon on the old code until logout:
+    # dpkg replaced the files and the system manager reloaded, but nobody
+    # restarted the per-user service, and Restart=on-failure only reacts to a
+    # process that dies on its own.
+    # Only configure (fresh install or upgrade) may act on running services;
+    # dpkg also calls this script with abort-* and friends, which must touch
+    # nothing. deb-systemd-invoke is the canonical maintscript entry point for
+    # this: it consults policy-rc.d and walks every running user@ manager,
+    # reaching the sessions that a bare `systemctl --user` from root cannot
+    # (root's --user only talks to root's own manager).
+    # Always attempting the restart, with || true, is the simplest robust
+    # variant: from root there is no per-session is-active check that would not
+    # re-implement the helper's own user@ enumeration, the helper itself
+    # declines to touch units that are neither enabled nor running, and on
+    # systemd older than 249 it prints a note and exits. So a headless install
+    # with no user manager is a no-op, a fresh install on a live desktop starts
+    # the units --global enable above just linked, and a failure can never
+    # break dpkg configure.
+    if [ "$1" = configure ] && command -v deb-systemd-invoke >/dev/null 2>&1; then
+        # systemctl restart reuses the unit definition already cached in the
+        # manager, so reload the user instances first or a changed unit file
+        # keeps shadowing the new code ("unit file changed on disk").
+        deb-systemd-invoke --user daemon-reload >/dev/null 2>&1 || true
+        # wayvoice-setup.service is a oneshot without RemainAfterExit and holds
+        # no process worth restarting; wayvoice.service and
+        # wayvoice-ydotool.service are long-running and must pick up new code.
+        deb-systemd-invoke --user restart wayvoice.service wayvoice-ydotool.service >/dev/null 2>&1 || true
+    fi
 fi
 
 if command -v udevadm >/dev/null 2>&1; then

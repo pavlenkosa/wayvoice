@@ -252,6 +252,14 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         menu_button.set_menu_model(menu)
         header.pack_end(menu_button)
 
+        # The save button lives in the header bar, where GNOME settings pages
+        # keep theirs: a row at the bottom of a long scrolling page sat
+        # "who knows where" and vanished entirely once the page grew.
+        self.save_button = Gtk.Button(label=self.t("settings.save"))
+        self.save_button.add_css_class("suggested-action")
+        self.save_button.connect("clicked", self._save)
+        header.pack_start(self.save_button)
+
         toolbar = Adw.ToolbarView()
         toolbar.add_top_bar(header)
         toolbar.set_content(self.stack)
@@ -259,10 +267,20 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         self.toast.add_css_class("window-root")
         self.set_content(self.toast)
 
+        # The button answers on the settings page only: on home it has nothing
+        # to save, and a dead-looking suggested button would invite a click.
+        self.save_button.set_visible(False)
+        self.stack.connect("notify::visible-child", self._save_button_visibility)
+
         GLib.idle_add(self._background_start)
         GLib.idle_add(self._model_state_start)
         GLib.timeout_add(650, self._poll_status)
         GLib.timeout_add(900, self._poll_engine_settings)
+
+    def _save_button_visibility(self, *_args) -> None:
+        """Show the header save button on the settings page, hide it elsewhere."""
+        if hasattr(self, "save_button"):
+            self.save_button.set_visible(self.stack.get_visible_child_name() == "settings")
 
     def t(self, key: str, **kwargs) -> str:
         return tr(key, self.ui_lang, **kwargs)
@@ -645,14 +663,9 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         logs_row.add_suffix(logs_btn)
         diag_group.add(logs_row)
 
-        actions = Adw.PreferencesGroup()
-        page.add(actions)
-        save = Adw.ActionRow(title=self.t("settings.save"))
-        btn = Gtk.Button(label=self.t("settings.save"), valign=Gtk.Align.CENTER)
-        btn.add_css_class("suggested-action")
-        btn.connect("clicked", self._save)
-        save.add_suffix(btn)
-        actions.add(save)
+        # Saving is in the header bar; nothing else belongs in this trailing
+        # group and an empty one would paint a gap, so the page ends with the
+        # diagnostics above.
 
         self._update_engine_visibility()
         self._sync_model_ui()
@@ -903,6 +916,10 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         The question about a fetch has already been asked and answered by the time anything
         calls this, so a refusal here would be a no-op.
         """
+        #: The model the press was about, captured before the thread starts: the
+        #: selection may change while the request is in flight, and the
+        #: confirmation should name what the daemon was actually asked to prepare.
+        self._prepare_requested_model = self._selected_model_id()
 
         def run() -> None:
             try:
@@ -920,8 +937,13 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         threading.Thread(target=run, daemon=True).start()
 
     def _handle_prepare_model_reply(self, reply: dict) -> None:
-        """Say why the daemon refused to prepare the model, as a toast.
+        """Say what the press did, the moment the daemon answers.
 
+        The status poll can take another interval to report the new state, and a
+        network fetch reports its first bytes even later: a press that starts a
+        download therefore looked like a press that did nothing. An accepted
+        request is confirmed at once - a toast and an optimistic row, which the
+        first state report then corrects into the real progress.
         A refusal the window swallowed looked exactly like a button that does
         nothing: the row kept its old state and no word explained the press.
         One refusal stays silent on purpose: ``not_applicable`` is the daemon's
@@ -929,13 +951,37 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         already says that about a local folder - repeating it as a toast on
         every selection would be noise.
         """
-        if reply.get("ok"):
+        if not reply.get("ok"):
+            if str(reply.get("state") or "") == "not_applicable":
+                return
+            error = str(reply.get("error") or "")
+            if error:
+                self._toast(error)
             return
-        if str(reply.get("state") or "") == "not_applicable":
+        model_id = str(getattr(self, "_prepare_requested_model", "") or "")
+        if not model_id:
             return
-        error = str(reply.get("error") or "")
-        if error:
-            self._toast(error)
+        name = display_name(model_id)
+        self._toast(self.t("toast.prepare_started", model=name))
+        # Optimistic row: the daemon is now fetching or loading the selected
+        # model, but the poll that would say so may be up to an interval away.
+        # Painting the accepted state at once is the difference between a
+        # button that visibly started something and one the user presses
+        # again because nothing seemed to happen.
+        entry = self._model_entry if isinstance(self._model_entry, dict) else {}
+        downloaded = bool(entry.get("downloaded"))
+        self._download_report = {
+            "model": model_id,
+            "download": {
+                "state": "downloading" if not downloaded else "warming",
+                "model": model_id,
+                "done_bytes": 0,
+                "total_bytes": 0,
+                "error": "",
+                "warming": downloaded,
+            },
+        }
+        self._apply_download_state(self._download_report)
 
     def _sync_model_ui(self):
         if not hasattr(self, "model"):
