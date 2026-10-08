@@ -239,6 +239,7 @@ def ping_reply(cache: ModelCache, config: WorkerConfig) -> dict[str, Any]:
         # so after an update the new daemon would otherwise hand its requests to a
         # process running the previous version, and nothing would say so.
         "version": __version__,
+        "request_status": True,
         "model": config.model,
         "device": device,
         "compute_type": compute_type_for(device),
@@ -381,6 +382,7 @@ class _WorkerState:
         self._grace = grace
         self._lock = threading.Lock()
         self._active: dict[str, threading.Event] = {}
+        self._running: set[str] = set()
         self._early: dict[str, float] = {}
         #: Work that is not a cancellable request - a model load.
         self._holding = 0
@@ -423,9 +425,20 @@ class _WorkerState:
             self._active[request_id] = event
         return event
 
+    def request_status(self, request_id: str) -> str:
+        with self._lock:
+            if request_id in self._running:
+                return "running"
+            return "queued" if request_id in self._active else "finished"
+
+    def mark_running(self, request_id: str) -> None:
+        with self._lock:
+            self._running.add(request_id)
+
     def finish(self, request_id: str) -> None:
         with self._lock:
             self._active.pop(request_id, None)
+            self._running.discard(request_id)
             self._expire()
 
     def cancel(self, request_id: str) -> bool:
@@ -513,6 +526,10 @@ def _send(conn: socket.socket, reply: dict[str, Any]) -> None:
 
 def _dispatch(payload: Any, cache: ModelCache, config: WorkerConfig, state: _WorkerState) -> dict[str, Any]:
     command = str(payload.get("cmd") or "").strip() if isinstance(payload, dict) else ""
+    if command == "request-status":
+        request_id = str(payload.get("request_id") or "")
+        return {"ok": True, "pid": os.getpid(), "request_id": request_id,
+                "state": state.request_status(request_id)}
     if command == "ping":
         # Never blocked and never waits for the lock: this is how the daemon checks
         # whether a warm-up that takes minutes is finished, and a ping that waited
@@ -527,12 +544,22 @@ def _dispatch(payload: Any, cache: ModelCache, config: WorkerConfig, state: _Wor
     if command != "transcribe":
         return handle_request(payload, cache, config)
     request_id = str(payload.get("request_id") or "")
-    with state.serial:
-        event = state.begin(request_id)
-        try:
-            return handle_request(payload, cache, config, event)
-        finally:
-            state.finish(request_id)
+    event = state.begin(request_id)
+    acquired = False
+    try:
+        while not event.is_set():
+            if state.serial.acquire(timeout=_POLL_INTERVAL):
+                acquired = True
+                break
+        if event.is_set():
+            return {"ok": False, "cancelled": True, "request_id": request_id,
+                    "error": "Transcription cancelled"}
+        state.mark_running(request_id)
+        return handle_request(payload, cache, config, event)
+    finally:
+        if acquired:
+            state.serial.release()
+        state.finish(request_id)
 
 
 def _serve_connection(conn: socket.socket, cache: ModelCache, config: WorkerConfig, state: _WorkerState) -> None:

@@ -69,9 +69,14 @@ class WorkerVersionTests(unittest.TestCase):
         reply = {
             "ok": True,
             "version": __version__,
+            "request_status": True,
             "config": {"model": "small", "device": "auto", "beam_size": 5, "vad": True},
         }
         self.assertTrue(_worker_settings_match(reply, {"model": "small"}))
+
+    def test_same_version_worker_without_recovery_protocol_is_replaced(self):
+        from wayvoice import __version__
+        self.assertFalse(_worker_settings_match({"version": __version__}, {}))
 
     def test_a_worker_started_with_another_model_is_not_used(self):
         # The version is only half of the match: a worker left over from a changed

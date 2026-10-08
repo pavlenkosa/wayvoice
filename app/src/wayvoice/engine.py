@@ -7,6 +7,7 @@ import shlex
 import shutil
 import signal
 import socket
+import struct
 import subprocess
 import sys
 import threading
@@ -749,7 +750,7 @@ def _worker_settings_match(reply: dict[str, Any], cfg: dict[str, Any]) -> bool:
     would otherwise keep talking to the previous version of the code.
     """
     remote_version = str(reply.get("version") or "")
-    if remote_version and remote_version != __version__:
+    if remote_version and (remote_version != __version__ or reply.get("request_status") is not True):
         return False
     remote = reply.get("config")
     if not isinstance(remote, dict):
@@ -809,7 +810,15 @@ def _is_worker_process(pid: int) -> bool:
     return "fw_runner.py" in argv and "--serve" in argv
 
 
-def stop_worker(timeout: float = 2.0) -> bool:
+def _worker_identity(pid: int) -> tuple[int, str] | None:
+    try:
+        fields = Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2].split()
+        return pid, fields[19]  # Linux field 22: process start time.
+    except (OSError, IndexError):
+        return None
+
+
+def stop_worker(timeout: float = 2.0, expected_identity=None, cleanup=True) -> bool:
     """Stop the running worker, if any.
 
     Best effort: this is used to replace a worker that was started for stale
@@ -821,8 +830,14 @@ def stop_worker(timeout: float = 2.0) -> bool:
         pid = int(worker_pid_path().read_text(encoding="utf-8").split()[0])
     except (OSError, ValueError, IndexError):
         pid = 0
+    if expected_identity is not None:
+        pid = expected_identity[0]
+        if _worker_identity(pid) != expected_identity:
+            return False
     if pid > 1 and _is_worker_process(pid):
         for sig in (signal.SIGTERM, signal.SIGKILL):
+            if expected_identity is not None and _worker_identity(pid) != expected_identity:
+                break
             try:
                 os.kill(pid, sig)
             except OSError:
@@ -833,9 +848,19 @@ def stop_worker(timeout: float = 2.0) -> bool:
                 time.sleep(0.1)
             if not _pid_alive(pid):
                 break
+    if expected_identity is not None and _pid_alive(pid):
+        return False
+    if not cleanup:
+        return stopped
     try:
-        worker_pid_path().unlink()
-    except OSError:
+        if expected_identity is None:
+            worker_pid_path().unlink()
+        elif not _pid_alive(pid):
+            # Another operation may already have published a replacement.
+            current_pid = int(worker_pid_path().read_text().split()[0])
+            if current_pid == pid:
+                worker_pid_path().unlink()
+    except (OSError, ValueError, IndexError):
         pass
     # The socket is unlinked only when nothing answers on it.
     #
@@ -989,6 +1014,27 @@ def _worker_send_cancel(request_id: str) -> None:
         pass
 
 
+def _recover_worker_request(request_id, identity):
+    """Retire only the instance still executing this abandoned request."""
+    if identity is None or _worker_identity(identity[0]) != identity:
+        return
+    try:
+        status = _worker_call({"cmd": "request-status", "request_id": request_id}, WORKER_PING_TIMEOUT)
+    except (OSError, ValueError, TimeoutError):
+        status = None
+    if isinstance(status, dict) and status.get("pid") == identity[0] and status.get("request_id") == request_id:
+        if status.get("state") in {"queued", "finished"}:
+            return
+    # Startup may own this lock for seconds. Process identity makes retirement
+    # safe without waiting indefinitely; only the lock owner mutates endpoints.
+    acquired = _worker_lock.acquire(timeout=WORKER_POLL_INTERVAL)
+    try:
+        stop_worker(timeout=0.5, expected_identity=identity, cleanup=acquired)
+    finally:
+        if acquired:
+            _worker_lock.release()
+
+
 def _worker_transcribe(payload: dict[str, Any], request_id: str, timeout: float, cancel_event: Event | None) -> dict[str, Any]:
     """Run one transcription on the worker while honouring cancel and timeout.
 
@@ -1003,32 +1049,56 @@ def _worker_transcribe(payload: dict[str, Any], request_id: str, timeout: float,
         sock.settimeout(WORKER_POLL_INTERVAL)
         try:
             sock.connect(str(worker_socket_path()))
+            peer_pid = struct.unpack("3i", sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))[0]
+            identity = _worker_identity(peer_pid)
+            try:
+                health = _worker_call({"cmd": "request-status", "request_id": request_id}, WORKER_PING_TIMEOUT)
+            except (OSError, ValueError, TimeoutError) as exc:
+                raise WorkerUnavailable("worker recovery protocol is unavailable") from exc
+            if not (health.get("ok") and health.get("pid") == peer_pid
+                    and health.get("request_id") == request_id
+                    and health.get("state") in {"queued", "running", "finished"}):
+                raise WorkerUnavailable("worker does not support request recovery")
+            if cancel_event is not None and cancel_event.is_set():
+                raise TranscriptionCancelled("Transcription cancelled")
             sock.sendall((json.dumps(payload) + "\n").encode("utf-8"))
             started = time.monotonic()
             cancel_deadline: float | None = None
+            failure = None
             data = bytearray()
             while True:
                 if cancel_event is not None and cancel_event.is_set() and cancel_deadline is None:
                     _worker_send_cancel(request_id)
                     cancel_deadline = time.monotonic() + WORKER_CANCEL_GRACE
-                if cancel_deadline is not None:
-                    # Give the worker a moment to unwind, then give up on it.
-                    if time.monotonic() >= cancel_deadline:
-                        raise TranscriptionCancelled("Transcription cancelled")
-                elif timeout > 0 and time.monotonic() - started >= timeout:
+                    failure = TranscriptionCancelled("Transcription cancelled")
+                if cancel_deadline is None and timeout > 0 and time.monotonic() - started >= timeout:
                     _worker_send_cancel(request_id)
-                    raise TranscriptionTimeout(f"Transcription exceeded {int(timeout)} seconds")
+                    cancel_deadline = time.monotonic() + WORKER_CANCEL_GRACE
+                    failure = TranscriptionTimeout(f"Transcription exceeded {int(timeout)} seconds")
+                if cancel_deadline is not None and time.monotonic() >= cancel_deadline:
+                    _recover_worker_request(request_id, identity)
+                    raise failure
                 try:
                     chunk = sock.recv(65536)
                 except TimeoutError:
                     continue
                 except OSError as exc:
+                    if failure is not None:
+                        raise failure
+                    if cancel_event is not None and cancel_event.is_set():
+                        raise TranscriptionCancelled("Transcription cancelled") from exc
                     raise WorkerUnavailable(f"worker connection failed: {exc}") from exc
                 if not chunk:
+                    if failure is not None:
+                        raise failure
+                    if cancel_event is not None and cancel_event.is_set():
+                        raise TranscriptionCancelled("Transcription cancelled")
                     raise WorkerUnavailable("worker closed the connection")
                 data.extend(chunk)
                 if data.endswith(b"\n"):
                     break
+            if failure is not None:
+                raise failure
             if cancel_event is not None and cancel_event.is_set():
                 # The answer was in flight when the user pressed cancel: honour it,
                 # the one-shot runner would have killed the process instead.
@@ -1039,8 +1109,8 @@ def _worker_transcribe(payload: dict[str, Any], request_id: str, timeout: float,
                 raise WorkerUnavailable(f"malformed worker reply: {exc}") from exc
         finally:
             sock.close()
-        if not isinstance(reply, dict):
-            raise WorkerUnavailable("malformed worker reply")
+        if not isinstance(reply, dict) or reply.get("request_id") != request_id:
+            raise WorkerUnavailable("malformed worker reply or mismatched request id")
         return reply
 
 
