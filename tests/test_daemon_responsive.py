@@ -29,7 +29,7 @@ from wayvoice import notify as notify_mod
 from wayvoice.daemon import WayVoiceDaemon
 from wayvoice.protocol import socket_path
 
-from support import isolate_engine, isolate_environment
+from tests.support import isolate_engine, isolate_environment
 
 #: The real dispatcher, captured before any test patches the class: the tests below
 #: make one command slow and need every other one to behave normally.

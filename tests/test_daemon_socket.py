@@ -10,7 +10,7 @@ from unittest import mock
 
 from wayvoice.daemon import WayVoiceDaemon
 
-from support import isolate_engine, isolate_environment
+from tests.support import isolate_engine, isolate_environment
 from wayvoice.protocol import socket_path
 
 

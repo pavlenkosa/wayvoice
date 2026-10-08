@@ -13,7 +13,7 @@ from pathlib import Path
 from unittest import mock
 
 from wayvoice import daemon as daemon_mod, engine
-from support import isolate_environment, isolate_engine
+from tests.support import isolate_environment, isolate_engine
 
 
 def alive(pid):

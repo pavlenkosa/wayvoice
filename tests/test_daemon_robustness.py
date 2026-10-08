@@ -22,7 +22,7 @@ from wayvoice import daemon as daemon_mod
 from wayvoice.daemon import CLIENT_TIMEOUT, MAX_REQUEST_BYTES, WayVoiceDaemon
 from wayvoice.protocol import owner_lock_path, socket_path
 
-from support import isolate_engine, isolate_environment
+from tests.support import isolate_engine, isolate_environment
 
 
 def _ping(path, timeout=2.0):

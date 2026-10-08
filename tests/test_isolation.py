@@ -17,7 +17,7 @@ from pathlib import Path
 
 from wayvoice import engine
 
-import support
+from tests import support
 
 
 class _Case(unittest.TestCase):

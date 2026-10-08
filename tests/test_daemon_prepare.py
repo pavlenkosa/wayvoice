@@ -22,7 +22,7 @@ from wayvoice.daemon import WayVoiceDaemon
 from wayvoice.engine import Engine
 from wayvoice.protocol import socket_path
 
-from support import isolate_engine, isolate_environment
+from tests.support import isolate_engine, isolate_environment
 
 
 def make_engine(*, present: bool, states: list[str] | None = None, progress=None,

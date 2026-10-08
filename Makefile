@@ -14,7 +14,7 @@ lint: version-check
 	  done
 
 test:
-	PYTHONPATH=app/src python3 -m unittest discover -s tests -v
+	PYTHONPATH=app/src python3 -m unittest discover -s tests -t . -v
 
 deb: version-check
 	./scripts/build-deb.sh

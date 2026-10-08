@@ -22,7 +22,7 @@ from unittest import mock
 
 from wayvoice import engine, model_store
 
-from support import isolate_engine, isolate_environment
+from tests.support import isolate_engine, isolate_environment
 
 #: A stand-in for model_fetch.py: speaks the protocol, needs no network.
 FAKE_HELPER = """

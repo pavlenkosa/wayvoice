@@ -6,8 +6,8 @@ from pathlib import Path
 from unittest import mock
 
 from wayvoice import audio, daemon as dm
-from test_audio import FakeProc
-from support import isolate_environment, isolate_engine
+from tests.test_audio import FakeProc
+from tests.support import isolate_environment, isolate_engine
 
 
 class RecorderDeathTests(unittest.TestCase):

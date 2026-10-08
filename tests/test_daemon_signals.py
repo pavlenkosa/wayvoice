@@ -23,7 +23,7 @@ from pathlib import Path
 from wayvoice import engine
 from wayvoice.paths import app_src_dir, python_executable
 
-from support import isolate_environment
+from tests.support import isolate_environment
 
 #: Stands in for pw-record: writes the file, then keeps appending to it for as long
 #: as it lives.

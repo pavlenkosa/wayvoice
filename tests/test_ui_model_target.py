@@ -10,7 +10,7 @@ except (ImportError, ValueError):
     GI_AVAILABLE = False
 else:
     GI_AVAILABLE = True
-    from ui_support import controller_context
+    from tests.ui_support import controller_context
     from wayvoice.ui.controllers import models
 
 

@@ -12,7 +12,7 @@ from unittest import mock
 
 from wayvoice import engine, model_store
 
-from support import isolate_environment
+from tests.support import isolate_environment
 
 
 class RuntimeMissingTests(unittest.TestCase):
