@@ -37,7 +37,8 @@ class AudioRecorder:
         fd, name = tempfile.mkstemp(prefix="wayvoice-", suffix=".wav")
         os.close(fd)
         path = Path(name)
-        path.unlink(missing_ok=True)
+        # Keep the private inode: libsndfile truncates it without replacing its
+        # 0600 permissions. Unlinking here recreated it using the caller umask.
 
         cmd = [
             "pw-record",
@@ -46,17 +47,21 @@ class AudioRecorder:
             "--channel-map=mono",
             str(path),
         ]
-        self._proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
-            # Its own session: pw-record holds the microphone, and a daemon that is
-            # killed must not leave a recorder behind still holding it. Being in its
-            # own session it also ignores the daemon's terminal signals, so it is
-            # stopped deliberately - through stop_to_wav()/cancel().
-            start_new_session=True,
-        )
+        try:
+            self._proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+                # Its own session: pw-record holds the microphone, and a daemon that is
+                # killed must not leave a recorder behind still holding it. Being in its
+                # own session it also ignores the daemon's terminal signals, so it is
+                # stopped deliberately - through stop_to_wav()/cancel().
+                start_new_session=True,
+            )
+        except Exception:
+            path.unlink(missing_ok=True)
+            raise
         self._path = path
 
         # Detect immediate PipeWire failures instead of pretending to record.
@@ -86,21 +91,23 @@ class AudioRecorder:
         self._proc = None
         self._path = None
         self._finished = None
-        if proc and proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=1.0)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                # Reap it: an unreaped child stays in the process table as a zombie
-                # for as long as this daemon lives, and a daemon that is cancelled
-                # often would accumulate one per dictation.
+        try:
+            if proc and proc.poll() is None:
+                proc.terminate()
                 try:
-                    proc.wait(timeout=0.5)
+                    proc.wait(timeout=1.0)
                 except subprocess.TimeoutExpired:
-                    pass
-        if path:
-            path.unlink(missing_ok=True)
+                    proc.kill()
+                    # Reap it: an unreaped child stays in the process table as a zombie
+                    # for as long as this daemon lives, and a daemon that is cancelled
+                    # often would accumulate one per dictation.
+                    try:
+                        proc.wait(timeout=0.5)
+                    except subprocess.TimeoutExpired:
+                        pass
+        finally:
+            if path:
+                path.unlink(missing_ok=True)
 
     def stop_to_wav(self) -> Path:
         proc, path = self._proc, self._path
@@ -131,6 +138,6 @@ class AudioRecorder:
             path.unlink(missing_ok=True)
             raise RuntimeError(err or "Запись микрофона получилась пустой.")
         # Remember it: the caller owns it from here on and normally deletes it
-        # itself, but if this process dies first, cancel() is what removes it.
+        # itself; cancel() must not delete a file still being read by ASR.
         self._finished = path
         return path

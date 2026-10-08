@@ -7,7 +7,10 @@ that dies later leaving a half-written file, and a cancel that has to clean up b
 process and the temporary recording.
 """
 
+import ctypes
+import ctypes.util
 import os
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -88,6 +91,81 @@ class RecorderTests(unittest.TestCase):
             return proc
 
         return mock.patch.object(audio.subprocess, "Popen", side_effect=factory)
+
+    def test_backend_truncation_keeps_recording_private_for_any_umask(self):
+        library = ctypes.util.find_library("sndfile")
+        if not library:
+            self.skipTest("libsndfile unavailable")
+        backend = ctypes.CDLL(library)
+
+        class Info(ctypes.Structure):
+            _fields_ = [("frames", ctypes.c_int64), ("samplerate", ctypes.c_int),
+                        ("channels", ctypes.c_int), ("format", ctypes.c_int),
+                        ("sections", ctypes.c_int), ("seekable", ctypes.c_int)]
+
+        backend.sf_open.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(Info)]
+        backend.sf_open.restype = ctypes.c_void_p
+        backend.sf_write_short.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_short),
+                                          ctypes.c_int64]
+        backend.sf_write_short.restype = ctypes.c_int64
+        backend.sf_close.argtypes = [ctypes.c_void_p]
+        backend.sf_close.restype = ctypes.c_int
+        for mask in (0o000, 0o002, 0o022):
+            with self.subTest(umask=mask):
+                proc = FakeProc(alive=True, hang_first=True)
+
+                def open_backend(cmd, **kwargs):
+                    path = Path(cmd[-1])
+                    self.assertTrue(path.is_file(), "private inode must exist before backend opens it")
+                    self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+                    previous = os.umask(mask)
+                    try:
+                        info = Info(0, 16000, 1, 0x010002, 0, 0)  # WAV/PCM16
+                        handle = backend.sf_open(os.fsencode(path), 0x20, ctypes.byref(info))
+                        self.assertTrue(handle, "libsndfile cannot open precreated WAV")
+                        try:
+                            samples = (ctypes.c_short * 1024)()
+                            self.assertEqual(backend.sf_write_short(handle, samples, 1024), 1024)
+                        finally:
+                            self.assertEqual(backend.sf_close(handle), 0)
+                    finally:
+                        os.umask(previous)
+                    self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+                    return proc
+
+                with self._patch_which(), mock.patch.object(audio.subprocess, "Popen", side_effect=open_backend):
+                    self.recorder.start()
+                    path = self.recorder.stop_to_wav()
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+                self.recorder.cancel()
+                self.assertTrue(path.exists(), "ASR owns a handed-off recording")
+                path.unlink()
+
+    def test_failed_spawn_removes_private_file_and_handles(self):
+        paths = []
+
+        def fail(cmd, **kwargs):
+            paths.append(Path(cmd[-1]))
+            raise OSError("spawn denied")
+
+        with self._patch_which(), mock.patch.object(audio.subprocess, "Popen", side_effect=fail):
+            with self.assertRaisesRegex(OSError, "spawn denied"):
+                self.recorder.start()
+        self.assertFalse(paths[0].exists())
+        self.assertIsNone(self.recorder._proc)
+        self.assertIsNone(self.recorder._path)
+
+    def test_cancel_removes_private_file_even_if_termination_fails(self):
+        proc = FakeProc(alive=True, hang_first=True)
+        with self._patch_which(), self._patch_popen(proc):
+            self.recorder.start()
+        path = self.recorder._path
+        with mock.patch.object(proc, "terminate", side_effect=ProcessLookupError()):
+            with self.assertRaises(ProcessLookupError):
+                self.recorder.cancel()
+        self.assertFalse(path.exists())
+        self.assertIsNone(self.recorder._proc)
+        self.assertIsNone(self.recorder._path)
 
     def test_a_missing_pw_record_is_reported_by_name(self):
         with self._patch_which(present=False):
