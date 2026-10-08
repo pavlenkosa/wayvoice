@@ -106,3 +106,19 @@ class StartRollbackTests(unittest.TestCase):
         self.assertTrue(path.exists())
         self.assertTrue(self.d.cancel()["ok"])
         self.assertFalse(path.exists())
+
+    def test_idle_cancel_retries_pending_wav_cleanup(self):
+        from pathlib import Path
+        reply, proc = self.start(mock.Mock(return_value=mock.Mock()))
+        self.assertTrue(reply["ok"])
+        path = self.paths[-1]
+        self.addCleanup(path.unlink, missing_ok=True)
+        with mock.patch.object(Path, "unlink", side_effect=PermissionError("cleanup denied")):
+            self.assertFalse(self.d.cancel()["ok"])
+            self.assertFalse(self.d.recorder.recording)
+            self.assertIsNone(self.d.recorder._proc)
+            self.assertEqual(self.d.recorder._path, path)
+            self.assertFalse(self.d.cancel()["ok"])
+        self.assertTrue(self.d.cancel()["ok"])
+        self.assertFalse(path.exists())
+        self.assertIsNone(self.d.recorder._path)

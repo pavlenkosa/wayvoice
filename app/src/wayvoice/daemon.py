@@ -518,6 +518,12 @@ class WayVoiceDaemon:
             if self.busy:
                 self._transcribe_cancel.set()
                 return {"ok": True, "state": "cancelling"}
+            # A stopped recorder may still own a WAV whose unlink failed.
+            try:
+                self.recorder.cancel()
+            except Exception as exc:
+                self.last_error = str(exc)
+                return {"ok": False, "error": str(exc)}
             return {"ok": True, "state": "idle"}
 
     def stop_recording(self) -> dict:

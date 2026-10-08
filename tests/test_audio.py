@@ -236,6 +236,46 @@ class RecorderTests(unittest.TestCase):
         self.assertFalse(path.exists())
         proc.stderr.close.assert_called_once()
 
+    def test_unlink_failure_blocks_new_spawn_until_cleanup_succeeds(self):
+        old = FakeProc(alive=True, hang_first=True)
+        with self._patch_which(), self._patch_popen(old):
+            self.recorder.start()
+        path = self.recorder._path
+        self.addCleanup(path.unlink, missing_ok=True)
+        unlink = Path.unlink
+        def deny(take, *args, **kwargs):
+            if take == path:
+                raise PermissionError("cleanup denied")
+            return unlink(take, *args, **kwargs)
+        with mock.patch.object(Path, "unlink", deny):
+            with self.assertRaises(PermissionError):
+                self.recorder.cancel()
+            self.assertIsNone(self.recorder._proc)
+            self.assertEqual(self.recorder._path, path)
+            with mock.patch.object(audio.subprocess, "Popen") as spawn:
+                with self.assertRaisesRegex(PermissionError, "cleanup denied"):
+                    self.recorder.start()
+            spawn.assert_not_called()
+        fresh = FakeProc(alive=True, hang_first=True)
+        with self._patch_which(), self._patch_popen(fresh):
+            self.recorder.start()
+        self.assertFalse(path.exists())
+        self.assertIs(self.recorder._proc, fresh)
+        self.assertNotEqual(self.recorder._path, path)
+
+    def test_failed_spawn_retains_path_if_cleanup_also_fails(self):
+        with self._patch_which(), mock.patch.object(audio.subprocess, "Popen", side_effect=OSError("spawn denied")), \
+             mock.patch.object(Path, "unlink", side_effect=PermissionError("cleanup denied")):
+            with self.assertRaisesRegex(RuntimeError, "spawn denied.*cleanup denied"):
+                self.recorder.start()
+        path = self.recorder._path
+        self.assertIsNotNone(path)
+        self.assertTrue(path.exists())
+        self.assertIsNone(self.recorder._proc)
+        self.recorder.cancel()
+        self.assertFalse(path.exists())
+        self.assertIsNone(self.recorder._path)
+
     def test_a_missing_pw_record_is_reported_by_name(self):
         with self._patch_which(present=False):
             with self.assertRaises(RuntimeError) as caught:
@@ -409,7 +449,7 @@ class RecorderTests(unittest.TestCase):
         self.assertEqual(self.recorder.take_failure(), "late failure")
         self.assertTrue(proc.stderr.closed)
 
-    def test_unlink_error_is_reported_without_retaining_dead_handles(self):
+    def test_unlink_error_retains_cleanup_path_without_dead_process(self):
         proc = FakeProc(alive=False, stderr="lost device")
         self.recorder._proc = proc
         self.recorder._path = mock.Mock()
@@ -417,9 +457,13 @@ class RecorderTests(unittest.TestCase):
         message = self.recorder.take_failure()
         self.assertIn("lost device", message)
         self.assertIn("denied", message)
-        self.assertIsNone(self.recorder._path)
+        pending = self.recorder._path
+        self.assertIsNotNone(pending)
         self.assertIsNone(self.recorder._proc)
         proc.stderr.close.assert_called_once()
+        pending.unlink.side_effect = None
+        self.recorder.cancel()
+        self.assertIsNone(self.recorder._path)
 
     def test_successful_handoff_closes_stderr_and_is_not_reconciled_or_deleted(self):
         proc = FakeProc(alive=True, hang_first=True)

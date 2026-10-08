@@ -74,6 +74,10 @@ class AudioRecorder:
         failure = self.take_failure()
         if failure:
             raise RuntimeError(failure)
+        # A stopped take remains ours until unlink succeeds. Do not overwrite
+        # its path with a new recording after a filesystem cleanup failure.
+        if self._path is not None:
+            self.cancel()
         if not shutil.which("pw-record"):
             raise RuntimeError(describe_missing("pipewire"))
 
@@ -90,6 +94,7 @@ class AudioRecorder:
             "--channel-map=mono",
             str(path),
         ]
+        self._path = path
         try:
             self._proc = subprocess.Popen(
                 cmd,
@@ -102,10 +107,12 @@ class AudioRecorder:
                 # stopped deliberately - through stop_to_wav()/cancel().
                 start_new_session=True,
             )
-        except Exception:
-            path.unlink(missing_ok=True)
+        except Exception as exc:
+            try:
+                self.cancel()
+            except Exception as cleanup_exc:
+                raise RuntimeError(f"{exc} Could not remove recording: {cleanup_exc}") from exc
             raise
-        self._path = path
 
         # Detect immediate PipeWire failures instead of pretending to record.
         try:
@@ -143,10 +150,10 @@ class AudioRecorder:
             # process, private take and stderr available for a later cancel.
             if proc is None or proc.poll() is not None:
                 self._proc = None
-                self._path = None
                 try:
                     if path:
                         path.unlink(missing_ok=True)
+                    self._path = None
                 finally:
                     self._close_stderr(proc)
 
