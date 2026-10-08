@@ -500,7 +500,8 @@ class DownloadErrorTests(unittest.TestCase):
                 source += (Path(__file__).resolve().parent.parent / origin).read_text(
                     encoding="utf-8"
                 )
-        self.assertIn("self.ctx.tasks.idle(self._handle_prepare_model_reply, reply)", source)
+        self.assertIn("self.ctx.tasks.run(", source)
+        self.assertIn("self._handle_prepare_model_reply(reply, model_id, engine_id, sequence)", source)
 
     def test_a_daemon_that_does_not_answer_says_so(self):
         # request() already answers with a dict when the daemon is gone; it is
@@ -524,8 +525,7 @@ class DownloadErrorTests(unittest.TestCase):
         # and an optimistic row in the accepted state, which the first real
         # state report then corrects.
         self._entry()
-        self.window.models._prepare_requested_model = "small"
-        self.window.models._handle_prepare_model_reply({"ok": True, "state": "downloading"})
+        self.window.models._handle_prepare_model_reply({"ok": True, "state": "downloading"}, "small")
         self.assertEqual(
             self.window.window.toast.titles, [self.window.state.t("toast.prepare_started", model="Small")])
         download = self.window.models._download_report["download"]
@@ -536,9 +536,8 @@ class DownloadErrorTests(unittest.TestCase):
         # Weights already on disk: the accepted work is a load into memory, and
         # an optimistic "downloading" would announce a fetch that never happens.
         self._entry()
-        self.window.models._prepare_requested_model = "small"
         self.window.models._model_entry["downloaded"] = True
-        self.window.models._handle_prepare_model_reply({"ok": True, "state": "warming"})
+        self.window.models._handle_prepare_model_reply({"ok": True, "state": "warming"}, "small")
         self.assertEqual(self.window.models._download_report["download"]["state"], "warming")
 
     def test_the_optimistic_row_is_not_painted_for_a_foreign_model(self):
@@ -547,9 +546,8 @@ class DownloadErrorTests(unittest.TestCase):
         # first poll would have to correct, so the confirmation names and
         # paints the model the press was about, not the current selection.
         self._entry()
-        self.window.models._prepare_requested_model = "small"
         self.window.models._model_entry["id"] = "medium"
-        self.window.models._handle_prepare_model_reply({"ok": True, "state": "downloading"})
+        self.window.models._handle_prepare_model_reply({"ok": True, "state": "downloading"}, "small")
         self.assertEqual(
             self.window.window.toast.titles, [self.window.state.t("toast.prepare_started", model="Small")])
         self.assertEqual(self.window.models._download_report["download"]["model"], "small")

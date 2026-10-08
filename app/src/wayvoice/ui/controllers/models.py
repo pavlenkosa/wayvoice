@@ -1,5 +1,6 @@
 """ModelsController owns its operations; pages own widgets."""
 
+import json
 import sys
 import threading
 
@@ -21,7 +22,7 @@ class ModelsController:
         self._model_refresh_pending = False
         self._download_confirmation_for = None
         self._model_deleting = False
-        self._prepare_requested_model = None
+        self._prepare_request_seq = 0
 
 
     def _selected_model_preset(self):
@@ -58,7 +59,7 @@ class ModelsController:
         if not self._download_confirmation_for or model_id != self._download_confirmation_for:
             return
         self._download_confirmation_for = None
-        if entry.get("downloaded"):
+        if entry.get("inference_ready", entry.get("downloaded")):
             # Free, and invisible otherwise: the first dictation would pay for loading
             # the model, and nothing would have said so.
             self._ask_daemon_to_prepare_model()
@@ -73,44 +74,28 @@ class ModelsController:
     def _ask_about_download(self, model_id: str, size_bytes: int) -> None:
         """The question, before the gigabytes."""
         from ..dialogs.confirmations import download_confirmation
-        download_confirmation(self.ctx.window, model_id, size_bytes, self.ctx.state.t, self.ctx.state.ui_lang, self._download_confirmed)
+        engine_id = self.ctx.preferences._selected_engine_object().id
+        confirmed = lambda button, win: self._download_confirmed(button, win, model_id, engine_id)
+        download_confirmation(self.ctx.window, model_id, size_bytes, self.ctx.state.t, self.ctx.state.ui_lang, confirmed)
 
-    def _download_confirmed(self, _button, win) -> None:
+    def _download_confirmed(self, _button, win, model_id, engine_id) -> None:
         win.close()
-        self._ask_daemon_to_prepare_model()
+        self._ask_daemon_to_prepare_model(model_id, engine_id)
 
-    def _ask_daemon_to_prepare_model(self) -> None:
-        """Ask the daemon to make the selected model ready, off the main loop.
+    def _ask_daemon_to_prepare_model(self, model_id=None, engine_id=None) -> None:
+        """Prepare a captured draft target without saving it or replacing the worker."""
+        model_id = model_id or self._selected_model_id()
+        engine_id = engine_id or self.ctx.preferences._selected_engine_object().id
+        self._prepare_request_seq += 1
+        sequence = self._prepare_request_seq
+        command = "prepare-model " + json.dumps({"engine": engine_id, "model": model_id})
+        self.ctx.tasks.run(
+            lambda: request(command, timeout=5.0),
+            lambda reply: self._handle_prepare_model_reply(reply, model_id, engine_id, sequence),
+            lambda exc: self._handle_prepare_model_reply({"ok": False, "error": str(exc)}, model_id, engine_id, sequence),
+        )
 
-        Which half this is depends on what the model needs: a fetch if its weights are not on
-        disk, a load into the worker if they are. Both belong to the daemon - the download is
-        its child process, and only it can end that child without leaving a helper running -
-        so this asks rather than does, and the answer comes back on the next status poll.
-
-        The question about a fetch has already been asked and answered by the time anything
-        calls this, so a refusal here would be a no-op.
-        """
-        #: The model the press was about, captured before the thread starts: the
-        #: selection may change while the request is in flight, and the
-        #: confirmation should name what the daemon was actually asked to prepare.
-        self._prepare_requested_model = self._selected_model_id()
-
-        def run() -> None:
-            try:
-                reply = request("prepare-model", timeout=5.0)
-                # What the reply means is the user's business, and GTK is
-                # touched on the main loop only: hand it over, decide there.
-                if isinstance(reply, dict):
-                    self.ctx.tasks.idle(self._handle_prepare_model_reply, reply)
-            except Exception as exc:
-                print(
-                    f"WayVoice: could not ask the daemon to prepare the model: {exc}",
-                    file=sys.stderr,
-                )
-
-        threading.Thread(target=run, daemon=True).start()
-
-    def _handle_prepare_model_reply(self, reply: dict) -> None:
+    def _handle_prepare_model_reply(self, reply: dict, model_id=None, engine_id=None, sequence=None) -> None:
         """Say what the press did, the moment the daemon answers.
 
         The status poll can take another interval to report the new state, and a
@@ -125,6 +110,10 @@ class ModelsController:
         already says that about a local folder - repeating it as a toast on
         every selection would be noise.
         """
+        if sequence is not None and sequence != self._prepare_request_seq:
+            return
+        if not isinstance(reply, dict):
+            return
         if not reply.get("ok"):
             if str(reply.get("state") or "") == "not_applicable":
                 return
@@ -132,7 +121,7 @@ class ModelsController:
             if error:
                 self.ctx.window._toast(error)
             return
-        model_id = str(getattr(self, "_prepare_requested_model", "") or "")
+        model_id = str(model_id or reply.get("model") or "")
         if not model_id:
             return
         name = display_name(model_id)
@@ -142,20 +131,25 @@ class ModelsController:
         # Painting the accepted state at once is the difference between a
         # button that visibly started something and one the user presses
         # again because nothing seemed to happen.
-        entry = self._model_entry if isinstance(self._model_entry, dict) else {}
-        downloaded = bool(entry.get("downloaded"))
+        if engine_id and engine_id != self.ctx.preferences._selected_engine_object().id:
+            return
+        phase = str(reply.get("state") or "ready")
+        if phase not in {"downloading", "warming"}:
+            self._refresh_model_state()
+            return
         self._download_report = {
             "model": model_id,
             "download": {
-                "state": "downloading" if not downloaded else "warming",
+                "state": phase,
                 "model": model_id,
                 "done_bytes": 0,
                 "total_bytes": 0,
                 "error": "",
-                "warming": downloaded,
+                "warming": phase == "warming",
             },
         }
-        self._apply_download_state(self._download_report)
+        if model_id == self._selected_model_id():
+            self._apply_download_state(self._download_report)
 
     def _sync_model_ui(self):
         if not hasattr(self.ctx.settings, "model"):
@@ -223,7 +217,7 @@ class ModelsController:
         model_id = str(entry.get("id") or "")
         # Check if the model is a repo model (hub model) and not downloaded
         is_repo_model = str(entry.get("kind") or "") == model_store.KIND_REPO
-        is_not_downloaded = not entry.get("downloaded")
+        is_not_downloaded = not entry.get("inference_ready", entry.get("downloaded"))
         # Determine if button should be visible
         wanted = (
             is_repo_model
@@ -368,6 +362,11 @@ class ModelsController:
     def _model_state_worker(self, model_id: str) -> None:
         try:
             entry = model_store.describe(model_id)
+            try:
+                model_store.inference_dir(model_id)
+                entry["inference_ready"] = True
+            except RuntimeError:
+                entry["inference_ready"] = False
             free_bytes = model_store.disk_free()
             total_bytes = model_store.total_size()
             cache_bytes = model_store.hub_size()

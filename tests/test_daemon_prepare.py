@@ -9,6 +9,8 @@ The engine is faked: what is under test is the daemon's own behaviour, not the h
 """
 
 import contextlib
+import json
+from dataclasses import replace
 import threading
 import types
 import time
@@ -643,6 +645,68 @@ class StartupTests(unittest.TestCase):
         report = daemon.status()["model"]
         self.assertFalse(report["warming"])
         self.assertTrue(report["present"])
+
+
+class AddressedPrepareTests(DaemonCase):
+    def test_unsaved_target_downloads_exact_model_without_config_or_worker_changes(self):
+        eng, calls = make_engine(present=False)
+        seen = []
+        original = eng.model_download
+        def download(cfg, *args):
+            seen.append(dict(cfg))
+            return original(cfg, *args)
+        eng = replace(eng, model_download=download)
+        harness = PrepareDaemon(self, eng, calls)
+        before = dict(harness.config)
+        with mock.patch("wayvoice.engine.warm_worker") as warm:
+            reply = harness.daemon.dispatch('prepare-model ' + json.dumps({"engine": "faster-whisper", "model": "MyOrg/MyModel"}))
+            harness.settle()
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["model"], "MyOrg/MyModel")
+        self.assertEqual(seen[-1]["model"], "MyOrg/MyModel")
+        self.assertFalse(seen[-1]["engine_worker"])
+        self.assertEqual(harness.config, before)
+        self.assertEqual(harness.daemon.status()["model"]["model"], "small")
+        warm.assert_not_called()
+
+    def test_invalid_payload_never_starts_preparation(self):
+        eng, calls = make_engine(present=False)
+        harness = PrepareDaemon(self, eng, calls)
+        invalid = ('{', '[]', '{}', '{"engine":"unknown","model":"small"}',
+                   '{"engine":"faster-whisper","model":3}',
+                   '{"engine":"faster-whisper","model":""}',
+                   '{"engine":"faster-whisper","model":"small","notify":true}')
+        with mock.patch.object(harness.daemon, "_start_model_prepare") as start:
+            for payload in invalid:
+                with self.subTest(payload=payload):
+                    reply = harness.daemon.dispatch("prepare-model " + payload)
+                    self.assertFalse(reply["ok"])
+                    self.assertEqual(reply["state"], "invalid_target")
+        start.assert_not_called()
+
+    def test_busy_request_for_present_other_model_is_not_reported_ready(self):
+        eng, calls = make_engine(present=True)
+        harness = PrepareDaemon(self, eng, calls)
+        harness.daemon._prepare_running = True
+        harness.daemon._download = {"state": "downloading", "model": "medium"}
+        reply = harness.daemon.dispatch('prepare-model {"engine":"faster-whisper","model":"small"}')
+        self.assertFalse(reply["ok"])
+        self.assertEqual(reply["state"], "busy")
+        self.assertEqual(reply["active_model"], "medium")
+        harness.daemon._prepare_running = False
+
+    def test_preparation_thread_owns_config_snapshot(self):
+        eng, calls = make_engine(present=False)
+        harness = PrepareDaemon(self, eng, calls)
+        cfg = dict(harness.config)
+        with mock.patch.object(daemon_mod.threading, "Thread") as thread:
+            harness.daemon._start_model_prepare(cfg)
+            captured = thread.call_args.kwargs["args"][0]
+            cfg["model"] = "medium"
+            self.assertEqual(captured["model"], "small")
+            self.assertIsNot(captured, cfg)
+        harness.daemon._prepare_running = False
+        harness.daemon._prepare_thread = None
 
 
 if __name__ == "__main__":

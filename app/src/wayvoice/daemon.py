@@ -22,6 +22,7 @@ from .engine import (
     TranscriptionCancelled,
     TranscriptionTimeout,
     engine_from_config,
+    get_engine,
     engine_status,
     model_state,
     prepare_model,
@@ -192,7 +193,7 @@ class WayVoiceDaemon:
         "already done", which used to leave someone who had just picked a different model
         facing a slow first dictation with nothing having told them it was coming.
         """
-        settings = cfg or load_config()
+        settings = dict(cfg or load_config())
         engine = engine_from_config(settings)
         state = model_state(engine, settings)
         if not state["supported"]:
@@ -598,7 +599,10 @@ class WayVoiceDaemon:
                 print(f"WayVoice: could not remove {wav}: {exc}", file=sys.stderr)
 
     def dispatch(self, command: str) -> dict:
-        command = command.strip().lower()
+        raw = command.strip()
+        name, _, target_json = raw.partition(" ")
+        addressed = name.lower() == "prepare-model" and bool(target_json)
+        command = name.lower() if addressed else raw.lower()
         if command == "toggle":
             return self.toggle()
         if command == "start":
@@ -614,14 +618,38 @@ class WayVoiceDaemon:
             self.last_warning = ""
             return {"ok": True}
         if command == "prepare-model":
-            cfg = load_config()
+            cfg = dict(load_config())
+            if addressed:
+                try:
+                    target = json.loads(target_json)
+                    if not isinstance(target, dict) or set(target) != {"engine", "model"}:
+                        raise ValueError("Expected engine and model")
+                    if any(not isinstance(target[key], str) or not target[key].strip()
+                           for key in ("engine", "model")):
+                        raise ValueError("Engine and model must be nonempty strings")
+                    if any(ord(ch) < 32 for ch in target["model"]):
+                        raise ValueError("Invalid model name")
+                    if get_engine(target["engine"]) is None:
+                        raise ValueError("Unknown engine")
+                except (ValueError, TypeError) as exc:
+                    return {"ok": False, "state": "invalid_target", "error": str(exc)}
+                cfg.update(target)
+                # A Settings draft prepares files, never replaces the live dictation
+                # worker. Save/startup (or the bare CLI) owns warming saved settings.
+                cfg["engine_worker"] = False
             phase = self._start_model_prepare(cfg)
             if phase:
                 # What was started, not what was hoped for: a model that was on
                 # disk is warmed rather than fetched, and a caller that says
                 # "downloading" for both would promise the user a progress bar
                 # that never moves.
-                return {"ok": True, "state": phase}
+                return {"ok": True, "state": phase, "model": cfg.get("model"),
+                        "engine": cfg.get("engine", DEFAULT_ENGINE)}
+            with self._lock:
+                if self._prepare_running:
+                    return {"ok": False, "state": "busy", "model": cfg.get("model"),
+                            "active_model": self._download.get("model"),
+                            "error": tr("daemon.model_prepare_busy", cfg.get("ui_language"))}
             state = self._model_report(cfg)
             if not state["supported"]:
                 # A local directory or an engine without hub models. There is
@@ -633,7 +661,8 @@ class WayVoiceDaemon:
                     "state": "not_applicable",
                 }
             if state["present"]:
-                return {"ok": True, "state": "ready"}
+                return {"ok": True, "state": "ready", "model": cfg.get("model"),
+                        "engine": cfg.get("engine", DEFAULT_ENGINE)}
             # Not started: a download is already running, or one just failed.
             download = state["download"]
             return {
