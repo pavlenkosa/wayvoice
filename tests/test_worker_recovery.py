@@ -27,14 +27,14 @@ def serve(c):
             if r in events: events[r].set()
             reply={'ok':True}
         elif cmd=='request-status':
-            reply={'ok':True,'pid':os.getpid(),'request_id':r,'state':'running' if r in active else 'finished'}
+            reply={'ok':True,'pid':os.getpid(),'request_id':r,'state':'running' if r in active else 'finished','warm_recovery':True}
         elif cmd=='ping': reply={'ok':True}
         else:
             active.add(r);events[r]=threading.Event()
             if mode=='hang': threading.Event().wait()
             elif mode=='cooperate': events[r].wait(2)
             active.discard(r)
-            reply={'ok':True,'request_id':'foreign' if mode=='wrong-id' else r,'text':'late text'}
+            reply={'ok':True,'request_id':'foreign' if mode=='wrong-id' else r,'text':'late text','warm':cmd=='warm'}
         c.sendall((json.dumps(reply)+'\\n').encode())
     finally: c.close()
 while True:

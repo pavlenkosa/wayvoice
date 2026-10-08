@@ -441,73 +441,57 @@ WARM_DEADLINE = 30.0
 
 
 class WarmWorkerTests(unittest.TestCase):
-    """Asking the worker to load the model now instead of at first use."""
+    """Warm outcomes remain compatible through the owned request transport."""
 
     def test_a_worker_that_answers_and_loads_the_model(self):
-        with mock.patch.object(engine, "ensure_worker", return_value=True):
-            with mock.patch.object(
-                engine, "_worker_call", return_value={"ok": True, "warm": True}
-            ) as call:
-                self.assertTrue(engine.warm_worker({}))
-        self.assertEqual(call.call_args[0][0]["cmd"], "warm")
+        with mock.patch.object(engine, "ensure_worker", return_value=True), \
+             mock.patch.object(engine, "_worker_request", return_value={"ok": True, "warm": True}) as call:
+            self.assertTrue(engine.warm_worker({}))
+        payload, request_id, timeout, event = call.call_args.args
+        self.assertEqual(payload, {"cmd": "warm", "request_id": request_id})
+        self.assertTrue(request_id)
+        self.assertEqual(timeout, engine.WARM_TIMEOUT)
 
     def test_a_worker_that_cannot_be_started_is_not_a_failure(self):
-        # Recognition falls back to the one-shot runner, which loads the model
-        # itself and works.
-        with mock.patch.object(engine, "ensure_worker", return_value=False):
+        with mock.patch.object(engine, "ensure_worker", return_value=False), \
+             mock.patch.object(engine, "_worker_request") as request:
             self.assertFalse(engine.warm_worker({}))
+        request.assert_not_called()
 
     def test_a_worker_that_refuses_to_load_is_not_a_failure(self):
-        with mock.patch.object(engine, "ensure_worker", return_value=True):
-            with mock.patch.object(
-                engine, "_worker_call", return_value={"ok": False, "error": "no such file"}
-            ):
-                self.assertFalse(engine.warm_worker({}))
+        with mock.patch.object(engine, "ensure_worker", return_value=True), \
+             mock.patch.object(engine, "_worker_request", return_value={"ok": False, "error": "no such file"}):
+            self.assertFalse(engine.warm_worker({}))
 
     def test_a_worker_that_cannot_be_reached_is_not_a_failure(self):
-        with mock.patch.object(engine, "ensure_worker", return_value=True):
-            with mock.patch.object(engine, "_worker_call", side_effect=OSError("gone")):
+        for error in (engine.WorkerUnavailable("gone"), OSError("gone")):
+            with self.subTest(error=error), mock.patch.object(engine, "ensure_worker", return_value=True), \
+                 mock.patch.object(engine, "_worker_request", side_effect=error):
                 self.assertFalse(engine.warm_worker({}))
 
     def test_a_model_that_is_still_loading_is_watched_until_it_is_there(self):
-        # The reply to ``warm`` only comes when the load is finished, and three
-        # gigabytes takes longer than any deadline worth having. Asking and then
-        # watching the ping keeps the answer honest both ways: not "warm" while it
-        # loads, and not "not warm" because the clock ran out on a model on its way.
-        pings = [
-            {"ok": True, "warm": False},
-            {"ok": True, "warm": False},
-            {"ok": True, "warm": True},
-        ]
+        def loading(*args):
+            time.sleep(0.02)
+            return {"ok": True, "warm": True}
         with mock.patch.object(engine, "ensure_worker", return_value=True), \
-             mock.patch.object(engine, "_worker_call", side_effect=TimeoutError("busy")), \
-             mock.patch.object(engine, "_worker_ping", side_effect=pings), \
-             mock.patch.object(engine, "WORKER_POLL_INTERVAL", 0.01):
+             mock.patch.object(engine, "_worker_request", side_effect=loading) as call:
             self.assertTrue(engine.warm_worker({}, timeout=30.0))
+        self.assertEqual(call.call_args.args[2], 30.0)
+        call.assert_called_once()
 
     def test_a_worker_that_dies_while_being_watched_is_not_waited_for(self):
-        # The clock is generous on purpose - it has to be for large models - so the only
-        # thing that ends the waiting early is the worker being gone. Otherwise a
-        # crashed worker would hold the preparation thread for the whole deadline with
-        # nothing reported.
         began = time.monotonic()
         with mock.patch.object(engine, "ensure_worker", return_value=True), \
-             mock.patch.object(engine, "_worker_call", side_effect=TimeoutError("busy")), \
-             mock.patch.object(engine, "_worker_ping", return_value=None):
+             mock.patch.object(engine, "_worker_request", side_effect=engine.WorkerUnavailable("worker closed connection")):
             self.assertFalse(engine.warm_worker({}, timeout=WARM_DEADLINE))
-        self.assertLess(
-            time.monotonic() - began, 5.0,
-            "waiting continued after the worker had gone",
-        )
+        self.assertLess(time.monotonic() - began, 5.0)
 
     def test_a_model_that_never_arrives_is_reported_as_not_warm(self):
-        # The other end of the deadline: a worker that answers but never warms. False
-        # here is the truth - recognition still works through the one-shot runner.
         with mock.patch.object(engine, "ensure_worker", return_value=True), \
-             mock.patch.object(engine, "_worker_call", side_effect=TimeoutError("busy")), \
-             mock.patch.object(engine, "_worker_ping", return_value={"ok": True, "warm": False}), \
-             mock.patch.object(engine, "WORKER_POLL_INTERVAL", 0.01):
+             mock.patch.object(engine, "_worker_request", side_effect=engine.TranscriptionTimeout("warm timeout")) as call:
             self.assertFalse(engine.warm_worker({}, timeout=0.3))
+        self.assertEqual(call.call_args.args[2], 0.3)
+        call.assert_called_once()
 
 
 class FetchPatternsTests(unittest.TestCase):

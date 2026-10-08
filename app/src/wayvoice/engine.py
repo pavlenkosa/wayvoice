@@ -750,7 +750,8 @@ def _worker_settings_match(reply: dict[str, Any], cfg: dict[str, Any]) -> bool:
     would otherwise keep talking to the previous version of the code.
     """
     remote_version = str(reply.get("version") or "")
-    if remote_version and (remote_version != __version__ or reply.get("request_status") is not True):
+    if remote_version and (remote_version != __version__ or reply.get("request_status") is not True
+                           or reply.get("warm_recovery") is not True):
         return False
     remote = reply.get("config")
     if not isinstance(remote, dict):
@@ -1035,8 +1036,8 @@ def _recover_worker_request(request_id, identity):
             _worker_lock.release()
 
 
-def _worker_transcribe(payload: dict[str, Any], request_id: str, timeout: float, cancel_event: Event | None) -> dict[str, Any]:
-    """Run one transcription on the worker while honouring cancel and timeout.
+def _worker_request(payload: dict[str, Any], request_id: str, timeout: float, cancel_event: Event | None) -> dict[str, Any]:
+    """Run an addressed worker request while honouring cancel and timeout.
 
     The socket is polled rather than read in one blocking call, so a cancel is
     noticed within a fraction of a second even though the model may be busy for a
@@ -1057,7 +1058,8 @@ def _worker_transcribe(payload: dict[str, Any], request_id: str, timeout: float,
                 raise WorkerUnavailable("worker recovery protocol is unavailable") from exc
             if not (health.get("ok") and health.get("pid") == peer_pid
                     and health.get("request_id") == request_id
-                    and health.get("state") in {"queued", "running", "finished"}):
+                    and health.get("state") in {"queued", "running", "finished"}
+                    and (payload.get("cmd") != "warm" or health.get("warm_recovery") is True)):
                 raise WorkerUnavailable("worker does not support request recovery")
             if cancel_event is not None and cancel_event.is_set():
                 raise TranscriptionCancelled("Transcription cancelled")
@@ -1112,6 +1114,10 @@ def _worker_transcribe(payload: dict[str, Any], request_id: str, timeout: float,
         if not isinstance(reply, dict) or reply.get("request_id") != request_id:
             raise WorkerUnavailable("malformed worker reply or mismatched request id")
         return reply
+
+
+def _worker_transcribe(payload, request_id, timeout, cancel_event):
+    return _worker_request(payload, request_id, timeout, cancel_event)
 
 
 def _language(cfg: dict[str, Any]) -> str:
@@ -1493,42 +1499,27 @@ def prepare_model(
 
 def warm_worker(cfg: dict[str, Any], timeout: float = WARM_TIMEOUT,
                 cancel_event: Event | None = None) -> bool:
-    """Make the warm worker hold the model, starting it if needed.
+    """Load the model through an owned, cancellable addressed request.
 
-    Returns whether the model is in memory afterwards. A worker that cannot be started
-    is not an error here: recognition falls back to the one-shot runner.
-
-    The load has no deadline of its own - seconds for ``small``, minutes for
-    ``large-v3`` on a slow disk. A definite answer is taken at face value (the worker
-    refused, or the load is done) and only the absence of one sends this to watching a
-    ping, which the worker answers while it loads. A worker that has died stops the
-    watching at once instead of running out the clock.
+    Timeout/unavailable workers return False; cancellation remains explicit.
+    Native loads that cannot unwind within grace retire only their own worker.
     """
     with _worker_job(cancel_event):
+        if timeout <= 0:
+            return False
         if not ensure_worker(cfg, cancel_event=cancel_event):
             return False
-        if cancel_event is not None and cancel_event.is_set():
-            raise TranscriptionCancelled("Transcription cancelled")
+        request_id = uuid.uuid4().hex
         try:
-            # Short deadline on purpose: the request may have to wait for the
-            # worker to be free, and nothing is lost by not hearing the reply.
-            reply = _worker_call({"cmd": "warm"}, timeout=WORKER_PING_TIMEOUT)
-        except (OSError, ValueError, TimeoutError):
-            reply = None
-        if reply is not None:
-            return bool(reply.get("ok") and reply.get("warm"))
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
+            reply = _worker_request({"cmd": "warm", "request_id": request_id},
+                                    request_id, timeout, cancel_event)
+        except (WorkerUnavailable, TranscriptionTimeout, OSError):
             if cancel_event is not None and cancel_event.is_set():
-                raise TranscriptionCancelled("Transcription cancelled")
-            watched = _worker_ping()
-            if watched is None:
-                # The worker is gone, so nothing is going to load any more.
-                return False
-            if watched.get("warm"):
-                return True
-            time.sleep(WORKER_POLL_INTERVAL)
-        return False
+                raise TranscriptionCancelled("Warm-up cancelled")
+            return False
+        if reply.get("cancelled"):
+            raise TranscriptionCancelled("Warm-up cancelled")
+        return bool(reply.get("ok") and reply.get("warm"))
 
 
 def request_engine_setup(engine: Engine | None) -> bool:

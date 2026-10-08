@@ -257,7 +257,8 @@ class OwnershipTests(unittest.TestCase):
         errors = []
         def warm_call(*args, **kwargs):
             sent.set()
-            return None
+            self.assertTrue(args[3].wait(2))
+            raise engine.TranscriptionCancelled("Warm-up cancelled")
         def warm():
             try:
                 engine.warm_worker({}, cancel_event=d._prepare_cancel)
@@ -269,7 +270,7 @@ class OwnershipTests(unittest.TestCase):
                 finished.set()
         d.recorder = mock.Mock(recording=False)
         d.recorder.cancel.side_effect = lambda: self.assertTrue(finished.wait(2))
-        with mock.patch.object(engine, "ensure_worker", return_value=True), mock.patch.object(engine, "_worker_call", side_effect=warm_call), mock.patch.object(engine, "_worker_ping", return_value={"warm": False}), mock.patch.object(engine, "stop_worker") as stop:
+        with mock.patch.object(engine, "ensure_worker", return_value=True), mock.patch.object(engine, "_worker_request", side_effect=warm_call), mock.patch.object(engine, "_worker_ping", return_value={"warm": False}), mock.patch.object(engine, "stop_worker") as stop:
             d._prepare_thread = threading.Thread(target=warm)
             d._prepare_thread.start()
             self.assertTrue(sent.wait(2))

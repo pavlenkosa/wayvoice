@@ -240,6 +240,7 @@ def ping_reply(cache: ModelCache, config: WorkerConfig) -> dict[str, Any]:
         # process running the previous version, and nothing would say so.
         "version": __version__,
         "request_status": True,
+        "warm_recovery": True,
         "model": config.model,
         "device": device,
         "compute_type": compute_type_for(device),
@@ -528,20 +529,22 @@ def _dispatch(payload: Any, cache: ModelCache, config: WorkerConfig, state: _Wor
     command = str(payload.get("cmd") or "").strip() if isinstance(payload, dict) else ""
     if command == "request-status":
         request_id = str(payload.get("request_id") or "")
-        return {"ok": True, "pid": os.getpid(), "request_id": request_id,
+        return {"ok": True, "pid": os.getpid(), "request_id": request_id, "warm_recovery": True,
                 "state": state.request_status(request_id)}
     if command == "ping":
         # Never blocked and never waits for the lock: this is how the daemon checks
         # whether a warm-up that takes minutes is finished, and a ping that waited
         # for the model would answer exactly when it is not needed.
         return handle_request(payload, cache, config)
-    if command == "warm":
+    if command == "warm" and not payload.get("request_id"):
+        # Legacy bare warm remains compatible. Addressed requests below share
+        # cancellable queue ownership with transcription.
         # Under the same lock as a transcription: loading weights into RAM while
         # something is being decoded would double the memory for nothing. Counted as
         # work, so the idle timer does not call this worker unused mid-load.
         with state.serial, state.hold():
             return handle_request(payload, cache, config)
-    if command != "transcribe":
+    if command not in {"transcribe", "warm"}:
         return handle_request(payload, cache, config)
     request_id = str(payload.get("request_id") or "")
     event = state.begin(request_id)
@@ -555,7 +558,12 @@ def _dispatch(payload: Any, cache: ModelCache, config: WorkerConfig, state: _Wor
             return {"ok": False, "cancelled": True, "request_id": request_id,
                     "error": "Transcription cancelled"}
         state.mark_running(request_id)
-        return handle_request(payload, cache, config, event)
+        reply = handle_request(payload, cache, config, event)
+        reply["request_id"] = request_id
+        if event.is_set():
+            return {"ok": False, "cancelled": True, "request_id": request_id,
+                    "error": "Request cancelled"}
+        return reply
     finally:
         if acquired:
             state.serial.release()

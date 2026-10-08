@@ -70,6 +70,7 @@ class WorkerVersionTests(unittest.TestCase):
             "ok": True,
             "version": __version__,
             "request_status": True,
+            "warm_recovery": True,
             "config": {"model": "small", "device": "auto", "beam_size": 5, "vad": True},
         }
         self.assertTrue(_worker_settings_match(reply, {"model": "small"}))
