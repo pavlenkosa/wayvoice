@@ -168,9 +168,9 @@ def ydotool_command() -> str | None:
 
 
 def ydotool_socket() -> Path | None:
-    """Where the helper's socket is, or ``None`` when there is none anywhere.
+    """Prefer a connectable helper; retain a stale path only for diagnostics.
 
-    Three places, in the order the client itself would find them:
+    Three places, in priority order among live endpoints:
 
     1. the socket the packaged unit creates, ``$XDG_RUNTIME_DIR/wayvoice-ydotool.sock``;
     2. ``$XDG_RUNTIME_DIR/.ydotool_socket`` - where a distribution's own ydotoold
@@ -183,13 +183,17 @@ def ydotool_socket() -> Path | None:
     and a restart - and look the same until you connect.
     """
     runtime = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}")
-    for candidate in (runtime / "wayvoice-ydotool.sock", runtime / DEFAULT_SOCKET_NAME):
+    fallback = None
+    for candidate in (runtime / "wayvoice-ydotool.sock", runtime / DEFAULT_SOCKET_NAME,
+                      Path(LEGACY_SOCKET)):
         if candidate.exists():
-            return candidate
-    legacy = Path(LEGACY_SOCKET)
-    if legacy.exists():
-        return legacy
-    return None
+            if fallback is None:
+                fallback = candidate
+            # Explicit paths avoid recursively invoking discovery from the probe.
+            # Connecting sends no key events or datagrams.
+            if helper_answering(candidate):
+                return candidate
+    return fallback
 
 
 def helper_answering(path: Path | None = None, timeout: float = 0.2) -> bool:

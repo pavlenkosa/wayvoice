@@ -265,6 +265,9 @@ class HelperSocketTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.path = Path(self.tmp.name) / "ydotool.sock"
+        patcher = mock.patch.object(injector, "LEGACY_SOCKET", str(Path(self.tmp.name) / "legacy.sock"))
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _bind(self) -> socket.socket:
         listener = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)

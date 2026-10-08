@@ -37,6 +37,10 @@ class SocketLookupTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.runtime = Path(self.tmp.name)
+        self.legacy_default = injector.LEGACY_SOCKET
+        legacy = mock.patch.object(injector, "LEGACY_SOCKET", str(self.runtime / "legacy.sock"))
+        legacy.start()
+        self.addCleanup(legacy.stop)
         patcher = mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(self.runtime)})
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -72,7 +76,7 @@ class SocketLookupTests(unittest.TestCase):
         self.assertTrue(name in client, f"ydotool.c no longer knows {name!r}")
         # And /tmp is the fallback for a daemon with no XDG_RUNTIME_DIR, not the
         # normal place - which is what an earlier comment here claimed.
-        self.assertTrue(injector.LEGACY_SOCKET in daemon,
+        self.assertTrue(self.legacy_default in daemon,
                         "the /tmp fallback disappeared from ydotoold.c")
 
 
@@ -83,6 +87,9 @@ class EnvironmentAfterTheHelperTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.runtime = Path(self.tmp.name)
+        legacy = mock.patch.object(injector, "LEGACY_SOCKET", str(self.runtime / "legacy.sock"))
+        legacy.start()
+        self.addCleanup(legacy.stop)
         patcher = mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(self.runtime)})
         patcher.start()
         self.addCleanup(patcher.stop)
