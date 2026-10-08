@@ -11,6 +11,7 @@ import ctypes
 import ctypes.util
 import os
 import stat
+import sys
 import subprocess
 import tempfile
 import unittest
@@ -23,7 +24,7 @@ from wayvoice import audio
 class FakeProc:
     """``Popen`` stand-in whose lifetime the test controls."""
 
-    def __init__(self, *, alive=True, exit_code=1, stderr="", hang=False,
+    def __init__(self, *, alive=True, exit_code=0, stderr="", hang=False,
                  hang_first=False):
         self.alive = alive
         self.exit_code = exit_code
@@ -276,6 +277,108 @@ class RecorderTests(unittest.TestCase):
             self.assertFalse(self.recorder.recording)
             self.recorder.cancel()
         self.assertFalse(path.exists())
+
+    def test_late_exit_is_reported_once_and_closes_file_and_stderr(self):
+        proc = FakeProc(alive=True, hang_first=True, stderr="PipeWire disconnected")
+        with self._patch_which(), self._patch_popen(proc):
+            self.recorder.start()
+        path = self.recorder._path
+        path.write_bytes(b"partial" * 100)
+        proc.alive = False
+        self.assertEqual(self.recorder.take_failure(), "PipeWire disconnected")
+        self.assertIsNone(self.recorder.take_failure())
+        self.assertFalse(path.exists())
+        self.assertIsNone(self.recorder._proc)
+        proc.stderr.close.assert_called_once()
+
+    def test_direct_restart_reports_and_cleans_dead_take_before_new_spawn(self):
+        proc = FakeProc(alive=True, hang_first=True)
+        with self._patch_which(), self._patch_popen(proc):
+            self.recorder.start()
+        path = self.recorder._path
+        proc.alive = False
+        healthy = FakeProc(alive=True, hang_first=True)
+        with self._patch_which(), self._patch_popen(healthy):
+            with self.assertRaisesRegex(RuntimeError, "unexpectedly"):
+                self.recorder.start()
+            self.assertFalse(path.exists())
+            self.recorder.start()
+        self.assertTrue(self.recorder.recording)
+
+    def test_stop_rejects_partial_wav_from_dead_recorder(self):
+        proc = FakeProc(alive=True, hang_first=True, stderr="device removed")
+        with self._patch_which(), self._patch_popen(proc):
+            self.recorder.start()
+        path = self.recorder._path
+        path.write_bytes(b"partial" * 100)
+        proc.alive = False
+        with self.assertRaisesRegex(RuntimeError, "device removed"):
+            self.recorder.stop_to_wav()
+        self.assertFalse(path.exists())
+
+    def test_death_between_probe_and_sigint_does_not_hand_partial_audio_to_asr(self):
+        proc = FakeProc(alive=True, hang_first=True)
+        with self._patch_which(), self._patch_popen(proc):
+            self.recorder.start()
+        path = self.recorder._path
+        path.write_bytes(b"partial" * 100)
+        def died(sig):
+            proc.alive = False
+            proc.exit_code = 1
+        proc.send_signal = died
+        with self.assertRaisesRegex(RuntimeError, "finish"):
+            self.recorder.stop_to_wav()
+        self.assertFalse(path.exists())
+        proc.stderr.close.assert_called()
+
+    def test_stderr_read_does_not_wait_for_inherited_open_pipe(self):
+        read_fd, write_fd = os.pipe()
+        self.addCleanup(os.close, write_fd)
+        os.write(write_fd, b"late failure")
+        proc = FakeProc(alive=False)
+        proc.stderr = os.fdopen(read_fd, "r")
+        self.recorder._proc = proc
+        self.assertEqual(self.recorder.take_failure(), "late failure")
+        self.assertTrue(proc.stderr.closed)
+
+    def test_unlink_error_is_reported_without_retaining_dead_handles(self):
+        proc = FakeProc(alive=False, stderr="lost device")
+        self.recorder._proc = proc
+        self.recorder._path = mock.Mock()
+        self.recorder._path.unlink.side_effect = PermissionError("denied")
+        message = self.recorder.take_failure()
+        self.assertIn("lost device", message)
+        self.assertIn("denied", message)
+        self.assertIsNone(self.recorder._path)
+        self.assertIsNone(self.recorder._proc)
+        proc.stderr.close.assert_called_once()
+
+    def test_successful_handoff_closes_stderr_and_is_not_reconciled_or_deleted(self):
+        proc = FakeProc(alive=True, hang_first=True)
+        with self._patch_which(), self._patch_popen(proc):
+            self.recorder.start()
+        path = self.recorder._path
+        self.addCleanup(path.unlink, missing_ok=True)
+        path.write_bytes(b"audio" * 100)
+        self.assertEqual(self.recorder.stop_to_wav(), path)
+        proc.stderr.close.assert_called_once()
+        self.assertIsNone(self.recorder.take_failure())
+        self.recorder.cancel()
+        self.assertTrue(path.exists())
+
+    def test_real_late_exit_after_start_probe_is_reaped_and_cleaned(self):
+        popen = subprocess.Popen
+        def spawn(cmd, **kwargs):
+            code = "import sys,time; from pathlib import Path; Path(sys.argv[1]).write_bytes(b'x'*512); time.sleep(0.15); print('PipeWire vanished',file=sys.stderr); sys.exit(1)"
+            return popen([sys.executable, "-c", code, cmd[-1]], **kwargs)
+        with self._patch_which(), mock.patch.object(audio.subprocess, "Popen", side_effect=spawn):
+            self.recorder.start()
+        proc, path = self.recorder._proc, self.recorder._path
+        self.assertTrue(self.recorder.recording)
+        proc.wait(timeout=2)
+        self.assertEqual(self.recorder.take_failure(), "PipeWire vanished")
+        self.assertFalse(path.exists())
+        self.assertTrue(proc.stderr.closed)
 
 
 if __name__ == "__main__":

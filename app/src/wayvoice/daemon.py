@@ -338,8 +338,9 @@ class WayVoiceDaemon:
         """Model state for :meth:`status`, merged with any run in flight."""
         engine = engine_from_config(cfg)
         state = model_state(engine, cfg)
-        with self._lock:
-            download = dict(self._download)
+        # A read snapshot is sufficient for progress; status must not wait for
+        # lifecycle I/O (for example pw-record finalizing its WAV under the lock).
+        download = dict(self._download)
         return {
             "supported": state["supported"],
             "present": state["present"],
@@ -350,7 +351,25 @@ class WayVoiceDaemon:
             "warming": bool(download.get("warming")) or download.get("state") == "warming",
         }
 
+    def _reconcile_recorder(self, blocking=True) -> str | None:
+        """Consume a lost recording under lifecycle ownership; status never waits."""
+        if not self._lock.acquire(blocking=blocking):
+            return None
+        try:
+            probe = getattr(self.recorder, "take_failure", None)
+            error = probe() if callable(probe) else None
+            if not isinstance(error, str) or not error:
+                return None
+            self._cancel_record_timer()
+            self._record_started = 0.0
+            self.last_error = error
+            reset_notification_id()
+            return error
+        finally:
+            self._lock.release()
+
     def status(self) -> dict:
+        self._reconcile_recorder(blocking=False)
         cfg = load_config()
         now = time.monotonic()
         return {
@@ -381,6 +400,8 @@ class WayVoiceDaemon:
 
     def _auto_stop_recording(self) -> None:
         with self._lock:
+            if self._reconcile_recorder():
+                return
             if not self.recorder.recording:
                 return
             cfg = load_config()
@@ -398,6 +419,9 @@ class WayVoiceDaemon:
 
     def start_recording(self) -> dict:
         with self._lock:
+            failure = self._reconcile_recorder()
+            if failure:
+                return {"ok": False, "error": failure}
             if self._shutdown.is_set():
                 return {"ok": False, "error": "Daemon is shutting down."}
             if self.busy:
@@ -469,6 +493,7 @@ class WayVoiceDaemon:
 
     def cancel(self) -> dict:
         with self._lock:
+            self._reconcile_recorder()
             cfg = load_config()
             if self.recorder.recording:
                 self._cancel_record_timer()
@@ -484,6 +509,9 @@ class WayVoiceDaemon:
 
     def stop_recording(self) -> dict:
         with self._lock:
+            failure = self._reconcile_recorder()
+            if failure:
+                return {"ok": False, "error": failure}
             if self._shutdown.is_set():
                 return {"ok": False, "error": "Daemon is shutting down."}
             if not self.recorder.recording:
@@ -546,6 +574,9 @@ class WayVoiceDaemon:
         self._shutdown.set()
 
     def toggle(self) -> dict:
+        failure = self._reconcile_recorder()
+        if failure:
+            return {"ok": False, "error": failure}
         if self.recorder.recording:
             return self.stop_recording()
         if self.busy:

@@ -26,11 +26,54 @@ class AudioRecorder:
 
     @property
     def recording(self) -> bool:
-        return self._proc is not None and self._proc.poll() is None
+        proc = self._proc
+        return proc is not None and proc.poll() is None
+
+    @staticmethod
+    def _stderr_message(proc) -> str:
+        stream = proc.stderr
+        if stream is None:
+            return ""
+        try:
+            os.set_blocking(stream.fileno(), False)
+        except (AttributeError, TypeError):
+            pass  # In-memory streams used by callers/tests have no OS descriptor.
+        except (OSError, ValueError):
+            return ""
+        try:
+            return (stream.read(8192) or "").strip()
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _close_stderr(proc) -> None:
+        if proc is not None and proc.stderr is not None:
+            try:
+                proc.stderr.close()
+            except Exception:
+                pass
+
+    def take_failure(self) -> str | None:
+        """Consume an unexpected exit once, without waiting for a live recorder."""
+        proc = self._proc
+        if proc is None:
+            return None
+        code = proc.poll()
+        if code is None:
+            return None
+        message = self._stderr_message(proc) or f"PipeWire recording stopped unexpectedly (exit code {code})."
+        try:
+            self.cancel()
+        except OSError as exc:
+            message += f" Could not remove recording: {exc}"
+        return message
 
     def start(self) -> None:
         if self.recording:
             return
+        failure = self.take_failure()
+        if failure:
+            raise RuntimeError(failure)
         if not shutil.which("pw-record"):
             raise RuntimeError(describe_missing("pipewire"))
 
@@ -70,13 +113,8 @@ class AudioRecorder:
         except subprocess.TimeoutExpired:
             return
 
-        err = ""
-        if self._proc.stderr:
-            err = self._proc.stderr.read().strip()
-        self._proc = None
-        self._path = None
-        path.unlink(missing_ok=True)
-        raise RuntimeError(err or "Не удалось открыть микрофон через PipeWire.")
+        error = self.take_failure()
+        raise RuntimeError(error or "Не удалось открыть микрофон через PipeWire.")
 
     def cancel(self) -> None:
         """Stop the recorder and remove the recording nobody ever took.
@@ -106,38 +144,41 @@ class AudioRecorder:
                     except subprocess.TimeoutExpired:
                         pass
         finally:
-            if path:
-                path.unlink(missing_ok=True)
+            try:
+                if path:
+                    path.unlink(missing_ok=True)
+            finally:
+                self._close_stderr(proc)
 
     def stop_to_wav(self) -> Path:
+        failure = self.take_failure()
+        if failure:
+            raise RuntimeError(failure)
         proc, path = self._proc, self._path
         if proc is None or path is None:
             raise RuntimeError("Запись не активна.")
-
+        try:
+            if proc.poll() is None:
+                proc.send_signal(signal.SIGINT)
+                try:
+                    proc.wait(timeout=2.0)
+                except subprocess.TimeoutExpired:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=0.7)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait(timeout=0.5)
+            if proc.poll() not in (0, -signal.SIGINT):
+                raise RuntimeError(self._stderr_message(proc) or "PipeWire could not finish the recording.")
+            if not path.exists() or path.stat().st_size < 128:
+                raise RuntimeError(self._stderr_message(proc) or "Запись микрофона получилась пустой.")
+        except Exception:
+            self.cancel()
+            raise
+        finally:
+            self._close_stderr(proc)
         self._proc = None
         self._path = None
-        if proc.poll() is None:
-            proc.send_signal(signal.SIGINT)
-            try:
-                proc.wait(timeout=2.0)
-            except subprocess.TimeoutExpired:
-                proc.terminate()
-                try:
-                    proc.wait(timeout=0.7)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    proc.wait(timeout=0.5)
-
-        if not path.exists() or path.stat().st_size < 128:
-            err = ""
-            if proc.stderr:
-                try:
-                    err = proc.stderr.read().strip()
-                except Exception:
-                    pass
-            path.unlink(missing_ok=True)
-            raise RuntimeError(err or "Запись микрофона получилась пустой.")
-        # Remember it: the caller owns it from here on and normally deletes it
-        # itself; cancel() must not delete a file still being read by ASR.
         self._finished = path
         return path
