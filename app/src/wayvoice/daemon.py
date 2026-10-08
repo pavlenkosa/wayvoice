@@ -23,6 +23,8 @@ from .engine import (
     TranscriptionTimeout,
     engine_from_config,
     get_engine,
+    stop_jobs,
+    cancel_jobs,
     engine_status,
     model_state,
     prepare_model,
@@ -55,6 +57,7 @@ COMMAND_QUEUE = 32
 #: holding: long enough for a recorder to flush its WAV header, short enough that
 #: ``quit`` does not feel like a hang.
 COMMAND_DRAIN_TIMEOUT = 5.0
+JOB_DRAIN_TIMEOUT = 5.0
 
 #: Longest request the daemon reads. Real commands are tens of bytes; anything
 #: bigger is a client that is broken or hostile, and reading it into memory would be
@@ -130,6 +133,8 @@ class WayVoiceDaemon:
         self._lock = threading.RLock()
         self._shutdown = threading.Event()
         self._transcribe_cancel = threading.Event()
+        self._transcribe_thread: threading.Thread | None = None
+        self._transcribe_wav: Path | None = None
         self._record_timer: threading.Timer | None = None
         self._record_started = 0.0
         self._busy_started = 0.0
@@ -193,6 +198,8 @@ class WayVoiceDaemon:
         "already done", which used to leave someone who had just picked a different model
         facing a slow first dictation with nothing having told them it was coming.
         """
+        if self._shutdown.is_set():
+            return ""
         settings = dict(cfg or load_config())
         engine = engine_from_config(settings)
         state = model_state(engine, settings)
@@ -208,7 +215,7 @@ class WayVoiceDaemon:
             # Asked to warm up a model that is not there.
             return ""
         with self._lock:
-            if self._prepare_running:
+            if self._shutdown.is_set() or self._prepare_running:
                 return ""
             self._prepare_running = True
             self._prepare_cancel.clear()
@@ -228,6 +235,11 @@ class WayVoiceDaemon:
             )
             self._prepare_thread = thread
         try:
+            with self._lock:
+                if self._shutdown.is_set():
+                    self._prepare_running = False
+                    self._prepare_thread = None
+                    return ""
             thread.start()
         except Exception as exc:
             with self._lock:
@@ -386,6 +398,8 @@ class WayVoiceDaemon:
 
     def start_recording(self) -> dict:
         with self._lock:
+            if self._shutdown.is_set():
+                return {"ok": False, "error": "Daemon is shutting down."}
             if self.busy:
                 return {
                     "ok": False,
@@ -470,6 +484,8 @@ class WayVoiceDaemon:
 
     def stop_recording(self) -> dict:
         with self._lock:
+            if self._shutdown.is_set():
+                return {"ok": False, "error": "Daemon is shutting down."}
             if not self.recorder.recording:
                 return {
                     "ok": False,
@@ -487,16 +503,24 @@ class WayVoiceDaemon:
             self._busy_started = time.monotonic()
             self._transcribe_cancel.clear()
 
-        thread = threading.Thread(target=self._transcribe_worker, args=(wav,), daemon=True)
+        with self._lock:
+            if self._shutdown.is_set():
+                self.busy = False
+                self._busy_started = 0.0
+                wav.unlink(missing_ok=True)
+                return {"ok": False, "error": "Daemon is shutting down."}
+            thread = threading.Thread(target=self._transcribe_worker, args=(wav,), daemon=True)
+            self._transcribe_thread = thread
+            self._transcribe_wav = wav
         try:
             thread.start()
         except Exception as exc:
-            # Without this the daemon would keep ``busy`` set forever: recording is
-            # refused, toggle turns into cancel, and only a restart clears it. The
-            # temporary recording would leak as well.
+            self._transcribe_thread = None
+            self._transcribe_wav = None
             self.busy = False
             self._busy_started = 0.0
-            self._transcribe_cancel.clear()
+            if not self._shutdown.is_set():
+                self._transcribe_cancel.clear()
             wav.unlink(missing_ok=True)
             self.last_error = str(exc)
             return {"ok": False, "error": str(exc)}
@@ -529,8 +553,11 @@ class WayVoiceDaemon:
         return self.start_recording()
 
     def _transcribe_worker(self, wav: Path) -> None:
-        cfg = load_config()
+        cfg = {}
         try:
+            cfg = load_config()
+            if self._transcribe_cancel.is_set():
+                raise TranscriptionCancelled("Transcription cancelled")
             notify(tr("daemon.transcribing", cfg.get("ui_language")), enabled=cfg.get("notify", True))
             text = transcribe(wav, cfg, self._transcribe_cancel)
             self.last_text = text.strip()
@@ -586,7 +613,8 @@ class WayVoiceDaemon:
             with self._lock:
                 self.busy = False
                 self._busy_started = 0.0
-                self._transcribe_cancel.clear()
+                if not self._shutdown.is_set():
+                    self._transcribe_cancel.clear()
             # The result is the last thing this notification says. It stays in the
             # history, and the next dictation starts a new entry instead of
             # overwriting a transcript the user may still be reading.
@@ -597,8 +625,16 @@ class WayVoiceDaemon:
                 # A leftover recording is swept at the next start; it is not worth
                 # turning into an error state after the text is already inserted.
                 print(f"WayVoice: could not remove {wav}: {exc}", file=sys.stderr)
+            finally:
+                with self._lock:
+                    if self._transcribe_thread is threading.current_thread():
+                        self._transcribe_thread = None
+                        self._transcribe_wav = None
+
 
     def dispatch(self, command: str) -> dict:
+        if self._shutdown.is_set() and command.strip().lower() not in {"ping", "status", "quit"}:
+            return {"ok": False, "state": "shutting_down", "error": "Daemon is shutting down."}
         raw = command.strip()
         name, _, target_json = raw.partition(" ")
         addressed = name.lower() == "prepare-model" and bool(target_json)
@@ -877,8 +913,10 @@ class WayVoiceDaemon:
                         pass
                     _close(conn)
         finally:
-            self._stop_work()
-            self._drain_commands(commands, worker, server, path)
+            try:
+                self._stop_work()
+            finally:
+                self._drain_commands(commands, worker, server, path)
 
     def _stop_work(self) -> None:
         """Let go of everything the daemon is holding, on the way out.
@@ -890,11 +928,14 @@ class WayVoiceDaemon:
         produced a ``FileNotFoundError`` where the user should have seen a cancelled
         recognition.
         """
+        self._shutdown.set()
+        deadline = time.monotonic() + JOB_DRAIN_TIMEOUT
+        self._shutdown_deadline = deadline
         self._cancel_record_timer()
-        self._transcribe_cancel.set()
+        with self._lock:
+            active_worker = cancel_jobs(self._transcribe_cancel, self._prepare_cancel)
         # A download that outlived the daemon would keep fetching a file nobody is
         # waiting for, in a session that is going away.
-        self._prepare_cancel.set()
         # Leaving a recording behind is not a cleanup detail: pw-record keeps the
         # microphone open and keeps writing to /tmp, so a daemon that exits
         # mid-dictation holds the device until something kills that process.
@@ -902,6 +943,25 @@ class WayVoiceDaemon:
             self.recorder.cancel()
         except Exception as exc:  # never let this stop the shutdown
             print(f"WayVoice: could not stop the recorder: {exc}", file=sys.stderr)
+        # Force registered children first. Their own owner threads reap, close
+        # pipes and remove WAVs; never delete a recording while ASR still reads it.
+        stop_jobs(self._transcribe_cancel, self._prepare_cancel, deadline=deadline, active_worker=active_worker)
+        with self._lock:
+            threads = (self._transcribe_thread, self._prepare_thread)
+            if self._transcribe_thread is not None and self._transcribe_thread.ident is None:
+                # A published thread can be stuck in start(). It checks cancellation
+                # before reading audio if it eventually begins, so nobody owns a read.
+                if self._transcribe_wav is not None:
+                    try:
+                        self._transcribe_wav.unlink(missing_ok=True)
+                    except OSError as exc:
+                        print(f"WayVoice: could not remove {self._transcribe_wav}: {exc}", file=sys.stderr)
+                self.busy = False
+                self._busy_started = 0.0
+        for thread in threads:
+            if thread is not None and thread.ident is not None and thread is not threading.current_thread():
+                thread.join(timeout=max(0.0, deadline - time.monotonic()))
+
 
     def _drain_commands(self, commands: "queue.Queue", worker: threading.Thread,
                         server: socket.socket, path: Path) -> None:
@@ -916,7 +976,8 @@ class WayVoiceDaemon:
             commands.put_nowait(None)
         except queue.Full:
             pass
-        worker.join(timeout=COMMAND_DRAIN_TIMEOUT)
+        remaining = max(0.0, getattr(self, "_shutdown_deadline", time.monotonic() + COMMAND_DRAIN_TIMEOUT) - time.monotonic())
+        worker.join(timeout=min(COMMAND_DRAIN_TIMEOUT, remaining))
         server.close()
         path.unlink(missing_ok=True)
 

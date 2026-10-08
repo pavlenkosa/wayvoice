@@ -538,10 +538,9 @@ class DaemonSetupTests(unittest.TestCase):
             mock.patch.object(self.daemon, "load_config", return_value=cfg),
             mock.patch("wayvoice.engine.service.request_engine_setup") as request,
         ):
-            reply = self.daemon.WayVoiceDaemon.dispatch(
-                self.daemon.WayVoiceDaemon.__new__(self.daemon.WayVoiceDaemon),
-                "engine-setup",
-            )
+            instance = self.daemon.WayVoiceDaemon.__new__(self.daemon.WayVoiceDaemon)
+            instance._shutdown = threading.Event()
+            reply = instance.dispatch("engine-setup")
         return reply, request
 
     def test_engine_setup_prepares_faster_whisper(self):

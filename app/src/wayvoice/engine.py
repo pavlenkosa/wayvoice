@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shlex
@@ -46,6 +47,10 @@ WORKER_PING_TIMEOUT = 1.5
 WARM_TIMEOUT = 900.0
 WORKER_CANCEL_GRACE = 3.0
 WORKER_RETRY_BACKOFF = 60.0
+
+_job_lock = Lock()
+_job_procs: dict[subprocess.Popen, Event | None] = {}
+_worker_jobs: dict[Event, int] = {}
 
 _worker_lock = Lock()
 #: Guards the reader threads' line buffers of a running download.
@@ -227,66 +232,72 @@ def download_model(
     env["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
     env["PYTHONUNBUFFERED"] = "1"
     try:
-        proc = subprocess.Popen(
-            args,
+        proc = _spawn_job(
+            args, cancel_event=cancel_event,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             env=env,
             start_new_session=True,
         )
+    except TranscriptionCancelled:
+        return {"state": "cancelled", "error": "Download cancelled", "done": 0, "total": 0}
     except (OSError, ValueError) as exc:
         return {"state": "error", "error": str(exc), "done": 0, "total": 0}
 
-    lines: list[str] = []
-    errors: list[str] = []
-    readers = _start_line_readers(proc, lines, errors)
-    started = time.monotonic()
-    state = "ready"
-    detail = ""
-    while True:
-        if proc.poll() is not None:
-            break
-        if cancel_event is not None and cancel_event.is_set():
-            _terminate_process(proc)
-            state = "cancelled"
-            detail = tr("engine.download_cancelled", language)
-            break
-        if time.monotonic() - started >= DOWNLOAD_TIMEOUT:
-            _terminate_process(proc)
-            state = "error"
-            detail = tr("engine.download_timeout", language, hours=int(DOWNLOAD_TIMEOUT // 3600))
-            break
+    try:
+        lines: list[str] = []
+        errors: list[str] = []
+        readers = _start_line_readers(proc, lines, errors)
+        started = time.monotonic()
+        state = "ready"
+        detail = ""
+        while True:
+            if proc.poll() is not None:
+                break
+            if cancel_event is not None and cancel_event.is_set():
+                _terminate_process(proc)
+                state = "cancelled"
+                detail = tr("engine.download_cancelled", language)
+                break
+            if time.monotonic() - started >= DOWNLOAD_TIMEOUT:
+                _terminate_process(proc)
+                state = "error"
+                detail = tr("engine.download_timeout", language, hours=int(DOWNLOAD_TIMEOUT // 3600))
+                break
+            _apply_download_lines(lines, result, on_progress)
+            time.sleep(0.2)
+        _terminate_process(proc)
+        for reader in readers:
+            reader.join(timeout=5.0)
         _apply_download_lines(lines, result, on_progress)
-        time.sleep(0.2)
-    for reader in readers:
-        reader.join(timeout=5.0)
-    _apply_download_lines(lines, result, on_progress)
-    _close_pipes(proc)
+        _close_pipes(proc)
 
-    stderr = "".join(errors).strip()
-    if state != "ready":
-        result["state"] = state
-        result["error"] = detail
+        stderr = "".join(errors).strip()
+        if state != "ready":
+            result["state"] = state
+            result["error"] = detail
+            return result
+        if proc.returncode != 0:
+            result["state"] = "error"
+            # The helper's own WV-ERROR line is the real reason; stderr is the
+            # library's own last word, and the exit code is the last resort.
+            result["error"] = (
+                str(result.get("error") or "")
+                or detail
+                or (stderr.splitlines()[-1] if stderr else "")
+                or f"Download failed with code {proc.returncode}"
+            )
+            return result
+        if not model_is_present(model_id):
+            # The helper said it was done and the weights are not there; reporting
+            # success would send the user to the hotkey for a model that is not on
+            # disk.
+            result["state"] = "error"
+            result["error"] = tr("engine.download_missing_after", language)
         return result
-    if proc.returncode != 0:
-        result["state"] = "error"
-        # The helper's own WV-ERROR line is the real reason; stderr is the
-        # library's own last word, and the exit code is the last resort.
-        result["error"] = (
-            str(result.get("error") or "")
-            or detail
-            or (stderr.splitlines()[-1] if stderr else "")
-            or f"Download failed with code {proc.returncode}"
-        )
-        return result
-    if not model_is_present(model_id):
-        # The helper said it was done and the weights are not there; reporting
-        # success would send the user to the hotkey for a model that is not on
-        # disk.
-        result["state"] = "error"
-        result["error"] = tr("engine.download_missing_after", language)
-    return result
+    finally:
+        _release_job(proc)
 
 
 def download_configured_model(
@@ -469,15 +480,86 @@ def engine_status(cfg: dict[str, Any]) -> dict[str, Any]:
     return {"id": engine.id, "label": engine.label, **engine.status(cfg)}
 
 
-def _terminate_process(proc: subprocess.Popen[str]) -> bool:
+def _spawn_job(args, *, cancel_event, **kwargs):
+    """Publish a cancellable child atomically; shutdown cannot miss a late spawn."""
+    with _job_lock:
+        if cancel_event is not None and cancel_event.is_set():
+            raise TranscriptionCancelled("Transcription cancelled")
+        proc = subprocess.Popen(args, **kwargs)
+        _job_procs[proc] = cancel_event
+        return proc
+
+
+def _release_job(proc):
+    try:
+        # The leader may have exited while descendants still hold its pipes.
+        _terminate_process(proc)
+        _close_pipes(proc)
+    finally:
+        with _job_lock:
+            _job_procs.pop(proc, None)
+
+
+@contextlib.contextmanager
+def _worker_job(event):
+    if event is not None:
+        with _job_lock:
+            if event.is_set():
+                raise TranscriptionCancelled("Transcription cancelled")
+            _worker_jobs[event] = _worker_jobs.get(event, 0) + 1
+    try:
+        yield
+    finally:
+        if event is not None:
+            with _job_lock:
+                count = _worker_jobs[event] - 1
+                if count:
+                    _worker_jobs[event] = count
+                else:
+                    del _worker_jobs[event]
+
+
+@contextlib.contextmanager
+def _worker_guard(event):
+    while not _worker_lock.acquire(timeout=WORKER_POLL_INTERVAL):
+        if event is not None and event.is_set():
+            raise TranscriptionCancelled("Transcription cancelled")
+    try:
+        yield
+    finally:
+        _worker_lock.release()
+
+
+def cancel_jobs(*events):
+    """Snapshot active worker ownership before cancelled waiters can unwind."""
+    with _job_lock:
+        active_worker = any(owner in _worker_jobs for owner in events)
+        for event in events:
+            event.set()
+        return active_worker
+
+
+def stop_jobs(*events, deadline=None, active_worker=False):
+    """Force cleanup of this owner's cancellable groups; leave idle worker alone."""
+    with _job_lock:
+        procs = [proc for proc, event in _job_procs.items()
+                 if any(event is owner for owner in events)]
+        active_worker = active_worker or any(owner in _worker_jobs for owner in events)
+    for proc in procs:
+        grace = 1.5 if deadline is None else min(1.5, max(0.0, (deadline - time.monotonic()) / 2))
+        _terminate_process(proc, timeout=grace)
+    if active_worker:
+        grace = 2.0 if deadline is None else max(0.0, (deadline - time.monotonic()) / 2)
+        stop_worker(timeout=grace)
+
+
+def _terminate_process(proc: subprocess.Popen[str], timeout: float = 1.5) -> bool:
     """Stop a child and its group; return whether it is gone.
 
     Failures are swallowed because the caller is already on an error path, but the
     answer is reported: a process that survived both signals would leave the caller
     waiting on its pipes.
     """
-    if proc.poll() is not None:
-        return True
     try:
         os.killpg(proc.pid, signal.SIGTERM)
     except Exception:
@@ -486,8 +568,7 @@ def _terminate_process(proc: subprocess.Popen[str]) -> bool:
         except Exception:
             return proc.poll() is not None
     try:
-        proc.wait(timeout=1.5)
-        return True
+        proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         pass
     try:
@@ -498,7 +579,7 @@ def _terminate_process(proc: subprocess.Popen[str]) -> bool:
         except Exception:
             pass
     try:
-        proc.wait(timeout=1.5)
+        proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         return proc.poll() is not None
     return True
@@ -569,34 +650,38 @@ def _run_cancelable(
     cancel_event: Event | None,
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    proc = subprocess.Popen(
-        args,
+    proc = _spawn_job(
+        args, cancel_event=cancel_event,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
         env=env,
         start_new_session=True,
     )
-    readers, out, err = _start_readers(proc)
-    started = time.monotonic()
-    while proc.poll() is None:
-        if cancel_event is not None and cancel_event.is_set():
-            raise _finish(
-                proc, readers, TranscriptionCancelled("Transcription cancelled")
-            )
-        if timeout > 0 and time.monotonic() - started >= timeout:
-            raise _finish(
-                proc,
-                readers,
-                TranscriptionTimeout(f"Transcription exceeded {int(timeout)} seconds"),
-            )
-        time.sleep(0.12)
-    for thread in readers:
-        thread.join(timeout=5.0)
-    _close_pipes(proc)
-    return subprocess.CompletedProcess(
-        args, proc.returncode, "".join(out), "".join(err)
-    )
+    try:
+        readers, out, err = _start_readers(proc)
+        started = time.monotonic()
+        while proc.poll() is None:
+            if cancel_event is not None and cancel_event.is_set():
+                raise _finish(
+                    proc, readers, TranscriptionCancelled("Transcription cancelled")
+                )
+            if timeout > 0 and time.monotonic() - started >= timeout:
+                raise _finish(
+                    proc,
+                    readers,
+                    TranscriptionTimeout(f"Transcription exceeded {int(timeout)} seconds"),
+                )
+            time.sleep(0.12)
+        _terminate_process(proc)
+        for thread in readers:
+            thread.join(timeout=5.0)
+        _close_pipes(proc)
+        return subprocess.CompletedProcess(
+            args, proc.returncode, "".join(out), "".join(err)
+        )
+    finally:
+        _release_job(proc)
 
 
 # --------------------------------------------------------------------------
@@ -724,7 +809,7 @@ def _is_worker_process(pid: int) -> bool:
     return "fw_runner.py" in argv and "--serve" in argv
 
 
-def stop_worker() -> bool:
+def stop_worker(timeout: float = 2.0) -> bool:
     """Stop the running worker, if any.
 
     Best effort: this is used to replace a worker that was started for stale
@@ -743,7 +828,7 @@ def stop_worker() -> bool:
             except OSError:
                 break
             stopped = True
-            deadline = time.monotonic() + 2.0
+            deadline = time.monotonic() + timeout
             while _pid_alive(pid) and time.monotonic() < deadline:
                 time.sleep(0.1)
             if not _pid_alive(pid):
@@ -845,7 +930,7 @@ def _start_worker(cfg: dict[str, Any]) -> bool:
     return True
 
 
-def ensure_worker(cfg: dict[str, Any]) -> bool:
+def ensure_worker(cfg: dict[str, Any], cancel_event: Event | None = None) -> bool:
     """Make sure a warm worker matching ``cfg`` is available.
 
     ``False`` means the caller should fall back to the one-shot runner. A worker that
@@ -854,8 +939,12 @@ def ensure_worker(cfg: dict[str, Any]) -> bool:
     """
     global _worker_retry_after
 
+    if cancel_event is not None and cancel_event.is_set():
+        raise TranscriptionCancelled("Transcription cancelled")
     path = worker_socket_path()
-    with _worker_lock:
+    with _worker_guard(cancel_event):
+        if cancel_event is not None and cancel_event.is_set():
+            raise TranscriptionCancelled("Transcription cancelled")
         _reap_workers()
         reply = _worker_ping(path)
         if reply is not None:
@@ -866,11 +955,19 @@ def ensure_worker(cfg: dict[str, Any]) -> bool:
             stop_worker()
         if time.monotonic() < _worker_retry_after:
             return False
-        if not _start_worker(cfg):
+        if cancel_event is not None and cancel_event.is_set():
+            raise TranscriptionCancelled("Transcription cancelled")
+        with _job_lock:
+            if cancel_event is not None and cancel_event.is_set():
+                raise TranscriptionCancelled("Transcription cancelled")
+            started_worker = _start_worker(cfg)
+        if not started_worker:
             _worker_retry_after = time.monotonic() + WORKER_RETRY_BACKOFF
             return False
         deadline = time.monotonic() + WORKER_START_TIMEOUT
         while True:
+            if cancel_event is not None and cancel_event.is_set():
+                raise TranscriptionCancelled("Transcription cancelled")
             reply = _worker_ping(path)
             if reply is not None:
                 if _worker_settings_match(reply, cfg):
@@ -901,49 +998,50 @@ def _worker_transcribe(payload: dict[str, Any], request_id: str, timeout: float,
     :class:`TranscriptionCancelled` as soon as the user asked to stop, including when
     the answer arrived first.
     """
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.settimeout(WORKER_POLL_INTERVAL)
-    try:
-        sock.connect(str(worker_socket_path()))
-        sock.sendall((json.dumps(payload) + "\n").encode("utf-8"))
-        started = time.monotonic()
-        cancel_deadline: float | None = None
-        data = bytearray()
-        while True:
-            if cancel_event is not None and cancel_event.is_set() and cancel_deadline is None:
-                _worker_send_cancel(request_id)
-                cancel_deadline = time.monotonic() + WORKER_CANCEL_GRACE
-            if cancel_deadline is not None:
-                # Give the worker a moment to unwind, then give up on it.
-                if time.monotonic() >= cancel_deadline:
-                    raise TranscriptionCancelled("Transcription cancelled")
-            elif timeout > 0 and time.monotonic() - started >= timeout:
-                _worker_send_cancel(request_id)
-                raise TranscriptionTimeout(f"Transcription exceeded {int(timeout)} seconds")
-            try:
-                chunk = sock.recv(65536)
-            except TimeoutError:
-                continue
-            except OSError as exc:
-                raise WorkerUnavailable(f"worker connection failed: {exc}") from exc
-            if not chunk:
-                raise WorkerUnavailable("worker closed the connection")
-            data.extend(chunk)
-            if data.endswith(b"\n"):
-                break
-        if cancel_event is not None and cancel_event.is_set():
-            # The answer was in flight when the user pressed cancel: honour it,
-            # the one-shot runner would have killed the process instead.
-            raise TranscriptionCancelled("Transcription cancelled")
+    with _worker_job(cancel_event):
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(WORKER_POLL_INTERVAL)
         try:
-            reply = json.loads(bytes(data).decode("utf-8"))
-        except ValueError as exc:
-            raise WorkerUnavailable(f"malformed worker reply: {exc}") from exc
-    finally:
-        sock.close()
-    if not isinstance(reply, dict):
-        raise WorkerUnavailable("malformed worker reply")
-    return reply
+            sock.connect(str(worker_socket_path()))
+            sock.sendall((json.dumps(payload) + "\n").encode("utf-8"))
+            started = time.monotonic()
+            cancel_deadline: float | None = None
+            data = bytearray()
+            while True:
+                if cancel_event is not None and cancel_event.is_set() and cancel_deadline is None:
+                    _worker_send_cancel(request_id)
+                    cancel_deadline = time.monotonic() + WORKER_CANCEL_GRACE
+                if cancel_deadline is not None:
+                    # Give the worker a moment to unwind, then give up on it.
+                    if time.monotonic() >= cancel_deadline:
+                        raise TranscriptionCancelled("Transcription cancelled")
+                elif timeout > 0 and time.monotonic() - started >= timeout:
+                    _worker_send_cancel(request_id)
+                    raise TranscriptionTimeout(f"Transcription exceeded {int(timeout)} seconds")
+                try:
+                    chunk = sock.recv(65536)
+                except TimeoutError:
+                    continue
+                except OSError as exc:
+                    raise WorkerUnavailable(f"worker connection failed: {exc}") from exc
+                if not chunk:
+                    raise WorkerUnavailable("worker closed the connection")
+                data.extend(chunk)
+                if data.endswith(b"\n"):
+                    break
+            if cancel_event is not None and cancel_event.is_set():
+                # The answer was in flight when the user pressed cancel: honour it,
+                # the one-shot runner would have killed the process instead.
+                raise TranscriptionCancelled("Transcription cancelled")
+            try:
+                reply = json.loads(bytes(data).decode("utf-8"))
+            except ValueError as exc:
+                raise WorkerUnavailable(f"malformed worker reply: {exc}") from exc
+        finally:
+            sock.close()
+        if not isinstance(reply, dict):
+            raise WorkerUnavailable("malformed worker reply")
+        return reply
 
 
 def _language(cfg: dict[str, Any]) -> str:
@@ -965,7 +1063,7 @@ def _transcribe_via_worker(audio: Path, cfg: dict[str, Any], cancel_event: Event
     can retry through the one-shot runner; a plain :class:`RuntimeError` when the
     worker reported a genuine engine error.
     """
-    if not ensure_worker(cfg):
+    if not ensure_worker(cfg, cancel_event=cancel_event):
         raise WorkerUnavailable("the Faster-Whisper worker is not available")
     request_id = uuid.uuid4().hex
     payload = {
@@ -1316,11 +1414,15 @@ def prepare_model(
         except Exception:
             # Telling the caller about a phase must never break that phase.
             pass
-    reply["warming"] = warm_worker(cfg)
+    if cancel_event is not None and cancel_event.is_set():
+        raise TranscriptionCancelled("Transcription cancelled")
+    reply["warming"] = (warm_worker(cfg) if cancel_event is None
+                        else warm_worker(cfg, cancel_event=cancel_event))
     return reply
 
 
-def warm_worker(cfg: dict[str, Any], timeout: float = WARM_TIMEOUT) -> bool:
+def warm_worker(cfg: dict[str, Any], timeout: float = WARM_TIMEOUT,
+                cancel_event: Event | None = None) -> bool:
     """Make the warm worker hold the model, starting it if needed.
 
     Returns whether the model is in memory afterwards. A worker that cannot be started
@@ -1332,26 +1434,31 @@ def warm_worker(cfg: dict[str, Any], timeout: float = WARM_TIMEOUT) -> bool:
     ping, which the worker answers while it loads. A worker that has died stops the
     watching at once instead of running out the clock.
     """
-    if not ensure_worker(cfg):
-        return False
-    try:
-        # Short deadline on purpose: the request may have to wait for the
-        # worker to be free, and nothing is lost by not hearing the reply.
-        reply = _worker_call({"cmd": "warm"}, timeout=WORKER_PING_TIMEOUT)
-    except (OSError, ValueError, TimeoutError):
-        reply = None
-    if reply is not None:
-        return bool(reply.get("ok") and reply.get("warm"))
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        watched = _worker_ping()
-        if watched is None:
-            # The worker is gone, so nothing is going to load any more.
+    with _worker_job(cancel_event):
+        if not ensure_worker(cfg, cancel_event=cancel_event):
             return False
-        if watched.get("warm"):
-            return True
-        time.sleep(WORKER_POLL_INTERVAL)
-    return False
+        if cancel_event is not None and cancel_event.is_set():
+            raise TranscriptionCancelled("Transcription cancelled")
+        try:
+            # Short deadline on purpose: the request may have to wait for the
+            # worker to be free, and nothing is lost by not hearing the reply.
+            reply = _worker_call({"cmd": "warm"}, timeout=WORKER_PING_TIMEOUT)
+        except (OSError, ValueError, TimeoutError):
+            reply = None
+        if reply is not None:
+            return bool(reply.get("ok") and reply.get("warm"))
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if cancel_event is not None and cancel_event.is_set():
+                raise TranscriptionCancelled("Transcription cancelled")
+            watched = _worker_ping()
+            if watched is None:
+                # The worker is gone, so nothing is going to load any more.
+                return False
+            if watched.get("warm"):
+                return True
+            time.sleep(WORKER_POLL_INTERVAL)
+        return False
 
 
 def request_engine_setup(engine: Engine | None) -> bool:

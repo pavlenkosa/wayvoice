@@ -249,7 +249,7 @@ class PrepareTests(DaemonCase):
         holding = threading.Event()
         release = threading.Event()
 
-        def warm(cfg):
+        def warm(cfg, cancel_event=None):
             holding.set()
             release.wait(10.0)
             return True
@@ -282,7 +282,7 @@ class PrepareTests(DaemonCase):
         started = threading.Event()
         finish = threading.Event()
 
-        def warm(cfg):
+        def warm(cfg, cancel_event=None):
             # Hold the load open, so the report can be read while it happens.
             started.set()
             finish.wait(10.0)
@@ -601,7 +601,7 @@ class StartupTests(unittest.TestCase):
         # owned by a process that is already gone.
         holder_warmed = threading.Event()
 
-        def warm_first(cfg):
+        def warm_first(cfg, cancel_event=None):
             holder_warmed.set()
             return True
 

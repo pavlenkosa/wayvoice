@@ -71,6 +71,9 @@ class SuccessfulDictationTests(unittest.TestCase):
         daemon.last_warning = ""
         daemon._lock = threading.Lock()
         daemon._transcribe_cancel = threading.Event()
+        daemon._shutdown = threading.Event()
+        daemon._transcribe_thread = None
+        daemon._transcribe_wav = None
         daemon.busy = True
         daemon._busy_started = 0.0
         return daemon
