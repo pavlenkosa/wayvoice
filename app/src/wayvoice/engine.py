@@ -133,15 +133,16 @@ _ERROR_PREFIX = "WV-ERROR"
 def model_is_present(model_id: str) -> bool:
     """Whether ``model_id`` can be used without touching the network.
 
-    Weights alone are not enough: a snapshot whose ``config.json`` never finished
-    downloading passes a weight check and then fails at load time.
+    This shares the runtime completeness check, including the tokenizer that
+    upstream would otherwise silently download. Disk accounting stays separate.
     """
     from . import model_store
 
-    if not model_store.is_downloaded(model_id):
+    try:
+        model_store.inference_dir(model_id)
+    except RuntimeError:
         return False
-    snapshot = model_store.snapshot_dir(model_id)
-    return bool(snapshot and (snapshot / "config.json").exists())
+    return True
 
 
 def _model_download_args(model_id: str) -> list[str] | None:

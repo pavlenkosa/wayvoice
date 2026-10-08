@@ -272,6 +272,33 @@ def snapshot_dir(model_id: str, root: str | os.PathLike[str] | None = None) -> P
     return snapshots[-1]
 
 
+def inference_dir(model_id: str, root: str | os.PathLike[str] | None = None) -> Path:
+    """Resolve a complete local CTranslate2 model without any hub/network calls.
+
+    Disk accounting deliberately has a weaker predicate (``is_downloaded``).
+    Tokenizer presence is mandatory: upstream otherwise fetches its default.
+    The optional preprocessor config can safely use upstream defaults.
+    """
+    path = snapshot_dir(model_id, root) if repo_id_for(model_id) else local_dir(model_id)
+
+    def usable(name: str) -> bool:
+        try:
+            candidate = path / name
+            return candidate.is_file() and candidate.stat().st_size > 0
+        except (OSError, TypeError):
+            return False
+
+    missing = [name for name in ("model.bin", "config.json", "tokenizer.json") if not usable(name)]
+    if not any(usable(name) for name in ("vocabulary.json", "vocabulary.txt")):
+        missing.append("vocabulary.json or vocabulary.txt")
+    if missing:
+        raise RuntimeError(
+            f"Local model {model_id!r} is incomplete ({', '.join(missing)}). "
+            "Prepare the model explicitly in Settings before dictation."
+        )
+    return path
+
+
 def _weight_files(snapshot: Path) -> Iterable[Path]:
     """Weight files of a snapshot, following the snapshot's own symlinks."""
     for name in WEIGHT_NAMES:

@@ -69,6 +69,8 @@ class PresenceTests(unittest.TestCase):
         (repo / "model.bin").write_bytes(weights)
         if config:
             (repo / "config.json").write_text("{}", encoding="utf-8")
+        (repo / "tokenizer.json").write_text("{}", encoding="utf-8")
+        (repo / "vocabulary.json").write_text("[]", encoding="utf-8")
         return repo
 
     def test_a_model_with_weights_and_config_is_present(self):

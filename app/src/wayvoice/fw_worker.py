@@ -22,11 +22,13 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import socket
 import stat
 import tempfile
 import threading
 import time
+import weakref
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -113,9 +115,34 @@ def default_model_factory(model_id: str, device: str, compute_type: str) -> Any:
     Imported here rather than at module level, which would make this module unusable
     without the engine runtime installed.
     """
+    from .model_store import inference_dir
+
+    path = inference_dir(model_id)
     from faster_whisper import WhisperModel
 
-    return WhisperModel(model_id, device=device, compute_type=compute_type)
+    # Pin the small tokenizer in a private view. Upstream ignores local_files_only
+    # for its tokenizer fallback; deleting the cache during load must not enable it.
+    # Weight files remain symlinks, avoiding a second multi-GB copy in RAM or disk.
+    view = tempfile.TemporaryDirectory(prefix="wayvoice-model-")
+    try:
+        directory = Path(view.name)
+        shutil.copyfile(path / "tokenizer.json", directory / "tokenizer.json")
+        if (directory / "tokenizer.json").stat().st_size == 0:
+            raise RuntimeError("Local tokenizer.json became empty; prepare the model again.")
+        for source in path.iterdir():
+            if source.name != "tokenizer.json":
+                (directory / source.name).symlink_to(source.absolute())
+        model = WhisperModel(
+            str(directory), device=device, compute_type=compute_type, local_files_only=True,
+        )
+        # Keep the view valid if the backend unloads/reloads weights later. Its
+        # lifetime follows the cached model, including eviction and load failure.
+        model._wayvoice_model_files = view
+        weakref.finalize(model, view.cleanup)
+        return model
+    except Exception:
+        view.cleanup()
+        raise
 
 
 def resolve_device(device: str) -> str:
