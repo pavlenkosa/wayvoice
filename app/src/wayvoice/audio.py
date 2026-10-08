@@ -126,8 +126,6 @@ class AudioRecorder:
         recording is swept at the next start.
         """
         proc, path = self._proc, self._path
-        self._proc = None
-        self._path = None
         self._finished = None
         try:
             if proc and proc.poll() is None:
@@ -139,16 +137,18 @@ class AudioRecorder:
                     # Reap it: an unreaped child stays in the process table as a zombie
                     # for as long as this daemon lives, and a daemon that is cancelled
                     # often would accumulate one per dictation.
-                    try:
-                        proc.wait(timeout=0.5)
-                    except subprocess.TimeoutExpired:
-                        pass
+                    proc.wait(timeout=0.5)
         finally:
-            try:
-                if path:
-                    path.unlink(missing_ok=True)
-            finally:
-                self._close_stderr(proc)
+            # A failed signal/wait does not transfer ownership. Keep the live
+            # process, private take and stderr available for a later cancel.
+            if proc is None or proc.poll() is not None:
+                self._proc = None
+                self._path = None
+                try:
+                    if path:
+                        path.unlink(missing_ok=True)
+                finally:
+                    self._close_stderr(proc)
 
     def stop_to_wav(self) -> Path:
         failure = self.take_failure()
@@ -173,11 +173,15 @@ class AudioRecorder:
                 raise RuntimeError(self._stderr_message(proc) or "PipeWire could not finish the recording.")
             if not path.exists() or path.stat().st_size < 128:
                 raise RuntimeError(self._stderr_message(proc) or "Запись микрофона получилась пустой.")
-        except Exception:
-            self.cancel()
+        except Exception as exc:
+            try:
+                self.cancel()
+            except Exception as cleanup_exc:
+                raise RuntimeError(f"{exc} Could not stop recording: {cleanup_exc}") from exc
             raise
         finally:
-            self._close_stderr(proc)
+            if proc.poll() is not None:
+                self._close_stderr(proc)
         self._proc = None
         self._path = None
         self._finished = path

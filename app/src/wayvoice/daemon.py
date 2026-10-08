@@ -506,7 +506,11 @@ class WayVoiceDaemon:
             cfg = load_config()
             if self.recorder.recording:
                 self._cancel_record_timer()
-                self.recorder.cancel()
+                try:
+                    self.recorder.cancel()
+                except Exception as exc:
+                    self.last_error = str(exc)
+                    return {"ok": False, "error": str(exc)}
                 self._record_started = 0.0
                 notify(tr("daemon.recording_cancelled", cfg.get("ui_language")), enabled=cfg.get("notify", True))
                 reset_notification_id()

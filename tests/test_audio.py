@@ -156,17 +156,85 @@ class RecorderTests(unittest.TestCase):
         self.assertIsNone(self.recorder._proc)
         self.assertIsNone(self.recorder._path)
 
-    def test_cancel_removes_private_file_even_if_termination_fails(self):
+    def test_cancel_cleans_take_when_process_exits_before_termination(self):
         proc = FakeProc(alive=True, hang_first=True)
         with self._patch_which(), self._patch_popen(proc):
             self.recorder.start()
         path = self.recorder._path
-        with mock.patch.object(proc, "terminate", side_effect=ProcessLookupError()):
+        def already_gone():
+            proc.alive = False
+            raise ProcessLookupError()
+        with mock.patch.object(proc, "terminate", side_effect=already_gone):
             with self.assertRaises(ProcessLookupError):
                 self.recorder.cancel()
         self.assertFalse(path.exists())
         self.assertIsNone(self.recorder._proc)
         self.assertIsNone(self.recorder._path)
+
+    def test_cancel_retains_live_process_and_private_take_on_signal_failure(self):
+        for signal_name in ("terminate", "kill"):
+            with self.subTest(signal=signal_name):
+                proc = FakeProc(alive=True, hang_first=True)
+                with self._patch_which(), self._patch_popen(proc):
+                    self.recorder.start()
+                path = self.recorder._path
+                self.addCleanup(path.unlink, missing_ok=True)
+                patches = [mock.patch.object(proc, signal_name, side_effect=PermissionError("denied"))]
+                if signal_name == "kill":
+                    patches.append(mock.patch.object(proc, "terminate"))
+                    patches.append(mock.patch.object(proc, "wait", side_effect=subprocess.TimeoutExpired("pw-record", 1)))
+                with patches[0]:
+                    if signal_name == "kill":
+                        with patches[1], patches[2]:
+                            with self.assertRaises(PermissionError):
+                                self.recorder.cancel()
+                    else:
+                        with self.assertRaises(PermissionError):
+                            self.recorder.cancel()
+                self.assertIs(self.recorder._proc, proc)
+                self.assertEqual(self.recorder._path, path)
+                self.assertTrue(self.recorder.recording)
+                self.assertTrue(path.exists())
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+                proc.stderr.close.assert_not_called()
+                self.recorder.cancel()
+                self.assertFalse(self.recorder.recording)
+                self.assertFalse(path.exists())
+                proc.stderr.close.assert_called_once()
+
+    def test_cancel_timeout_retains_owner_until_retry(self):
+        proc = FakeProc(alive=True, hang_first=True)
+        with self._patch_which(), self._patch_popen(proc):
+            self.recorder.start()
+        path = self.recorder._path
+        self.addCleanup(path.unlink, missing_ok=True)
+        with mock.patch.object(proc, "terminate"), mock.patch.object(proc, "kill"), \
+             mock.patch.object(proc, "wait", side_effect=subprocess.TimeoutExpired("pw-record", 1)):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                self.recorder.cancel()
+        self.assertIs(self.recorder._proc, proc)
+        self.assertTrue(path.exists())
+        proc.stderr.close.assert_not_called()
+        self.recorder.cancel()
+        self.assertFalse(path.exists())
+
+    def test_failed_stop_and_cancel_keep_live_recorder_for_retry(self):
+        proc = FakeProc(alive=True, hang_first=True)
+        with self._patch_which(), self._patch_popen(proc):
+            self.recorder.start()
+        path = self.recorder._path
+        self.addCleanup(path.unlink, missing_ok=True)
+        with mock.patch.object(proc, "send_signal", side_effect=PermissionError("stop denied")), \
+             mock.patch.object(proc, "terminate", side_effect=PermissionError("cancel denied")):
+            with self.assertRaisesRegex(RuntimeError, "stop denied.*cancel denied"):
+                self.recorder.stop_to_wav()
+        self.assertIs(self.recorder._proc, proc)
+        self.assertEqual(self.recorder._path, path)
+        self.assertTrue(path.exists())
+        proc.stderr.close.assert_not_called()
+        self.recorder.cancel()
+        self.assertFalse(path.exists())
+        proc.stderr.close.assert_called_once()
 
     def test_a_missing_pw_record_is_reported_by_name(self):
         with self._patch_which(present=False):

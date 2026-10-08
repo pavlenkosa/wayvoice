@@ -74,3 +74,35 @@ class StartRollbackTests(unittest.TestCase):
         self.assert_rolled_back(reply, proc)
         self.assertIn("cleanup failed", reply["error"])
         self.assertEqual(self.d.last_error, reply["error"])
+
+    def test_cancel_denied_reports_failure_keeps_owner_and_allows_retry(self):
+        reply, proc = self.start(mock.Mock(return_value=mock.Mock()))
+        self.assertTrue(reply["ok"])
+        path = self.paths[-1]
+        with mock.patch.object(proc, "terminate", side_effect=PermissionError("denied")):
+            reply = self.d.cancel()
+        self.assertFalse(reply["ok"])
+        self.assertIn("denied", self.d.last_error)
+        self.assertTrue(self.d.recorder.recording)
+        self.assertIs(self.d.recorder._proc, proc)
+        self.assertTrue(path.exists())
+        self.assertEqual(self.d.cancel(), {"ok": True, "state": "idle"})
+        self.assertFalse(path.exists())
+
+    def test_startup_rollback_denied_keeps_process_for_explicit_cancel(self):
+        proc = FakeProc(alive=True, hang_first=True)
+        timer = mock.Mock()
+        timer.start.side_effect = RuntimeError("timer unavailable")
+        with mock.patch.object(audio.shutil, "which", return_value="pw-record"), \
+             mock.patch.object(audio.subprocess, "Popen", return_value=proc), \
+             mock.patch.object(proc, "terminate", side_effect=PermissionError("denied")), \
+             mock.patch.object(daemon.threading, "Timer", return_value=timer):
+            reply = self.d.start_recording()
+        self.assertFalse(reply["ok"])
+        self.assertIn("timer unavailable", reply["error"])
+        self.assertIn("denied", reply["error"])
+        self.assertIs(self.d.recorder._proc, proc)
+        path = self.d.recorder._path
+        self.assertTrue(path.exists())
+        self.assertTrue(self.d.cancel()["ok"])
+        self.assertFalse(path.exists())
