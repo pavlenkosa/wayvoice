@@ -9,6 +9,12 @@ with what, not how a ``Gtk.ProgressBar`` draws.  The window itself is built
 without its constructor, because that one starts threads and talks to a daemon.
 """
 
+from tests.ui_support import controller_context
+try:
+    from wayvoice.ui.model_presentation import model_state_text, hero_preparation_caption, show_hero_preparation
+except Exception:
+    pass
+
 import unittest
 
 from wayvoice import model_store
@@ -72,17 +78,17 @@ class FakeBar:
 @needs_window
 class DownloadRowTests(unittest.TestCase):
     def setUp(self):
-        self.window = ui.WayVoiceWindow.__new__(ui.WayVoiceWindow)
-        self.window.ui_lang = "en"
-        self.window.t = lambda key, **kwargs: tr(key, "en", **kwargs)
-        self.window.model_download_row = FakeRow()
-        self.window.model_download_bar = FakeBar()
-        self.window.model_download_cancel_btn = FakeButton()
-        self.row = self.window.model_download_row
-        self.bar = self.window.model_download_bar
+        self.window = controller_context()
+        self.window.state.ui_lang = "en"
+        self.window.state.t = lambda key, **kwargs: tr(key, "en", **kwargs)
+        self.window.settings.model_download_row = FakeRow()
+        self.window.settings.model_download_bar = FakeBar()
+        self.window.settings.model_download_cancel_btn = FakeButton()
+        self.row = self.window.settings.model_download_row
+        self.bar = self.window.settings.model_download_bar
 
     def _apply(self, report):
-        self.window._apply_download_state(report)
+        self.window.models._apply_download_state(report)
 
     def _downloading(self, **download):
         base = {"state": "downloading", "model": "medium", "done_bytes": 0,
@@ -122,13 +128,13 @@ class DownloadRowTests(unittest.TestCase):
 
     def test_cancelling_is_offered_while_bytes_are_moving(self):
         self._apply(self._downloading(done_bytes=1, total_bytes=100))
-        self.assertTrue(self.window.model_download_cancel_btn.sensitive)
+        self.assertTrue(self.window.settings.model_download_cancel_btn.sensitive)
 
     def test_cancelling_is_not_offered_while_the_model_is_loading(self):
         # Nothing can be interrupted at that point; a button that reports
         # success and changes nothing is worse than no button.
         self._apply(self._downloading(done_bytes=100, total_bytes=100, warming=True))
-        self.assertFalse(self.window.model_download_cancel_btn.sensitive)
+        self.assertFalse(self.window.settings.model_download_cancel_btn.sensitive)
 
     def test_warming_is_its_own_message(self):
         # Nothing is being fetched any more: the weights are down and the model is going
@@ -203,17 +209,17 @@ class FetchButtonTests(unittest.TestCase):
     """The row's own way to fetch a model it does not have."""
 
     def setUp(self):
-        self.window = ui.WayVoiceWindow.__new__(ui.WayVoiceWindow)
-        self.window.ui_lang = "en"
-        self.window.t = lambda key, **kwargs: tr(key, "en", **kwargs)
-        self.window.model_download_row = FakeRow()
-        self.window.model_download_bar = FakeBar()
-        self.window.model_download_cancel_btn = FakeButton()
-        self.window.model_fetch_btn = FakeButton()
-        self.window._model_entry = {}
-        self.window._download_report = {}
+        self.window = controller_context()
+        self.window.state.ui_lang = "en"
+        self.window.state.t = lambda key, **kwargs: tr(key, "en", **kwargs)
+        self.window.settings.model_download_row = FakeRow()
+        self.window.settings.model_download_bar = FakeBar()
+        self.window.settings.model_download_cancel_btn = FakeButton()
+        self.window.settings.model_fetch_btn = FakeButton()
+        self.window.models._model_entry = {}
+        self.window.models._download_report = {}
         self.asked = []
-        self.window._ask_about_download = lambda model_id, size: self.asked.append(
+        self.window.models._ask_about_download = lambda model_id, size: self.asked.append(
             (model_id, size)
         )
 
@@ -228,47 +234,47 @@ class FetchButtonTests(unittest.TestCase):
         base = {"id": "medium", "kind": model_store.KIND_REPO,
                 "downloaded": False, "size_bytes": 1500}
         base.update(entry)
-        self.window._model_entry = base
+        self.window.models._model_entry = base
 
     def test_a_missing_hub_model_offers_the_download(self):
         # Without this button the only way to fetch a model was to pick a different
         # one - a place a user goes to only by accident.
         self._entry()
-        self.window._apply_download_state(self._download())
-        self.assertTrue(self.window.model_fetch_btn.visible)
+        self.window.models._apply_download_state(self._download())
+        self.assertTrue(self.window.settings.model_fetch_btn.visible)
 
     def test_a_model_that_is_on_disk_does_not(self):
         self._entry(downloaded=True)
-        self.window._apply_download_state(self._download())
-        self.assertFalse(self.window.model_fetch_btn.visible)
+        self.window.models._apply_download_state(self._download())
+        self.assertFalse(self.window.settings.model_fetch_btn.visible)
 
     def test_a_download_that_is_running_does_not_offer_a_second_one(self):
         self._entry()
-        self.window._apply_download_state(
+        self.window.models._apply_download_state(
             self._download(state="downloading", model="medium", total_bytes=10)
         )
-        self.assertFalse(self.window.model_fetch_btn.visible)
+        self.assertFalse(self.window.settings.model_fetch_btn.visible)
 
     def test_a_failed_download_offers_it_again(self):
         # The reason it failed may be gone - the network came back - and a user who
         # cannot retry has to restart the program.
         self._entry()
-        self.window._apply_download_state(
+        self.window.models._apply_download_state(
             self._download(state="error", model="medium", error="404 Client Error")
         )
-        self.assertTrue(self.window.model_fetch_btn.visible)
+        self.assertTrue(self.window.settings.model_fetch_btn.visible)
 
     def test_a_local_path_is_never_offered_a_download(self):
         # Nothing can fetch it: a button here would report success and change
         # nothing.
         self._entry(id="/home/u/models/foo", kind="local")
-        self.window._apply_download_state(self._download())
-        self.assertFalse(self.window.model_fetch_btn.visible)
+        self.window.models._apply_download_state(self._download())
+        self.assertFalse(self.window.settings.model_fetch_btn.visible)
 
     def test_pressing_it_asks_the_same_question_a_choice_asks(self):
         self._entry()
-        self.window._apply_download_state(self._download())
-        self.window._ask_to_fetch_the_model()
+        self.window.models._apply_download_state(self._download())
+        self.window.models._ask_to_fetch_the_model()
         self.assertEqual(self.asked, [("medium", 1500)])
 
 
@@ -282,14 +288,14 @@ class ChoosingAModelTests(unittest.TestCase):
     """
 
     def setUp(self):
-        self.window = ui.WayVoiceWindow.__new__(ui.WayVoiceWindow)
-        self.window.ui_lang = "en"
-        self.window.t = lambda key, **kwargs: tr(key, "en", **kwargs)
-        self.window._download_confirmation_for = None
+        self.window = controller_context()
+        self.window.state.ui_lang = "en"
+        self.window.state.t = lambda key, **kwargs: tr(key, "en", **kwargs)
+        self.window.models._download_confirmation_for = None
         self.prepared = []
         self.asked = []
-        self.window._ask_daemon_to_prepare_model = lambda: self.prepared.append(True)
-        self.window._ask_about_download = lambda model_id, size: self.asked.append(
+        self.window.models._ask_daemon_to_prepare_model = lambda: self.prepared.append(True)
+        self.window.models._ask_about_download = lambda model_id, size: self.asked.append(
             (model_id, size)
         )
 
@@ -297,18 +303,18 @@ class ChoosingAModelTests(unittest.TestCase):
         base = {"id": "medium", "kind": model_store.KIND_REPO,
                 "downloaded": False, "size_bytes": 1500}
         base.update(entry)
-        self.window._decide_what_to_do_about_the_selected_model(base)
+        self.window.models._decide_what_to_do_about_the_selected_model(base)
 
     def test_a_model_on_disk_is_warmed_without_a_question(self):
         # Loading it is free, and the first dictation would otherwise pay for it with
         # nothing having said so.
-        self.window._download_confirmation_for = "medium"
+        self.window.models._download_confirmation_for = "medium"
         self._decide(downloaded=True)
         self.assertEqual(self.prepared, [True])
         self.assertEqual(self.asked, [])
 
     def test_a_model_that_is_not_there_is_asked_about_first(self):
-        self.window._download_confirmation_for = "medium"
+        self.window.models._download_confirmation_for = "medium"
         self._decide()
         self.assertEqual(self.asked, [("medium", 1500)])
         self.assertEqual(self.prepared, [], "the download started without an answer")
@@ -316,13 +322,13 @@ class ChoosingAModelTests(unittest.TestCase):
     def test_a_local_path_is_neither_asked_about_nor_fetched(self):
         # Nothing can fetch it, so there is nothing to ask; the daemon reports
         # that for itself.
-        self.window._download_confirmation_for = "/home/u/models/foo"
+        self.window.models._download_confirmation_for = "/home/u/models/foo"
         self._decide(id="/home/u/models/foo", kind="local", downloaded=False)
         self.assertEqual(self.asked, [])
         self.assertEqual(self.prepared, [True])
 
     def test_the_question_is_asked_once(self):
-        self.window._download_confirmation_for = "medium"
+        self.window.models._download_confirmation_for = "medium"
         self._decide()
         self._decide()
         self.assertEqual(len(self.asked), 1, "the same download was asked about twice")
@@ -330,17 +336,17 @@ class ChoosingAModelTests(unittest.TestCase):
     def test_a_report_about_another_model_answers_nothing(self):
         # The state report is refreshed for the model that is selected now; one
         # that arrives late, from before the change, must not trigger anything.
-        self.window._download_confirmation_for = "large-v3"
+        self.window.models._download_confirmation_for = "large-v3"
         self._decide(id="small")
         self.assertEqual(self.asked, [])
         self.assertEqual(self.prepared, [])
 
     def test_an_answer_only_counts_for_the_model_it_was_asked_about(self):
-        self.window._download_confirmation_for = "medium"
+        self.window.models._download_confirmation_for = "medium"
         self._decide(id="large-v3")
         self.assertEqual(self.asked, [])
         self.assertIsNotNone(
-            self.window._download_confirmation_for,
+            self.window.models._download_confirmation_for,
             "the pending answer was dropped by an unrelated report",
         )
 
@@ -371,14 +377,14 @@ class HeroPreparationTests(unittest.TestCase):
     """
 
     def setUp(self):
-        self.window = ui.WayVoiceWindow.__new__(ui.WayVoiceWindow)
-        self.window.ui_lang = "en"
-        self.window.t = lambda key, **kwargs: tr(key, "en", **kwargs)
-        self.window._selected_model_id = lambda: "medium"
-        self.window.status_pill = FakeLabel()
-        self.window.hero_state = FakeLabel()
-        self.window.hero_caption = FakeLabel()
-        self.window.mic_icon = FakeIcon()
+        self.window = controller_context()
+        self.window.state.ui_lang = "en"
+        self.window.state.t = lambda key, **kwargs: tr(key, "en", **kwargs)
+        self.window.models._selected_model_id = lambda: "medium"
+        self.window.home.status_pill = FakeLabel()
+        self.window.home.hero_state = FakeLabel()
+        self.window.home.hero_caption = FakeLabel()
+        self.window.home.mic_icon = FakeIcon()
 
     def _report(self, **download):
         base = {"state": "idle", "model": "", "done_bytes": 0,
@@ -388,7 +394,7 @@ class HeroPreparationTests(unittest.TestCase):
                 "download": base}
 
     def _caption_for(self, report):
-        return self.window._hero_preparation_caption(report)
+        return hero_preparation_caption(self.window, report)
 
     def test_a_download_is_painted_with_progress(self):
         caption = self._caption_for(self._report(
@@ -396,10 +402,10 @@ class HeroPreparationTests(unittest.TestCase):
         self.assertIsNotNone(caption)
         self.assertIn("Downloading Medium", caption[0])
         self.assertIn("33%", caption[1])
-        self.window._show_hero_preparation(*caption)
-        self.assertEqual(self.window.status_pill.text, "Preparing")
-        self.assertEqual(self.window.hero_state.text, "Downloading Medium")
-        self.assertEqual(self.window.mic_icon.icon_name, "folder-download-symbolic")
+        show_hero_preparation(self.window, *caption)
+        self.assertEqual(self.window.home.status_pill.text, "Preparing")
+        self.assertEqual(self.window.home.hero_state.text, "Downloading Medium")
+        self.assertEqual(self.window.home.mic_icon.icon_name, "folder-download-symbolic")
 
     def test_a_download_without_bytes_yet_says_connecting(self):
         caption = self._caption_for(self._report(

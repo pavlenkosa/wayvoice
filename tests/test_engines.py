@@ -72,11 +72,11 @@ def _test_application():
     Registering emits ``GApplication::startup``, which GTK wants to have seen before a
     window is created, and a second registration of the same id in one process is refused.
     """
-    from gi.repository import Adw
+    from gi.repository import Adw, Gio
 
     global _APPLICATION
     if _APPLICATION is None:
-        _APPLICATION = Adw.Application(application_id="io.github.stepan.WayVoice.Test")
+        _APPLICATION = Adw.Application(application_id="io.github.stepan.WayVoice.Test", flags=Gio.ApplicationFlags.NON_UNIQUE)
         _APPLICATION.register()
     return _APPLICATION
 
@@ -451,6 +451,7 @@ class SettingsWindowRegistryTests(unittest.TestCase):
         self.window = self._build_window()
 
     def tearDown(self):
+        self.window._dispose_ui()
         self.window.destroy()
         self._env.stop()
         self._tmp.cleanup()
@@ -460,15 +461,11 @@ class SettingsWindowRegistryTests(unittest.TestCase):
         # The window arms timers and an idle callback on construction; they never fire
         # without a main loop, but replacing them keeps a run from touching the real
         # daemon or the real user's config.
-        with (
-            mock.patch.object(self.ui.WayVoiceWindow, "_background_start", lambda self: 0),
-            mock.patch.object(self.ui.WayVoiceWindow, "_poll_status", lambda self: 0),
-            mock.patch.object(self.ui.WayVoiceWindow, "_poll_engine_settings", lambda self: 0),
-        ):
+        with mock.patch("wayvoice.ui.window.TaskRunner", return_value=mock.Mock()):
             return self.ui.WayVoiceWindow(app)
 
     def _combo_labels(self) -> list[str]:
-        model = self.window.engine.get_model()
+        model = self.window.settings.engine.get_model()
         return [model.get_string(i) for i in range(model.get_n_items())]
 
     def test_engine_list_is_the_registry(self):
@@ -481,16 +478,16 @@ class SettingsWindowRegistryTests(unittest.TestCase):
     def test_selecting_an_index_selects_that_engine(self):
         for index, engine_id in enumerate(engine_ids()):
             with self.subTest(engine=engine_id):
-                self.window.engine.set_selected(index)
-                self.assertEqual(self.window._selected_engine(), engine_id)
-                self.assertEqual(self.window._selected_engine_object(), get_engine(engine_id))
+                self.window.settings.engine.set_selected(index)
+                self.assertEqual(self.window.context.preferences._selected_engine(), engine_id)
+                self.assertEqual(self.window.context.preferences._selected_engine_object(), get_engine(engine_id))
 
     def test_rows_follow_the_registry_settings(self):
-        rows = dict(self.window._engine_rows)
+        rows = dict(self.window.settings._engine_rows)
         for index, engine_id in enumerate(engine_ids()):
             with self.subTest(engine=engine_id):
-                self.window.engine.set_selected(index)
-                self.window._update_engine_visibility()
+                self.window.settings.engine.set_selected(index)
+                self.window.context.preferences._update_engine_visibility()
                 owned = set(get_engine(engine_id).settings)
                 for key, row in rows.items():
                     self.assertEqual(
@@ -499,23 +496,23 @@ class SettingsWindowRegistryTests(unittest.TestCase):
                         f"{engine_id}: row {key}",
                     )
                 self.assertEqual(
-                    self.window.engine_setup_btn.get_visible(),
+                    self.window.settings.engine_setup_btn.get_visible(),
                     get_engine(engine_id).needs_setup,
                     engine_id,
                 )
 
     def test_the_external_command_has_a_row_of_its_own(self):
-        rows = dict(self.window._engine_rows)
+        rows = dict(self.window.settings._engine_rows)
         self.assertIn("custom_command", rows)
-        self.window.engine.set_selected(engine_ids().index("custom"))
-        self.window._update_engine_visibility()
+        self.window.settings.engine.set_selected(engine_ids().index("custom"))
+        self.window.context.preferences._update_engine_visibility()
         self.assertTrue(rows["custom_command"].get_visible())
-        self.assertFalse(self.window.engine_setup_btn.get_visible())
+        self.assertFalse(self.window.settings.engine_setup_btn.get_visible())
         # The model list belongs to faster-whisper only.
         self.assertFalse(rows["model"].get_visible())
 
     def test_custom_command_row_is_filled_and_explained(self):
-        rows = dict(self.window._engine_rows)
+        rows = dict(self.window.settings._engine_rows)
         row = rows["custom_command"]
         hint = row.get_tooltip_text() or ""
         self.assertTrue(hint)
@@ -524,8 +521,8 @@ class SettingsWindowRegistryTests(unittest.TestCase):
         self.assertIn("{audio}", hint)
 
     def test_engine_card_shows_the_registry_label(self):
-        self.window._update_cards()
-        self.assertEqual(self.window.engine_card.get_text(), engine_label(DEFAULTS["engine"]))
+        self.window.context.status._update_cards()
+        self.assertEqual(self.window.home.engine_card.get_text(), engine_label(DEFAULTS["engine"]))
 
 
 class DaemonSetupTests(unittest.TestCase):

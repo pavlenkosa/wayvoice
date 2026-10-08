@@ -13,7 +13,13 @@ FORBIDDEN = (
     "/usr/bin/python3",
 )
 
-GLOBS = ("app/src/wayvoice/*.py", "systemd/*.service", "data/*.desktop")
+GLOBS = (
+    "app/src/wayvoice/*.py",
+    # UI-ARCH-001: the ui package (pages/controllers/widgets/dialogs) too.
+    "app/src/wayvoice/ui/**/*.py",
+    "systemd/*.service",
+    "data/*.desktop",
+)
 
 
 def scanned_files() -> list[Path]:

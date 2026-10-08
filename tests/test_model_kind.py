@@ -15,6 +15,8 @@ was written by hand from memory; only the real function settles it. So the guard
 below do not spell the values out - they ask ``describe()``.
 """
 
+from tests.ui_support import controller_context
+
 import importlib.util
 import tempfile
 import unittest
@@ -83,8 +85,14 @@ class KindComparisonTests(unittest.TestCase):
         # find_spec rather than ui.__file__: this class runs on CI, where the import
         # of wayvoice.ui fails for want of the GTK bindings. Locating the file does
         # not import it, so the guards run everywhere instead of only on a desktop.
-        return Path(importlib.util.find_spec("wayvoice.ui").origin).read_text(
-            encoding="utf-8")
+        # find_spec("wayvoice.ui") imports only the gi-free wayvoice/__init__, never
+        # the window module itself.
+        # UI-ARCH-001: the window shell lives in ui/window.py and the model
+        # lifecycle (where the kind comparisons now are) in the models controller.
+        ui_origin = importlib.util.find_spec("wayvoice.ui").origin
+        legacy = Path(str(Path(__file__).resolve().parents[1] / "app/src/wayvoice/ui/window.py"))
+        models = Path(ui_origin).parent / "controllers" / "models.py"
+        return legacy.read_text(encoding="utf-8") + "\n" + models.read_text(encoding="utf-8")
 
     def test_no_kind_is_compared_as_a_bare_string(self):
         import re
@@ -118,12 +126,12 @@ class RealEntryDrivesTheWindowTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
-        self.window = ui.WayVoiceWindow.__new__(ui.WayVoiceWindow)
-        self.window.ui_lang = "en"
+        self.window = controller_context()
+        self.window.state.ui_lang = "en"
         self.prepared = []
         self.asked = []
-        self.window._ask_daemon_to_prepare_model = lambda: self.prepared.append(True)
-        self.window._ask_about_download = lambda model_id, size: self.asked.append(
+        self.window.models._ask_daemon_to_prepare_model = lambda: self.prepared.append(True)
+        self.window.models._ask_about_download = lambda model_id, size: self.asked.append(
             (model_id, size))
 
     def _button(self):
@@ -132,38 +140,38 @@ class RealEntryDrivesTheWindowTests(unittest.TestCase):
 
             def set_visible(self, value):
                 self.visible = bool(value)
-        self.window.model_fetch_btn = Btn()
-        return self.window.model_fetch_btn
+        self.window.settings.model_fetch_btn = Btn()
+        return self.window.settings.model_fetch_btn
 
     def test_a_real_missing_repository_offers_the_download(self):
         entry = _entry_for(self.root, "org/some-finetune")
         button = self._button()
-        self.window._download_report = {}
-        self.window._model_entry = entry
-        self.window._refresh_fetch_button()
+        self.window.models._download_report = {}
+        self.window.models._model_entry = entry
+        self.window.models._refresh_fetch_button()
         self.assertTrue(button.visible,
                         f"no download button for kind={entry['kind']!r}")
 
     def test_a_real_local_folder_offers_no_download_button(self):
         entry = _entry_for(self.root, str(self.root / "local-model"))
         button = self._button()
-        self.window._download_report = {}
-        self.window._model_entry = entry
-        self.window._refresh_fetch_button()
+        self.window.models._download_report = {}
+        self.window.models._model_entry = entry
+        self.window.models._refresh_fetch_button()
         self.assertFalse(button.visible)
 
     def test_a_real_missing_repository_is_asked_about_first(self):
         entry = _entry_for(self.root, "org/some-finetune")
-        self.window._download_confirmation_for = entry["id"]
-        self.window._decide_what_to_do_about_the_selected_model(entry)
+        self.window.models._download_confirmation_for = entry["id"]
+        self.window.models._decide_what_to_do_about_the_selected_model(entry)
         self.assertEqual(len(self.asked), 1,
                          "a hub model was fetched without asking")
         self.assertEqual(self.asked[0][0], entry["id"])
 
     def test_a_real_local_folder_is_not_asked_about(self):
         entry = _entry_for(self.root, str(self.root / "local-model"))
-        self.window._download_confirmation_for = entry["id"]
-        self.window._decide_what_to_do_about_the_selected_model(entry)
+        self.window.models._download_confirmation_for = entry["id"]
+        self.window.models._decide_what_to_do_about_the_selected_model(entry)
         self.assertEqual(self.asked, [])
         self.assertEqual(len(self.prepared), 1,
                          "a local model should be warmed, not questioned")
