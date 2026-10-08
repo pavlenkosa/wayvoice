@@ -484,12 +484,21 @@ class WayVoiceDaemon:
                 notify(tr("daemon.recording_started", cfg.get("ui_language")), enabled=cfg.get("notify", True), replace=False)
                 return {"ok": True, "state": "recording"}
             except Exception as exc:
-                self.last_error = str(exc)
+                # Startup owns the take until both recorder and timer are ready.
+                # Roll back even if failure follows opening the microphone.
+                self._cancel_record_timer()
+                self._record_started = 0.0
+                error = str(exc)
+                try:
+                    self.recorder.cancel()
+                except Exception as cleanup_exc:
+                    error += f" Could not clean up recording: {cleanup_exc}"
+                self.last_error = error
                 # The notification cannot raise (see notify.notify) and must not be the
                 # last thing in the handler either: an exception here would escape
                 # start_recording entirely.
-                notify(str(exc), enabled=cfg.get("notify", True))
-                return {"ok": False, "error": str(exc)}
+                notify(error, enabled=cfg.get("notify", True))
+                return {"ok": False, "error": error}
 
     def cancel(self) -> dict:
         with self._lock:
