@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.6 — 2026-10-09
+
+- Decomposed the settings UI into pages and owned controllers; background replies respect window lifetime.
+- Fixed recorder and ASR cleanup, startup rollback, cancellation, shutdown and worker recovery after timeouts or lost connections. A worker disappearing before a request permits safe one-shot fallback.
+- Local recognition requires complete offline model snapshots; model preparation uses the explicitly selected target without saving unrelated draft settings.
+- Daemon readiness is confirmed after service startup; failed recovery retries are bounded. Repeated desktop-integration requests are combined and setup errors retain their cause.
+- Dictation text is hidden in notifications by default, with an explicit opt-in setting. Removed compute-type keys that never affected recognition.
+- Native setup and Flatpak share pinned runtime dependencies compatible with Python 3.11. Debian builds use source timestamps and stop on compiler errors; Python wheels include the runtime dependency file.
+- Removed redundant tests while retaining behavioral regression checks. Full Flatpak build and passive imports were verified; live microphone, shortcut and insertion scenarios remain to be validated on target desktops.
+
+
 ## 0.6.5 — 2026-10-07
 
 - CI and release runs at the 0.6.4 commit were red: a new test class carried no skip guard for machines without GTK bindings and errored instead of skipping. The class now skips like every other UI test, and the release gate runs the suite a second time with `gi` blocked, so the class of mistake fails the gate locally before it fails a release.
