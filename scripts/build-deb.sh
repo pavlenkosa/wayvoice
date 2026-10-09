@@ -2,6 +2,12 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# dpkg-deb clamps archive timestamps to this source timestamp. An explicit
+# value wins; git archives retain the commit timestamp on source files.
+if [ -z "${SOURCE_DATE_EPOCH:-}" ]; then
+    SOURCE_DATE_EPOCH="$(git -C "$ROOT" log -1 --format=%ct 2>/dev/null || stat -c %Y "$ROOT/app/src/wayvoice/__init__.py")"
+fi
+export SOURCE_DATE_EPOCH
 VERSION="$(PYTHONPATH="$ROOT/app/src" python3 -c 'from wayvoice import __version__; print(__version__)')"
 PKG="$ROOT/build/pkg"
 DIST="$ROOT/dist"
