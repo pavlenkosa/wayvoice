@@ -22,6 +22,7 @@ DEFAULTS: dict[str, Any] = {
     "paste_mode": "standard",
     "append_space": True,
     "notify": True,
+    "notify_transcript": False,
     "shortcut": "F8",
     "whisper_cpp_binary": "",
     "whisper_cpp_model": "",

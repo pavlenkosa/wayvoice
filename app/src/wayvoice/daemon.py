@@ -657,7 +657,7 @@ class WayVoiceDaemon:
                     self.last_warning = result.warning
                     notify(result.warning, enabled=cfg.get("notify", True))
                 else:
-                    notify(tr("daemon.text_inserted", cfg.get("ui_language")), text.strip()[:160], enabled=cfg.get("notify", True))
+                    notify(tr("daemon.text_inserted", cfg.get("ui_language")), text.strip()[:160] if cfg.get("notify_transcript") is True else "", enabled=cfg.get("notify", True))
             except InjectionError as exc:
                 self.last_error = str(exc)
                 notify(str(exc), enabled=cfg.get("notify", True))

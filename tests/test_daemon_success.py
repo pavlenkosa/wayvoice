@@ -101,13 +101,25 @@ class SuccessfulDictationTests(unittest.TestCase):
         self.assertEqual(inject.call_args.args[0], "привет мир")
         self.assertEqual(daemon.last_text, "привет мир")
 
-    def test_the_result_is_announced_with_the_recognised_text(self):
+    def test_the_result_is_announced_with_the_recognised_text_when_opted_in(self):
+        patcher = mock.patch("wayvoice.daemon.load_config", return_value=dict(CONFIG, notify_transcript=True))
+        patcher.start()
+        self.addCleanup(patcher.stop)
         daemon = self._daemon()
         self._run(daemon)
         summaries = [args[0] for args, _kwargs in self.calls if args]
         self.assertIn(tr("daemon.text_inserted", "en"), summaries)
         bodies = [args[1] for args, _kwargs in self.calls if len(args) > 1]
         self.assertIn("привет мир", bodies)
+
+    def test_transcript_is_private_by_default_and_without_boolean_opt_in(self):
+        for value in (None, False, "true", "false", 1):
+            with self.subTest(value=value), mock.patch("wayvoice.daemon.load_config", return_value=dict(CONFIG, notify_transcript=value)):
+                self.calls.clear()
+                daemon = self._daemon()
+                self._run(daemon)
+                self.assertEqual(daemon.last_text, "привет мир")
+                self.assertFalse(any("привет мир" in str(args) for args, _ in self.calls))
 
     def test_an_empty_result_is_a_warning_not_an_error(self):
         daemon = self._daemon()

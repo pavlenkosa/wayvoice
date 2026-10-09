@@ -193,6 +193,11 @@ class SettingsPage:
         self.notifications = Adw.SwitchRow(title=self.ctx.state.t("settings.notifications"))
         self.notifications.set_active(bool(self.ctx.state.cfg.get("notify", True)))
         control_group.add(self.notifications)
+        self.notification_text = Adw.SwitchRow(
+            title=self.ctx.state.t("settings.notification_text"),
+            subtitle=self.ctx.state.t("settings.notification_text_sub"))
+        self.notification_text.set_active(self.ctx.state.cfg.get("notify_transcript") is True)
+        control_group.add(self.notification_text)
 
         self.ctx.integration._build_dependencies_group(page)
 

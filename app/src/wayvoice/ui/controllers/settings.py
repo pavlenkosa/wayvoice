@@ -111,6 +111,7 @@ class SettingsController:
             "append_space": self.ctx.settings.append_space.get_active(),
             "paste_mode": PASTE_MODES[self.ctx.settings.paste.get_selected()],
             "notify": self.ctx.settings.notifications.get_active(),
+            "notify_transcript": self.ctx.settings.notification_text.get_active(),
             "shortcut": self.ctx.state.shortcut_binding,
             "whisper_cpp_binary": self.ctx.settings.cpp_binary.get_text().strip(),
             "whisper_cpp_model": self.ctx.settings.cpp_model.get_text().strip(),
