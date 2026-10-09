@@ -46,14 +46,15 @@ cp "$ROOT/data/80-wayvoice-uinput.rules" "$PKG/usr/lib/udev/rules.d/80-wayvoice-
 # anything: with no helper the application falls back to the clipboard, and says
 # so. Skipped quietly rather than fatally - a machine that cannot compile C can
 # still use voice dictation.
-if "$ROOT/scripts/build-ydotool.sh" "$PKG/usr/lib/wayvoice/ydotool"; then
+if command -v cc >/dev/null 2>&1; then
+    "$ROOT/scripts/build-ydotool.sh" "$PKG/usr/lib/wayvoice/ydotool"
     # AGPL-6: the object code travels with its licence and a pointer to where
     # the sources are. Both are inside the package, which is the only place a
     # user who has the binary will look.
     cp "$ROOT/third_party/ydotool/LICENSE" "$PKG/usr/lib/wayvoice/ydotool/LICENSE"
     cp "$ROOT/third_party/ydotool/README.wayvoice.md" "$PKG/usr/lib/wayvoice/ydotool/README.md"
 else
-    echo "wayvoice: continuing without the bundled ydotool" >&2
+    echo "wayvoice: no C compiler; continuing without the bundled ydotool" >&2
 fi
 # Lets the settings UI and `wayvoice deps --install` run the package manager
 # through pkexec; without it polkit would deny every install attempt.
