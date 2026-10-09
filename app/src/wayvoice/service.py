@@ -164,14 +164,32 @@ def start_user_unit(unit: str) -> bool:
     return _systemctl("start", unit)
 
 
+def _systemd_daemon_ready(action: str, wait: float) -> bool:
+    """Command completion precedes ping, so restart cannot accept the old daemon."""
+    deadline = time.monotonic() + max(0.0, wait)
+    cmd = ["systemctl", "--user", action, DAEMON_UNIT]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True,
+                                timeout=max(0.001, deadline - time.monotonic()),
+                                check=False)
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"WayVoice: daemon {action} failed: {exc}", file=sys.stderr)
+        return False
+    if result.returncode:
+        print(f"WayVoice: daemon {action} failed ({result.returncode}): "
+              f"{(result.stderr or result.stdout or '').strip()}", file=sys.stderr)
+        return False
+    return _wait_for_daemon(max(0.0, deadline - time.monotonic()))
+
+
 def _wait_for_daemon(wait: float) -> bool:
     deadline = time.monotonic() + max(0.0, wait)
     while True:
-        if daemon_socket_alive():
+        if daemon_socket_alive(timeout=min(0.3, max(0.001, deadline - time.monotonic()))):
             return True
         if time.monotonic() >= deadline:
             return False
-        time.sleep(POLL_INTERVAL)
+        time.sleep(min(POLL_INTERVAL, max(0.0, deadline - time.monotonic())))
 
 
 def start_daemon(wait: float = 5.0) -> bool:
@@ -183,7 +201,7 @@ def start_daemon(wait: float = 5.0) -> bool:
     """
     try:
         if systemd_available():
-            return _systemctl("start", DAEMON_UNIT)
+            return _systemd_daemon_ready("start", wait)
         with _start_lock:
             return _start_daemon_locked(wait=wait)
     except Exception as exc:
@@ -267,7 +285,7 @@ def restart_daemon(wait: float = 5.0) -> bool:
     with _start_lock:
         try:
             if systemd_available():
-                return _systemctl("restart", DAEMON_UNIT)
+                return _systemd_daemon_ready("restart", wait)
             if daemon_socket_alive():
                 try:
                     _request("quit", timeout=1.0)

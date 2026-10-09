@@ -3,7 +3,7 @@
 from ... import deps as deps_mod
 from ... import pkgsys
 from ... import service
-from ...paths import setup_user_script
+from ...cli import _run_setup_user
 from ..widgets.labels import clip_subtitle
 
 import gi
@@ -11,9 +11,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk
-import subprocess
 import sys
-import threading
 import time
 
 
@@ -39,29 +37,28 @@ class IntegrationController:
         """
         # The daemon start and the shortcut both talk to the outside world and can block,
         # so they never run on the GTK main loop.
-        threading.Thread(target=self._apply_desktop_integration_worker, daemon=True).start()
+        self.ctx.tasks.run(self._apply_desktop_integration_worker,
+                           self._desktop_integration_finished,
+                           lambda exc: self._desktop_integration_finished(str(exc)))
 
-    def _apply_desktop_integration_worker(self) -> None:
+    def _apply_desktop_integration_worker(self) -> str:
+        problems = []
         if not service.start_daemon():
-            # Desktop integration is optional: never let it break the UI, but
-            # keep the reason visible for bug reports.
-            print("WayVoice: the background daemon did not come up.", file=sys.stderr)
+            problems.append("WayVoice: the background daemon did not come up.")
         if service.systemd_available():
-            setup_user = setup_user_script()
-            if setup_user is None:
-                print(
-                    "WayVoice: setup-user script not found; skipping desktop integration.",
-                    file=sys.stderr,
-                )
-                return
-            try:
-                subprocess.Popen([str(setup_user)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except Exception as exc:
-                print(f"WayVoice: failed to start {setup_user}: {exc}", file=sys.stderr)
-            return
-        ok, msg = service.apply_shortcut_now()
+            ok, msg = _run_setup_user()
+        else:
+            ok, msg = service.apply_shortcut_now()
         if not ok:
-            print(f"WayVoice: global shortcut not applied: {msg}", file=sys.stderr)
+            problems.append(f"WayVoice: desktop integration failed: {msg}")
+        detail = "\n".join(problems)
+        if detail:
+            print(detail, file=sys.stderr)
+        return detail
+
+    def _desktop_integration_finished(self, detail):
+        if detail:
+            self.ctx.window._toast(detail)
 
     def _background_start(self):
         self._apply_desktop_integration()

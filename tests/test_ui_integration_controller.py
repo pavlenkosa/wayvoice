@@ -129,3 +129,25 @@ class RefreshThrottleTests(unittest.TestCase):
         with mock.patch.object(deps_mod, "status_all", return_value=[]) as status_all:
             window.integration._refresh_dependency_rows(force=True)
             status_all.assert_called_once_with()
+
+
+@needs_window
+class DesktopIntegrationResultTests(unittest.TestCase):
+    def test_setup_failure_is_returned_separately_from_daemon_failure(self):
+        from wayvoice.ui.controllers import integration
+        controller = IntegrationController(controller_context().integration.ctx)
+        with mock.patch.object(integration.service, "start_daemon", return_value=False), \
+             mock.patch.object(integration.service, "systemd_available", return_value=True), \
+             mock.patch.object(integration, "_run_setup_user", return_value=(False, "unit denied")):
+            result = controller._apply_desktop_integration_worker()
+        self.assertIn("daemon did not come up", result)
+        self.assertIn("unit denied", result)
+
+    def test_worker_result_is_marshaled_by_window_runner(self):
+        context = mock.Mock()
+        controller = IntegrationController(context)
+        controller._apply_desktop_integration()
+        work, done, failed = context.tasks.run.call_args.args
+        self.assertEqual(work, controller._apply_desktop_integration_worker)
+        done("setup denied")
+        context.window._toast.assert_called_once_with("setup denied")

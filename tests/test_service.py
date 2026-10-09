@@ -42,13 +42,51 @@ class SystemdAvailableTests(unittest.TestCase):
 class StartDaemonSystemdTests(unittest.TestCase):
     def test_starts_the_unit_with_exact_argv(self):
         with mock.patch.object(service, "systemd_available", return_value=True):
-            with mock.patch.object(service, "daemon_socket_alive", side_effect=AssertionError):
-                with mock.patch.object(subprocess, "Popen") as popen:
+            with mock.patch.object(service, "daemon_socket_alive", return_value=True):
+                with mock.patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as popen:
                     self.assertTrue(service.start_daemon())
         popen.assert_called_once()
         args, kwargs = popen.call_args
         self.assertEqual(args[0], ["systemctl", "--user", "start", "wayvoice.service"])
         self.assertNotIn("shell", kwargs)
+
+    def test_failed_command_never_accepts_old_daemon_or_spawns_direct(self):
+        for action in (service.start_daemon, service.restart_daemon):
+            with self.subTest(action=action.__name__), \
+                 mock.patch.object(service, "systemd_available", return_value=True), \
+                 mock.patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 1, stderr="unit failed")), \
+                 mock.patch.object(service, "daemon_socket_alive") as ping, \
+                 mock.patch.object(service, "_spawn") as spawn:
+                self.assertFalse(action(wait=0.1))
+                ping.assert_not_called()
+                spawn.assert_not_called()
+
+    def test_successful_command_without_ready_socket_is_failure(self):
+        with mock.patch.object(service, "systemd_available", return_value=True), \
+             mock.patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 0)), \
+             mock.patch.object(service, "daemon_socket_alive", return_value=False):
+            self.assertFalse(service.start_daemon(wait=0.01))
+
+    def test_command_errors_are_reported_without_ping(self):
+        for error in (OSError("missing"), subprocess.TimeoutExpired("systemctl", 0.01)):
+            with self.subTest(error=error), \
+                 mock.patch.object(service, "systemd_available", return_value=True), \
+                 mock.patch.object(subprocess, "run", side_effect=error), \
+                 mock.patch.object(service, "daemon_socket_alive") as ping:
+                self.assertFalse(service.restart_daemon(wait=0.01))
+                ping.assert_not_called()
+
+    def test_command_completion_precedes_ping_and_budget_is_shared(self):
+        events = []
+        def command(*args, **kwargs):
+            events.append("command")
+            return subprocess.CompletedProcess([], 0)
+        with mock.patch.object(service, "systemd_available", return_value=True), \
+             mock.patch.object(subprocess, "run", side_effect=command), \
+             mock.patch.object(service, "_wait_for_daemon", side_effect=lambda wait: events.append(wait) or True), \
+             mock.patch.object(service.time, "monotonic", side_effect=[0, 0, 2]):
+            self.assertTrue(service.restart_daemon(wait=5))
+        self.assertEqual(events, ["command", 3])
 
 
 class StartDaemonDirectTests(unittest.TestCase):
@@ -100,7 +138,7 @@ class StartDaemonDirectTests(unittest.TestCase):
 class RestartDaemonTests(unittest.TestCase):
     def test_systemd_path_restarts_the_unit(self):
         with mock.patch.object(service, "systemd_available", return_value=True):
-            with mock.patch.object(subprocess, "Popen") as popen:
+            with mock.patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as popen, mock.patch.object(service, "daemon_socket_alive", return_value=True):
                 self.assertTrue(service.restart_daemon())
         popen.assert_called_once()
         self.assertEqual(
