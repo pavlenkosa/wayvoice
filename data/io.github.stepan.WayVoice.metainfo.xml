@@ -21,6 +21,9 @@
   <supports><control>pointing</control><control>keyboard</control></supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.6.7" date="2026-10-10">
+      <description><p>Improved model download state, unsaved settings protection, first-use guidance and diagnostic export; added recognition presets, an optional status indicator and Fedora RPM packages.</p></description>
+    </release>
     <release version="0.6.6" date="2026-10-09">
       <description><p>Improved recording cleanup, cancellation, worker recovery and daemon readiness. Local recognition uses explicit offline model snapshots. Dictation text is hidden in notifications unless enabled in settings. The UI is decomposed into owned controllers and pages. Native and Flatpak share pinned runtime dependencies; repeated Debian builds on the same toolchain use reproducible source timestamps.</p></description>
     </release>

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.7 — 2026-10-10
+
+- Model availability and download progress now follow the selected model and refresh after completion without restarting the UI.
+- Unsaved settings are confirmed before leaving; saving respects language changes, window closure and later edits. Repeated actions and delayed replies are guarded.
+- Fixed graceful PipeWire recording completion and improved recovery and preparation feedback.
+- Added first-dictation preparation guidance, draft-only recognition presets and an optional compact status indicator.
+- Diagnostic reports are previewed before sharing and saved asynchronously with intact UTF-8 contents and private file permissions.
+- Added Fedora 44 RPM builds, architecture checks and SHA-256 checksums to CI and releases alongside Debian packages.
+- Removed unused UI scaffolding and retained behavioral regression checks. Live microphone, insertion and RPM desktop-installation scenarios still require validation on target desktops.
+
 ## 0.6.6 — 2026-10-09
 
 - Decomposed the settings UI into pages and owned controllers; background replies respect window lifetime.
