@@ -1104,8 +1104,13 @@ def _worker_request(payload: dict[str, Any], request_id: str, timeout: float, ca
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         sock.settimeout(WORKER_POLL_INTERVAL)
         try:
-            sock.connect(str(worker_socket_path()))
-            peer_pid = struct.unpack("3i", sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))[0]
+            try:
+                sock.connect(str(worker_socket_path()))
+                peer_pid = struct.unpack("3i", sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))[0]
+            except OSError as exc:
+                if cancel_event is not None and cancel_event.is_set():
+                    raise TranscriptionCancelled("Transcription cancelled") from exc
+                raise WorkerUnavailable("worker connection is unavailable") from exc
             identity = _worker_identity(peer_pid)
             if identity is None:
                 raise WorkerUnavailable("worker identity cannot be verified")

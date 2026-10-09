@@ -25,6 +25,32 @@ class TransportLossTests(unittest.TestCase):
         (root / 'bin' / 'python').touch()
         return root
 
+    def test_pre_send_connection_loss_falls_back_unless_cancelled(self):
+        from pathlib import Path
+        import subprocess
+        root = self.root_runtime()
+        for cancelled in (False, True):
+            with self.subTest(cancelled=cancelled):
+                event = threading.Event()
+                sock = mock.Mock()
+                def lost_connection(_path):
+                    if cancelled:
+                        event.set()
+                    raise ConnectionRefusedError("worker disappeared")
+                sock.connect.side_effect = lost_connection
+                with mock.patch.object(engine, "faster_runtime", return_value=root), \
+                     mock.patch.object(engine, "ensure_worker", return_value=True), \
+                     mock.patch.object(engine.socket, "socket", return_value=sock), \
+                     mock.patch.object(engine, "_run_cancelable", return_value=subprocess.CompletedProcess([], 0, "text", "")) as oneshot:
+                    if cancelled:
+                        with self.assertRaises(engine.TranscriptionCancelled):
+                            engine._transcribe_faster(Path("audio.wav"), {}, event)
+                        oneshot.assert_not_called()
+                    else:
+                        self.assertEqual(engine._transcribe_faster(Path("audio.wav"), {}, event), "text")
+                        oneshot.assert_called_once()
+                sock.close.assert_called_once()
+
     def test_cancel_socket_loss_retires_decode_and_warm_before_owner_unwinds(self):
         for command in ('transcribe', 'warm'):
             with self.subTest(command=command):
