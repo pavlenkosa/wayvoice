@@ -1428,14 +1428,11 @@ _register(Engine(
     uses_models=True,
     needs_setup=True,
     # ``custom_model`` is the "custom" entry of the model list, and the worker
-    # settings exist for this engine only. ``compute_type_*`` are read by nothing
-    # (the quantization comes from the device) but they name a faster-whisper
-    # setting.
+    # settings exist for this engine only. Compute type is selected automatically
+    # by fw_worker for both persistent and one-shot operation.
     settings=(
         "model",
         "custom_model",
-        "compute_type_cpu",
-        "compute_type_cuda",
         "device",
         "beam_size",
         "vad_filter",

@@ -270,3 +270,30 @@ class EngineSetupLockTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LegacyComputeConfigTests(unittest.TestCase):
+    def test_legacy_compute_keys_are_ignored_without_rewriting_or_losing_settings(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from wayvoice import config, fw_worker
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            raw = json.dumps({"compute_type_cpu": None, "compute_type_cuda": ["invalid"],
+                              "model": "small", "extra_setting": "keep"})
+            path.write_text(raw)
+            with mock.patch.object(config, "config_path", return_value=path), \
+                 mock.patch.object(config, "config_dir", return_value=Path(directory)):
+                loaded = config.load_config()
+                self.assertEqual(path.read_text(), raw)
+                self.assertNotIn("compute_type_cpu", loaded)
+                self.assertNotIn("compute_type_cuda", loaded)
+                self.assertEqual(config.config_error(), "")
+                config.save_config(dict(loaded, compute_type_cpu="float32"))
+            saved = json.loads(path.read_text())
+            self.assertNotIn("compute_type_cpu", saved)
+            self.assertEqual(saved["extra_setting"], "keep")
+            self.assertEqual(saved["model"], "small")
+        self.assertEqual(fw_worker.compute_type_for("cpu"), "int8")
+        self.assertEqual(fw_worker.compute_type_for("cuda"), "float16")

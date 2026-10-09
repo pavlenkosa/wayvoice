@@ -241,3 +241,10 @@ Contributions, bug reports and testing on different Linux/Wayland setups are wel
 WayVoice is licensed under the **GNU Affero General Public License v3.0 or later** (`AGPL-3.0-or-later`).
 
 See [LICENSE](LICENSE) and [third_party/ydotool](third_party/ydotool/README.wayvoice.md) for details.
+
+
+Faster-Whisper selects its compute type automatically: `int8` on CPU and `float16`
+on CUDA, in both worker and one-shot modes. Legacy `compute_type_cpu` and
+`compute_type_cuda` configuration keys never controlled recognition; they are now
+ignored when reading old files and omitted on the next explicit settings save.
+Reading a configuration does not rewrite it.

@@ -12,8 +12,6 @@ DEFAULTS: dict[str, Any] = {
     # loudly, it transcribes foreign speech with the wrong grammar and spelling.
     "language": "auto",
     "device": "auto",
-    "compute_type_cpu": "int8",
-    "compute_type_cuda": "float16",
     "beam_size": 5,
     "vad_filter": True,
     "auto_punctuation": True,
@@ -38,6 +36,10 @@ DEFAULTS: dict[str, Any] = {
     "engine_worker_idle_sec": 900,
 }
 
+
+# Legacy keys never affected recognition. Accept old files without carrying the
+# unsupported knobs into the active config or the next explicit save.
+_RETIRED_KEYS = frozenset({"compute_type_cpu", "compute_type_cuda"})
 
 def config_dir() -> Path:
     base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
@@ -69,7 +71,7 @@ def load_config() -> dict[str, Any]:
         try:
             loaded = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(loaded, dict):
-                data.update(loaded)
+                data.update({key: value for key, value in loaded.items() if key not in _RETIRED_KEYS})
             else:
                 _LAST_ERROR = f"{path} does not contain an object"
         except Exception as exc:
@@ -80,7 +82,7 @@ def load_config() -> dict[str, Any]:
 def save_config(data: dict[str, Any]) -> None:
     config_dir().mkdir(parents=True, exist_ok=True)
     merged = dict(DEFAULTS)
-    merged.update(data)
+    merged.update({key: value for key, value in data.items() if key not in _RETIRED_KEYS})
     path = config_path()
     # Written to a temporary file and renamed, never in place: the daemon reads this
     # several times a minute, and a reader that catches a half-written config falls
