@@ -724,6 +724,9 @@ _EN.update({'indicator.title': 'WayVoice — indicator',
  'indicator.processing': 'Recognizing the recording. Open Home to cancel.',
  'indicator.preparing': 'Downloading or preparing a model.'})
 
+_RU.update({"indicator.open_app": "Открыть WayVoice"})
+_EN.update({"indicator.open_app": "Open WayVoice"})
+
 _TRANSLATIONS = {"ru": _RU, "en": _EN}
 
 

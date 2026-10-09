@@ -146,6 +146,42 @@ class UnsavedNavigationTests(unittest.TestCase):
         self.assertIsNotNone(self.controller._restart_command)
         self.assertFalse(self.controller.has_unsaved_changes())
 
+    def test_language_save_honors_leave_close_and_quit(self):
+        self.draft['ui_language'] = 'ru'
+        for mode in ('leave', 'close', 'quit'):
+            with self.subTest(mode=mode):
+                self.controller._saved_draft = dict(self.draft)
+                proceed = mock.Mock()
+                self.ctx.window.close = mock.Mock()
+                self.ctx.window._quit = mock.Mock()
+                self.controller._leave_after_save = proceed if mode == 'leave' else None
+                self.ctx.window._close_pending = mode == 'close'
+                self.ctx.window._quit_pending = mode == 'quit'
+                self.controller._save_finished((dict(self.draft), True, ''))
+                self.assertIsNone(self.controller._restart_command)
+                if mode == 'leave':
+                    proceed.assert_called_once()
+                else:
+                    self.controller._mutations = [(None, None, None)]
+                    self.controller._mutation_finished(lambda _: None, None)
+                    (self.ctx.window.close if mode == 'close' else self.ctx.window._quit).assert_called_once()
+
+    def test_delayed_language_replacement_preserves_new_edit_or_exit(self):
+        self.draft['ui_language'] = 'ru'
+        self.controller._saved_draft = dict(self.draft)
+        self.controller._save_finished((dict(self.draft), True, ''))
+        self.draft['model'] = 'medium'
+        self.ctx.window.get_application = mock.Mock()
+        self.controller._restart_ui()
+        self.ctx.window.get_application.assert_not_called()
+        self.assertTrue(self.controller.has_unsaved_changes())
+        self.draft['model'] = 'small'
+        self.ctx.window._close_pending = True
+        self.ctx.window.close = mock.Mock()
+        self.controller._restart_ui()
+        self.ctx.window.close.assert_called_once()
+        self.ctx.window.get_application.assert_not_called()
+
     def test_failed_save_stays_but_explicit_leave_keeps_draft(self):
         self.draft["model"] = "medium"
         proceed = mock.Mock()

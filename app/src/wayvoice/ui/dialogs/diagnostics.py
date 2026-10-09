@@ -50,8 +50,8 @@ def diagnostics_preview(parent, text, t, on_copy):
         chooser = None
         if file is not None and not closed:
             save.set_sensitive(False)
-            file.replace_contents_async(
-                text.encode("utf-8"), None, False,
+            file.replace_contents_bytes_async(
+                GLib.Bytes.new(text.encode("utf-8")), None, False,
                 Gio.FileCreateFlags.PRIVATE | Gio.FileCreateFlags.REPLACE_DESTINATION,
                 None, saved,
             )

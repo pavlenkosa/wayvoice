@@ -193,10 +193,12 @@ class SettingsController:
         self.ctx.state.cfg = cfg
         if self._saved_draft is not None:
             self._baseline_draft = dict(self._saved_draft)
+        self._refresh_save_state()
         proceed, self._leave_after_save = self._leave_after_save, None
         new_ui_setting = cfg["ui_language"]
         language_changed = new_ui_setting != self.ctx.state.ui_lang_setting
-        if language_changed and ok and not self.has_unsaved_changes():
+        exiting = self.ctx.window._close_pending or self.ctx.window._quit_pending
+        if language_changed and ok and not proceed and not exiting and not self.has_unsaved_changes():
             # Replace this window inside the existing application; keep any
             # independent status indicator alive and avoid a launcher race.
             self._restart_command = True
@@ -211,6 +213,13 @@ class SettingsController:
 
     def _restart_ui(self):
         self._restart_command = None
+        # A queued preparation can finish after the accepted Save. Respect a
+        # subsequent edit or close instead of replacing the window underneath it.
+        if (self.has_unsaved_changes() or self.ctx.window._close_pending
+                or self.ctx.window._quit_pending):
+            self.ctx.window._toast(self.ctx.state.t("settings.language_pending"))
+            self.ctx.window._mutations_finished()
+            return
         self.ctx.window.get_application().replace_settings(self.ctx.window)
 
     def _prepare_selected_engine(self, cfg):

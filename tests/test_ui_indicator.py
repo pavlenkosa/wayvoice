@@ -46,6 +46,7 @@ class IndicatorTests(unittest.TestCase):
                 self.assertNotIn('private transcript', self.window.detail_label.get_text())
             self.window._paint(({'ok': False}, {}))
             self.assertEqual(self.window.language, 'en')
+            self.assertEqual(self.window.settings_button.get_label(), 'Open WayVoice')
             present.assert_not_called()
 
     def test_poll_is_single_flight_and_close_disposes_callbacks(self):

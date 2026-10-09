@@ -28,7 +28,7 @@ class IndicatorWindow(Adw.ApplicationWindow):
         self.limit_label = make_label(self.t('indicator.limit'), wrap=True)
         box.append(self.limit_label)
         buttons = Gtk.Box(spacing=8)
-        self.settings_button = Gtk.Button(label=self.t('nav.settings'))
+        self.settings_button = Gtk.Button(label=self.t('indicator.open_app'))
         self.settings_button.connect('clicked', lambda *_: app.activate())
         close = Gtk.Button(label=self.t('common.close'))
         close.connect('clicked', lambda *_: self.close())
@@ -68,7 +68,7 @@ class IndicatorWindow(Adw.ApplicationWindow):
         reply, cfg = snapshot
         self.language = cfg.get('ui_language', self.language or 'auto')
         self.set_title(self.t('indicator.title'))
-        self.settings_button.set_label(self.t('nav.settings'))
+        self.settings_button.set_label(self.t('indicator.open_app'))
         self.close_button.set_label(self.t('common.close'))
         self.limit_label.set_text(self.t('indicator.limit'))
         if not reply.get('ok'):
