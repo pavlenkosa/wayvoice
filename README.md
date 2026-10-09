@@ -248,3 +248,12 @@ on CUDA, in both worker and one-shot modes. Legacy `compute_type_cpu` and
 `compute_type_cuda` configuration keys never controlled recognition; they are now
 ignored when reading old files and omitted on the next explicit settings save.
 Reading a configuration does not rewrite it.
+
+
+Native engine preparation and Flatpak builds use the same exact dependency versions
+in `app/src/wayvoice/runtime-requirements.txt`. Updating the runtime means updating
+and checking that set, including Python 3.11 compatibility.
+
+Debian builds honor `SOURCE_DATE_EPOCH`; otherwise they use the Git commit timestamp
+or, for a source archive, the timestamp of `app/src/wayvoice/__init__.py`. Use the same
+source, compiler/toolchain and epoch when comparing artifacts from repeated builds.

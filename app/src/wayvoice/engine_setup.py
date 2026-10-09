@@ -52,8 +52,7 @@ def _install_once(runtime: Path, log) -> None:
         [
             str(python), "-m", "pip", "install",
             "--disable-pip-version-check", "--no-input", "--upgrade",
-            "av>=11,<19",
-            "faster-whisper>=1.1.1,<2",
+            "--requirement", str(Path(__file__).with_name("runtime-requirements.txt")),
         ],
         stdout=log,
         stderr=subprocess.STDOUT,

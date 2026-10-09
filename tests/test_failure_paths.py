@@ -247,14 +247,25 @@ class EngineSetupLockTests(unittest.TestCase):
             self.addCleanup(handle.close)
             self.assertTrue(engine_setup._take_lock(handle))
 
-    def test_pip_has_a_deadline(self):
-        # A network that stops delivering used to leave the status at "installing"
-        # forever: the window spun with no cancel button and every dictation attempt
-        # spawned another setup process waiting on the lock.
+    def test_pip_has_a_deadline_and_uses_the_shared_pinned_dependencies(self):
+        import tempfile
+        from pathlib import Path
         from wayvoice import engine_setup
-
-        self.assertGreater(engine_setup.PIP_TIMEOUT, 0)
-        self.assertGreater(engine_setup.LOCK_TIMEOUT, 0)
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory)
+            (runtime / "bin").mkdir()
+            (runtime / "bin/python").touch()
+            with mock.patch.object(engine_setup.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as run:
+                engine_setup._install_once(runtime, mock.Mock())
+            args = run.call_args_list[0].args[0]
+            requirement = Path(args[args.index("--requirement") + 1])
+            self.assertTrue(requirement.is_file())
+            entries = [line for line in requirement.read_text().splitlines() if line and not line.startswith("#")]
+            self.assertTrue(entries)
+            self.assertTrue(all("==" in line for line in entries))
+            self.assertEqual(run.call_args_list[0].kwargs["timeout"], engine_setup.PIP_TIMEOUT)
+            self.assertGreater(engine_setup.PIP_TIMEOUT, 0)
+            self.assertGreater(engine_setup.LOCK_TIMEOUT, 0)
 
     def test_the_log_names_the_running_version(self):
         from wayvoice import __version__, engine_setup
