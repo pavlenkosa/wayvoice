@@ -214,7 +214,6 @@ class ModelsController:
         report = self._download_report if isinstance(self._download_report, dict) else {}
         download = report.get("download") if isinstance(report.get("download"), dict) else {}
         phase = str(download.get("state") or "idle")
-        model_id = str(entry.get("id") or "")
         # Check if the model is a repo model (hub model) and not downloaded
         is_repo_model = str(entry.get("kind") or "") == model_store.KIND_REPO
         is_not_downloaded = not entry.get("inference_ready", entry.get("downloaded"))
@@ -223,7 +222,6 @@ class ModelsController:
             is_repo_model
             and is_not_downloaded
             and phase in {"idle", "error", "ready"}
-            and str(download.get("model") or "") in {"", model_id}
         )
         self.ctx.settings.model_fetch_btn.set_visible(wanted)
 
@@ -250,13 +248,24 @@ class ModelsController:
         if not hasattr(self.ctx.settings, "model_download_row"):
             return
         report = report if isinstance(report, dict) else {}
+        previous = self._download_report.get("download")
+        previous = previous if isinstance(previous, dict) else {}
+        download = report.get("download") if isinstance(report.get("download"), dict) else {}
+        # Rescan once at lifecycle boundaries, never on every byte-progress poll.
+        def boundary(value):
+            return (value.get("model"), value.get("state"), bool(value.get("warming")))
         self._download_report = report
+        if boundary(previous) != boundary(download) and (
+            download.get("state") in {"ready", "error", "idle", "warming"}
+            or download.get("warming")
+            or previous.get("state") in {"downloading", "warming"}
+        ):
+            self._refresh_model_state()
         # Before any branch below, all of which return: the button in the model row asks
         # about both what is on disk and what is being done about it.
         self._refresh_fetch_button()
-        download = report.get("download") if isinstance(report.get("download"), dict) else {}
         state = str(download.get("state") or "idle")
-        model_id = str(report.get("model") or "")
+        model_id = self._selected_model_id()
         if str(download.get("model") or "") != model_id:
             # Work on a different model than the selected one - the user changed the row
             # while the old model was still coming down or being loaded. Painting its
@@ -382,8 +391,11 @@ class ModelsController:
 
     def _model_state_ready(self, entry, free_bytes, total_bytes, held, cache_bytes=0):
         self._model_refresh_busy = False
-        self._apply_model_state(entry, free_bytes, total_bytes, held, cache_bytes)
-        self._decide_what_to_do_about_the_selected_model(entry)
+        if str(entry.get("id") or "") == self._selected_model_id():
+            self._apply_model_state(entry, free_bytes, total_bytes, held, cache_bytes)
+            self._decide_what_to_do_about_the_selected_model(entry)
+        else:
+            self._model_refresh_pending = True
         if self._model_refresh_pending:
             self._refresh_model_state()
         return GLib.SOURCE_REMOVE

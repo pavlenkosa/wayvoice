@@ -86,3 +86,23 @@ class ModelTargetTests(unittest.TestCase):
             self.controller._model_state_worker("medium")
         self.assertTrue(ready.call_args.args[0]["downloaded"])
         self.assertFalse(ready.call_args.args[0]["inference_ready"])
+
+    def test_draft_progress_and_completion_refresh_without_restart(self):
+        controller = self.controller
+        self.ctx.settings.model_download_row = mock.Mock()
+        self.ctx.settings.model_download_bar = mock.Mock()
+        self.ctx.settings.model_download_cancel_btn = mock.Mock()
+        apply = lambda report: models.ModelsController._apply_download_state(controller, report)
+        apply({"model": "small", "download": {"model": "medium", "state": "downloading", "done_bytes": 5, "total_bytes": 10}})
+        self.ctx.settings.model_download_row.set_visible.assert_called_with(True)
+        self.ctx.settings.model_download_bar.set_fraction.assert_called_once_with(0.5)
+        ready = {"model": "small", "download": {"model": "medium", "state": "ready"}}
+        apply(ready)
+        apply(ready)
+        controller._refresh_model_state.assert_called_once()
+
+    def test_old_cache_scan_cannot_replace_selected_model(self):
+        with mock.patch.object(self.controller, "_apply_model_state") as paint:
+            self.controller._model_state_ready({"id": "small"}, 0, 0, {})
+        paint.assert_not_called()
+        self.controller._refresh_model_state.assert_called_once()

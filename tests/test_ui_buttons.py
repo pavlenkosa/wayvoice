@@ -382,6 +382,7 @@ class DownloadErrorTests(unittest.TestCase):
         self.window.settings.model_fetch_btn = FakeButton()
         self.window.models._model_entry = {}
         self.window.models._download_report = {}
+        self.window.models._selected_model_id = lambda: "small"
         self.window.window.toast = FakeToast()
         # GLib.idle_add runs its callback at once, so the reply is handled on
         # this thread the way the main loop would - without a running loop.
@@ -397,6 +398,13 @@ class DownloadErrorTests(unittest.TestCase):
                 "downloaded": False, "size_bytes": 1500}
         base.update(entry)
         self.window.models._model_entry = base
+
+    def test_completed_other_model_does_not_hide_download_offer(self):
+        self._entry()
+        self.window.models._download_report = {
+            "download": {"state": "ready", "model": "medium"}}
+        self.window.models._refresh_fetch_button()
+        self.assertTrue(self.window.settings.model_fetch_btn.visible)
 
     def test_error_state_leaves_row_visible_with_error_subtitle(self):
         # The row is the only place a failed download explains itself; hiding it

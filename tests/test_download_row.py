@@ -84,6 +84,7 @@ class DownloadRowTests(unittest.TestCase):
         self.window.settings.model_download_row = FakeRow()
         self.window.settings.model_download_bar = FakeBar()
         self.window.settings.model_download_cancel_btn = FakeButton()
+        self.window.models._selected_model_id = lambda: "medium"
         self.row = self.window.settings.model_download_row
         self.bar = self.window.settings.model_download_bar
 
@@ -172,6 +173,7 @@ class DownloadRowTests(unittest.TestCase):
             self.assertFalse(self.row.visible)
 
     def test_another_models_download_is_not_reported_as_this_row(self):
+        self.window.models._selected_model_id = lambda: "small"
         # The report is about the selected model; a download of something else must not
         # be painted next to it.
         self._apply({"supported": True, "present": False, "model": "small",
@@ -182,6 +184,7 @@ class DownloadRowTests(unittest.TestCase):
         self.assertFalse(self.row.visible)
 
     def test_another_models_warm_up_is_not_reported_as_this_row_either(self):
+        self.window.models._selected_model_id = lambda: "small"
         # The same lie in the other direction: the user picked another model while the
         # old one was still being read into the worker. The warm-up is a branch of its
         # own, so it needed the same guard, in the same place: before it.
