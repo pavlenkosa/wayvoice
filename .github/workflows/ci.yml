@@ -56,6 +56,7 @@ jobs:
             scripts/setup-user \
             scripts/build-deb.sh \
             scripts/build-rpm.sh \
+            scripts/build-rpm-container.sh \
             scripts/build-ydotool.sh \
             packaging/DEBIAN/postinst \
             packaging/DEBIAN/postrm \
@@ -72,13 +73,7 @@ jobs:
 
       - name: Build and inspect Fedora RPM
         run: |
-          docker run --rm -v "$PWD:/src" -w /src fedora:44 sh -ec '
-            dnf install -y rpm-build gcc python3 systemd-rpm-macros tar gzip
-            ./scripts/build-rpm.sh
-            rpm -qip dist/*.rpm
-            rpm -qlp dist/*.rpm
-            rpm -qp --scripts dist/*.rpm
-          '
+          ./scripts/build-rpm-container.sh
 
       - name: Inspect Debian package
         run: |
