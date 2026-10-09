@@ -23,6 +23,8 @@ class IntegrationController:
         self._dep_last_refresh = 0.0
         self._refresh_running = False
         self._refresh_pending = False
+        self._integration_running = False
+        self._integration_pending = False
 
 
     def _apply_desktop_integration(self) -> None:
@@ -37,9 +39,15 @@ class IntegrationController:
         """
         # The daemon start and the shortcut both talk to the outside world and can block,
         # so they never run on the GTK main loop.
-        self.ctx.tasks.run(self._apply_desktop_integration_worker,
+        if self._integration_running:
+            self._integration_pending = True
+            return
+        self._integration_running = True
+        if not self.ctx.tasks.run(self._apply_desktop_integration_worker,
                            self._desktop_integration_finished,
-                           lambda exc: self._desktop_integration_finished(str(exc)))
+                           lambda exc: self._desktop_integration_finished(str(exc))):
+            self._integration_running = False
+            self._integration_pending = False
 
     def _apply_desktop_integration_worker(self) -> str:
         problems = []
@@ -57,8 +65,15 @@ class IntegrationController:
         return detail
 
     def _desktop_integration_finished(self, detail):
-        if detail:
-            self.ctx.window._toast(detail)
+        self._integration_running = False
+        pending = self._integration_pending
+        self._integration_pending = False
+        try:
+            if detail:
+                self.ctx.window._toast(detail)
+        finally:
+            if pending:
+                self._apply_desktop_integration()
 
     def _background_start(self):
         self._apply_desktop_integration()

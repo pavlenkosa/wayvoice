@@ -151,3 +151,55 @@ class DesktopIntegrationResultTests(unittest.TestCase):
         self.assertEqual(work, controller._apply_desktop_integration_worker)
         done("setup denied")
         context.window._toast.assert_called_once_with("setup denied")
+
+
+    def test_repeated_requests_queue_one_followup_even_after_failure(self):
+        context = mock.Mock()
+        context.tasks.run.return_value = True
+        controller = IntegrationController(context)
+        controller._apply_desktop_integration()
+        for _ in range(5):
+            controller._apply_desktop_integration()
+        self.assertEqual(context.tasks.run.call_count, 1)
+        context.tasks.run.call_args.args[2](RuntimeError("setup denied"))
+        self.assertEqual(context.tasks.run.call_count, 2)
+        self.assertTrue(controller._integration_running)
+        context.tasks.run.call_args.args[1]("")
+        self.assertFalse(controller._integration_running)
+        self.assertFalse(controller._integration_pending)
+        self.assertEqual(context.tasks.run.call_count, 2)
+
+    def test_close_suppresses_pending_job_and_late_toast(self):
+        import threading
+        from tests.test_ui_async_tasks import FakeGLib, TaskRunner
+        glib = FakeGLib()
+        runner = TaskRunner(glib)
+        self.addCleanup(runner.close)
+        context = mock.Mock(tasks=runner)
+        controller = IntegrationController(context)
+        entered = threading.Event()
+        release = threading.Event()
+        finished = threading.Event()
+        def work():
+            entered.set()
+            release.wait(2)
+            finished.set()
+            return "setup denied"
+        with mock.patch.object(controller, "_apply_desktop_integration_worker", side_effect=work) as worker:
+            controller._apply_desktop_integration()
+            self.assertTrue(entered.wait(2))
+            controller._apply_desktop_integration()
+            runner.close()
+            release.set()
+            self.assertTrue(finished.wait(2))
+            glib.drain()
+            self.assertEqual(worker.call_count, 1)
+        context.window._toast.assert_not_called()
+
+    def test_rejected_job_does_not_strand_running_state(self):
+        context = mock.Mock()
+        context.tasks.run.return_value = False
+        controller = IntegrationController(context)
+        controller._apply_desktop_integration()
+        self.assertFalse(controller._integration_running)
+        self.assertFalse(controller._integration_pending)
