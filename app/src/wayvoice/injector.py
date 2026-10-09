@@ -2,9 +2,11 @@ from __future__ import annotations
 import atexit
 import os
 import shutil
+import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from dataclasses import dataclass
@@ -47,8 +49,7 @@ class InjectionResult:
 _clipboard_lock = threading.Lock()
 _clipboard_proc: subprocess.Popen | None = None
 
-#: How long wl-copy gets to claim the Wayland selection before we assume it made
-#: it. A deadline rather than a sleep, so a wedged clipboard tool cannot exceed it.
+#: Deadline for wl-copy to acknowledge selection ownership (not a fixed delay).
 CLIPBOARD_SETTLE_TIMEOUT = 0.5
 
 
@@ -74,15 +75,11 @@ def _run(cmd, *, env=None, timeout: float = 2.0,
 
 
 def copy_to_clipboard(text: str, language: str | None = None) -> None:
-    """Own the Wayland clipboard without blocking on wl-copy's background server.
+    """Wait for wl-copy's selection handshake, retaining its background owner.
 
-    wl-copy forks after acquiring the selection, and waiting on it with a captured
-    stderr pipe can hang because the background child keeps that pipe open. Running it
-    in the foreground and keeping the process alive avoids that, and leaves the
-    clipboard usable for repeated pastes until another owner replaces it.
-
-    ``language`` is the interface language of the error messages, taken from the
-    configuration so that a notification matches the UI.
+    Default-mode wl-copy exits its parent after acquiring the selection. Its child
+    serves the text until the compositor replaces it, including after UI exit.
+    Inherited stderr must not be a PIPE: the child would keep communicate waiting.
     """
     global _clipboard_proc
 
@@ -90,72 +87,59 @@ def copy_to_clipboard(text: str, language: str | None = None) -> None:
     if not binary:
         raise InjectionError(describe_missing("wl-clipboard"))
 
-    with _clipboard_lock:
+    with _clipboard_lock, tempfile.TemporaryFile() as errors:
         _terminate_clipboard()
-
         proc = subprocess.Popen(
-            [binary, "--foreground", "--type", "text/plain;charset=utf-8"],
+            [binary, "--type", "text/plain;charset=utf-8"],
             stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
+            stderr=errors,
             text=True,
-            start_new_session=False,
+            encoding="utf-8",
+            start_new_session=True,
         )
-        # Remember the process before doing anything that can fail. wl-copy only
-        # forks into its clipboard server after the selection is claimed, so a
-        # process we lose track of keeps owning the Wayland clipboard.
         _clipboard_proc = proc
         try:
-            assert proc.stdin is not None
-            proc.stdin.write(text)
-            proc.stdin.close()
+            proc.communicate(input=text, timeout=CLIPBOARD_SETTLE_TIMEOUT)
+            if proc.returncode != 0:
+                errors.seek(0)
+                detail = errors.read(8192).decode("utf-8", errors="replace").strip()
+                raise InjectionError(detail or tr("injector.clipboard_write", language))
         except Exception as exc:
+            # A failed parent can already have forked. Retire the entire attempt,
+            # even when that parent exited, before permitting another copy/paste.
             _terminate_clipboard()
+            if isinstance(exc, InjectionError):
+                raise
             raise InjectionError(tr("injector.clipboard_error", language, error=exc)) from exc
-
-        # Wait for the selection with a deadline. The daemon serves one client at
-        # a time, so this wait is part of the dictation's latency, and an unbounded
-        # poll() hands the daemon to a clipboard tool that stopped making progress.
-        deadline = time.monotonic() + CLIPBOARD_SETTLE_TIMEOUT
-        while True:
-            rc = proc.poll()
-            if rc is not None:
-                break
-            if time.monotonic() >= deadline:
-                break
-            time.sleep(0.005)
-
-        rc = proc.poll()
-        if rc is None:
-            # Still running, which is the good case: it owns the selection.
-            return
+        # The successful child intentionally outlives this application. A later
+        # selection cancels it through the compositor; atexit owns only attempts
+        # that have not completed their handshake.
         _clipboard_proc = None
-        detail = ""
-        try:
-            if proc.stderr is not None:
-                detail = proc.stderr.read().strip()
-        except Exception:
-            pass
-        raise InjectionError(detail or tr("injector.clipboard_write", language))
 
 
 def _terminate_clipboard() -> None:
-    """Stop the process that currently owns our clipboard entry, if any."""
+    """Retire every process belonging to an unsuccessful clipboard attempt."""
     global _clipboard_proc
-
     proc = _clipboard_proc
     _clipboard_proc = None
-    if proc is None or proc.poll() is not None:
+    if proc is None:
         return
     try:
-        proc.terminate()
-        proc.wait(timeout=0.25)
-    except Exception:
-        try:
-            proc.kill()
-            proc.wait(timeout=0.5)
-        except Exception:
-            pass
+        os.killpg(proc.pid, signal.SIGKILL)
+    except OSError:
+        # The group may have disappeared already; still reap the parent below.
+        pass
+    try:
+        proc.wait(timeout=0.5)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    finally:
+        if proc.stdin is not None:
+            try:
+                proc.stdin.close()
+            except OSError:
+                pass
 
 
 def ydotool_command() -> str | None:

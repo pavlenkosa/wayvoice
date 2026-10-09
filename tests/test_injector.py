@@ -7,7 +7,8 @@ at a time, the whole daemon; and remembering the ``wl-copy`` process only after 
 step that could fail, so a failure in between leaked a process that kept owning the
 clipboard.
 
-The process is faked throughout: what is under test is this module's own logic.
+Most helpers are faked. Real forked helpers also verify handshake, inherited
+descriptors and cleanup without touching the desktop clipboard.
 """
 
 import contextlib
@@ -24,141 +25,80 @@ from wayvoice import injector
 
 
 class FakeProc:
-    """The part of ``Popen`` this module touches."""
-
-    def __init__(self, *, exit_after=None, stderr="", stdin_fails=False):
+    def __init__(self, returncode=0, failure=None):
         self.pid = 4242
         self.stdin = mock.Mock()
-        self.stderr = mock.Mock()
-        self.stderr.read.return_value = stderr
-        if stdin_fails:
-            self.stdin.write.side_effect = BrokenPipeError("pipe closed")
-        self._exit_after = exit_after
-        self._polls = 0
-        self.terminated = False
-        self.killed = False
-        self.waited = 0
-
-    def poll(self):
-        self._polls += 1
-        if self._exit_after is None:
-            return None
-        if self._polls >= self._exit_after:
-            return 1
-        return None
-
-    def terminate(self):
-        self.terminated = True
-
-    def kill(self):
-        self.killed = True
-
-    def wait(self, timeout=None):
-        self.waited += 1
-        return 0
+        self.returncode = returncode
+        self.communicate = mock.Mock(side_effect=failure)
+        self.wait = mock.Mock(return_value=returncode)
 
 
 class ClipboardTests(unittest.TestCase):
     def setUp(self):
         injector._clipboard_proc = None
         self.addCleanup(setattr, injector, "_clipboard_proc", None)
+        group = mock.patch.object(injector.os, "killpg")
+        self.killpg = group.start()
+        self.addCleanup(group.stop)
 
-    def _popen(self, proc):
-        return mock.patch.object(injector.subprocess, "Popen", return_value=proc)
+    def copy_with(self, proc, detail="", text="текст"):
+        def start(*args, **kwargs):
+            kwargs['stderr'].write(detail.encode('utf-8'))
+            return proc
+        with mock.patch.object(injector.shutil, "which", return_value="/fake/wl-copy"), \
+             mock.patch.object(injector.subprocess, "Popen", side_effect=start) as popen:
+            injector.copy_to_clipboard(text)
+        return popen
 
-    def _which(self, path="/usr/bin/wl-copy"):
-        return mock.patch.object(injector.shutil, "which", return_value=path)
+    def test_selection_ack_returns_without_fixed_sleep_and_keeps_child(self):
+        proc = FakeProc()
+        with mock.patch.object(injector.time, "sleep") as sleep:
+            popen = self.copy_with(proc)
+        proc.communicate.assert_called_once_with(
+            input="текст", timeout=injector.CLIPBOARD_SETTLE_TIMEOUT)
+        sleep.assert_not_called()
+        self.assertNotIn('--foreground', popen.call_args.args[0])
+        self.assertTrue(popen.call_args.kwargs['start_new_session'])
+        self.assertEqual(popen.call_args.kwargs['encoding'], 'utf-8')
+        self.assertNotEqual(popen.call_args.kwargs['stderr'], subprocess.PIPE)
+        self.assertIsNone(injector._clipboard_proc)
+        injector._cleanup_clipboard()
+        self.killpg.assert_not_called()
 
-    def test_a_hanging_wl_copy_cannot_hold_the_caller(self):
-        # An unbounded poll() meant the daemon's single-threaded accept loop sat inside
-        # a clipboard copy for as long as wl-copy felt like staying quiet.
-        proc = FakeProc(exit_after=None)  # never exits: it owns the selection
-        with self._which(), self._popen(proc), mock.patch.object(
-            injector.time, "sleep"
-        ):
-            injector.copy_to_clipboard("текст")  # must return
-        self.assertIs(injector._clipboard_proc, proc)
-        self.assertGreaterEqual(proc._polls, 1)
-
-    def test_the_wait_for_the_selection_is_bounded(self):
-        # The loop must be able to end on its deadline, not only on the exit of a tool
-        # that stopped making progress. The clock here advances by exactly what the loop
-        # sleeps, so the iteration count is the deadline: a loop that ignored it would
-        # spin until the clock ran out or wait forever.
-        proc = FakeProc(exit_after=None)
-        slept = []
-        now = [0.0]
-
-        def monotonic():
-            return now[0]
-
-        budget = 20 * round(injector.CLIPBOARD_SETTLE_TIMEOUT / 0.005)
-
-        def sleep(seconds):
-            now[0] += seconds
-            slept.append(seconds)
-            # The guard is here and not only on the clock because a loop without a
-            # deadline never reads the clock at all; without it the failure would be a
-            # hung test.
-            if len(slept) > budget:
-                raise AssertionError(
-                    "the settle loop kept going long past its deadline"
-                )
-
-        with self._which(), self._popen(proc), mock.patch.object(
-            injector.time, "sleep", side_effect=sleep
-        ), mock.patch.object(injector.time, "monotonic", side_effect=monotonic):
-            injector.copy_to_clipboard("текст")
-        self.assertEqual(
-            len(slept), round(injector.CLIPBOARD_SETTLE_TIMEOUT / 0.005),
-            "the settle loop did not end on its deadline",
-        )
-        # And the process it was waiting for is deliberately left alone: that is
-        # the process holding the selection.
-        self.assertIs(injector._clipboard_proc, proc)
-        self.assertFalse(proc.terminated)
-
-    def test_a_tool_that_exits_is_waited_for_only_until_it_does(self):
-        # The other end of the loop: a tool that exits on its own ends the wait early,
-        # and its exit is a failure carrying the reason it gave - saying otherwise would
-        # send the user to paste an empty selection.
-        proc = FakeProc(exit_after=10, stderr="wl-copy: no Wayland display")
-        slept = []
-        with self._which(), self._popen(proc), mock.patch.object(
-            injector.time, "sleep", side_effect=lambda s: slept.append(s)
-        ):
-            with self.assertRaises(injector.InjectionError) as caught:
-                injector.copy_to_clipboard("текст")
-        self.assertEqual(len(slept), 9, "the loop did not follow the process")
-        self.assertIn("no Wayland display", str(caught.exception))
-        self.assertIsNone(injector._clipboard_proc, "an exited tool was kept")
-
-    def test_a_failed_write_does_not_leak_the_process(self):
-        # proc was assigned to the module global only after the write, so a write that
-        # raised lost the process - and a lost wl-copy keeps the Wayland clipboard.
-        proc = FakeProc(stdin_fails=True)
-        with self._which(), self._popen(proc):
-            with self.assertRaises(injector.InjectionError):
-                injector.copy_to_clipboard("текст")
-        self.assertIsNone(injector._clipboard_proc, "the process was lost")
-        self.assertTrue(proc.terminated or proc.killed, "the process was not stopped")
-
-    def test_an_early_exit_reports_the_real_error_and_forgets_the_process(self):
-        proc = FakeProc(exit_after=1, stderr="No Wayland display")
-        with self._which(), self._popen(proc):
-            with self.assertRaises(injector.InjectionError) as caught:
-                injector.copy_to_clipboard("текст")
-        self.assertIn("No Wayland display", str(caught.exception))
+    def test_timeout_retires_group_and_reports_failure(self):
+        proc = FakeProc(failure=subprocess.TimeoutExpired('wl-copy', 0.5))
+        with self.assertRaises(injector.InjectionError):
+            self.copy_with(proc)
+        self.killpg.assert_called_once_with(proc.pid, injector.signal.SIGKILL)
+        proc.wait.assert_called_once_with(timeout=0.5)
         self.assertIsNone(injector._clipboard_proc)
 
-    def test_a_new_copy_replaces_the_previous_clipboard_owner(self):
-        old = FakeProc()
-        new = FakeProc()
-        with self._which(), mock.patch.object(injector.subprocess, "Popen", return_value=new):
-            injector._clipboard_proc = old
-            injector.copy_to_clipboard("текст")
-        self.assertTrue(old.terminated, "the previous wl-copy was left running")
-        self.assertIs(injector._clipboard_proc, new)
+    def test_failed_input_retires_group(self):
+        proc = FakeProc(failure=BrokenPipeError('pipe closed'))
+        with self.assertRaises(injector.InjectionError) as caught:
+            self.copy_with(proc)
+        self.assertIn('pipe closed', str(caught.exception))
+        self.killpg.assert_called_once()
+        self.assertIsNone(injector._clipboard_proc)
+
+    def test_failed_parent_retires_descendants_and_reports_error(self):
+        proc = FakeProc(returncode=1)
+        with self.assertRaises(injector.InjectionError) as caught:
+            self.copy_with(proc, 'No Wayland display')
+        self.assertIn('No Wayland display', str(caught.exception))
+        self.killpg.assert_called_once_with(proc.pid, injector.signal.SIGKILL)
+
+    def test_error_detail_is_bounded(self):
+        with self.assertRaises(injector.InjectionError) as caught:
+            self.copy_with(FakeProc(returncode=1), 'x' * 10000)
+        self.assertEqual(len(str(caught.exception)), 8192)
+
+    def test_spawn_failure_leaves_no_attempt(self):
+        with mock.patch.object(injector.shutil, 'which', return_value='/fake/wl-copy'), \
+             mock.patch.object(injector.subprocess, 'Popen', side_effect=OSError('spawn')):
+            with self.assertRaises(OSError):
+                injector.copy_to_clipboard('text')
+        self.assertIsNone(injector._clipboard_proc)
 
     def test_without_wl_copy_the_error_names_the_dependency(self):
         with mock.patch.object(injector.shutil, "which", return_value=None):
@@ -166,20 +106,85 @@ class ClipboardTests(unittest.TestCase):
                 injector.copy_to_clipboard("текст", "ru")
         self.assertIn("wl-copy", str(caught.exception))
 
-    def test_cleanup_does_not_raise_without_a_process(self):
-        injector._clipboard_proc = None
-        injector._cleanup_clipboard()  # must not raise
+    def test_cleanup_does_not_raise_without_an_attempt(self):
+        injector._cleanup_clipboard()
+        self.killpg.assert_not_called()
+
+    def test_cleanup_reaps_parent_even_when_group_is_gone(self):
+        proc = FakeProc()
+        injector._clipboard_proc = proc
+        self.killpg.side_effect = ProcessLookupError()
+        injector._cleanup_clipboard()
+        proc.wait.assert_called_once_with(timeout=0.5)
         self.assertIsNone(injector._clipboard_proc)
 
-    def test_cleanup_stops_a_process_that_is_still_holding_the_selection(self):
-        # The exit hook runs at interpreter shutdown, when the process that owns
-        # the Wayland clipboard has to be released: wl-copy would otherwise keep
-        # owning it for the rest of the session with nobody to paste from.
-        proc = FakeProc(exit_after=None)
-        injector._clipboard_proc = proc
-        injector._cleanup_clipboard()
-        self.assertTrue(proc.terminated or proc.killed, "the clipboard tool survived")
-        self.assertIsNone(injector._clipboard_proc, "a dead process was kept")
+
+class ClipboardProcessTests(unittest.TestCase):
+    """Real helper processes, without connecting to the desktop clipboard."""
+    def make_helper(self, base, *, acknowledge):
+        helper = base / 'wl-copy'
+        helper.write_text("#!/usr/bin/env python3\n" +
+            "import os, signal, sys\n" +
+            ("sys.stdin.buffer.read()\n" if acknowledge else "") +
+            "reader, writer = os.pipe()\n" +
+            "child = os.fork()\n" +
+            "if child == 0:\n" +
+            "    os.close(reader)\n" +
+            "    os.write(writer, b'ready')\n" +
+            "    os.close(writer)\n" +
+            "    signal.pause()\n" +
+            "else:\n" +
+            "    os.close(writer)\n" +
+            "    os.read(reader, 5)\n" +
+            f"    open({str(base / 'child')!r}, 'w').write(str(child))\n" +
+            ("    sys.exit(0)\n" if acknowledge else "    signal.pause()\n"))
+        helper.chmod(0o755)
+        return helper
+
+    def test_background_owner_survives_caller_exit_without_inherited_pipe_hang(self):
+        import sys
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            self.make_helper(base, acknowledge=True)
+            env = dict(os.environ, PATH=f'{base}:{os.environ["PATH"]}')
+            try:
+                result = subprocess.run([sys.executable, '-c',
+                    'from wayvoice.injector import copy_to_clipboard; '
+                    'copy_to_clipboard("текст")'], env=env, capture_output=True,
+                    timeout=3)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                child = int((base / 'child').read_text())
+                self.assertTrue(Path(f'/proc/{child}').exists(), 'owner died at UI exit')
+                self.assertNotEqual(Path(f'/proc/{child}/stat').read_text().split()[2], 'Z')
+            finally:
+                if (base / 'child').exists():
+                    try:
+                        os.kill(int((base / 'child').read_text()), injector.signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+
+    def test_blocked_stdin_timeout_kills_forked_child(self):
+        import time
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            helper = self.make_helper(base, acknowledge=False)
+            with mock.patch.object(injector.shutil, 'which', return_value=str(helper)):
+                with self.assertRaises(injector.InjectionError):
+                    injector.copy_to_clipboard('x' * 1000000)
+            child = int((base / 'child').read_text())
+            try:
+                deadline = time.monotonic() + 1
+                while Path(f'/proc/{child}/stat').exists():
+                    if Path(f'/proc/{child}/stat').read_text().split()[2] == 'Z':
+                        break
+                    if time.monotonic() >= deadline:
+                        self.fail('failed helper child survived cleanup')
+                    time.sleep(0.01)
+            finally:
+                try:
+                    os.kill(child, injector.signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
 
 
 class WhichYdotoolTests(unittest.TestCase):
