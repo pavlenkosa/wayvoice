@@ -169,6 +169,7 @@ jobs:
             scripts/wayvoice-ydotoold \
             scripts/setup-user \
             scripts/build-deb.sh \
+            scripts/build-rpm.sh \
             scripts/build-ydotool.sh \
             packaging/DEBIAN/postinst \
             packaging/DEBIAN/postrm \
@@ -184,6 +185,17 @@ jobs:
       - name: Build Debian package
         if: steps.version.outputs.release == 'true'
         run: ./scripts/build-deb.sh
+
+      - name: Build and inspect Fedora RPM
+        if: steps.version.outputs.release == 'true'
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src fedora:44 sh -ec '
+            dnf install -y rpm-build gcc python3 systemd-rpm-macros tar gzip
+            ./scripts/build-rpm.sh
+            rpm -qip dist/*.rpm
+            rpm -qlp dist/*.rpm
+            rpm -qp --scripts dist/*.rpm
+          '
 
       - name: Verify Debian package
         if: steps.version.outputs.release == 'true'
@@ -213,7 +225,7 @@ jobs:
 
           (
             cd dist
-            sha256sum *.deb wayvoice-${VERSION}-source.zip > SHA256SUMS
+            sha256sum *.deb *.rpm wayvoice-${VERSION}-source.zip > SHA256SUMS
           )
 
       - name: Upload release artifact
@@ -224,6 +236,8 @@ jobs:
           path: |
             dist/*.deb
             dist/*.deb.sha256
+            dist/*.rpm
+            dist/*.rpm.sha256
             dist/*-source.zip
             dist/SHA256SUMS
           if-no-files-found: error
@@ -244,6 +258,8 @@ jobs:
           files: |
             dist/*.deb
             dist/*.deb.sha256
+            dist/*.rpm
+            dist/*.rpm.sha256
             dist/*-source.zip
             dist/SHA256SUMS
           fail_on_unmatched_files: true

@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   test-and-build:
-    name: Test & build Debian package
+    name: Test & build native packages
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
@@ -55,6 +55,7 @@ jobs:
             scripts/wayvoice-ydotoold \
             scripts/setup-user \
             scripts/build-deb.sh \
+            scripts/build-rpm.sh \
             scripts/build-ydotool.sh \
             packaging/DEBIAN/postinst \
             packaging/DEBIAN/postrm \
@@ -69,6 +70,16 @@ jobs:
       - name: Build Debian package
         run: ./scripts/build-deb.sh
 
+      - name: Build and inspect Fedora RPM
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src fedora:44 sh -ec '
+            dnf install -y rpm-build gcc python3 systemd-rpm-macros tar gzip
+            ./scripts/build-rpm.sh
+            rpm -qip dist/*.rpm
+            rpm -qlp dist/*.rpm
+            rpm -qp --scripts dist/*.rpm
+          '
+
       - name: Inspect Debian package
         run: |
           dpkg-deb --info dist/*.deb
@@ -81,13 +92,15 @@ jobs:
           PACKAGE_ARCH="$(dpkg-deb -f dist/*.deb Architecture)"
           test "$PACKAGE_ARCH" = "$(dpkg --print-architecture)"
 
-      - name: Upload Debian package
+      - name: Upload native packages
         uses: actions/upload-artifact@v4
         with:
-          name: wayvoice-deb-${{ github.sha }}
+          name: wayvoice-native-${{ github.sha }}
           path: |
             dist/*.deb
             dist/*.deb.sha256
+            dist/*.rpm
+            dist/*.rpm.sha256
           if-no-files-found: error
           retention-days: 14
 

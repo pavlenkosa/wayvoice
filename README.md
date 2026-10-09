@@ -48,6 +48,17 @@ If you are looking for a Linux alternative to built-in voice typing on other des
 
 ## Install
 
+### Fedora 44
+
+New releases will include an `.rpm` package. Install it with
+`sudo dnf install ./wayvoice-*.rpm`. RPM builds target Fedora 44; other RPM-based
+distributions are not yet validated. User services follow the distribution's
+preset policy; launch WayVoice from the application menu after installation.
+
+To build an RPM in a Fedora environment, install `rpm-build`, `gcc`, `python3`,
+`systemd-rpm-macros`, `tar` and `gzip`, then run `make rpm`. The package and its
+SHA-256 checksum appear in `dist/`. Building does not install or start anything.
+
 ### Debian / Ubuntu
 
 Download the latest `.deb` package from [GitHub Releases](https://github.com/pavlenkosa/wayvoice/releases), then install it with APT:
