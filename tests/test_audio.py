@@ -15,6 +15,7 @@ import sys
 import subprocess
 import tempfile
 import unittest
+import wave
 from pathlib import Path
 from unittest import mock
 
@@ -329,6 +330,27 @@ class RecorderTests(unittest.TestCase):
         self.assertEqual(result, path)
         # SIGINT is what lets pw-record finalise its WAV header.
         self.assertEqual(proc.signals, [2])
+
+    def test_pipewire_signal_exit_one_requires_complete_wav(self):
+        for valid in (True, False):
+            with self.subTest(valid=valid):
+                proc = FakeProc(alive=True, hang_first=True, exit_code=1)
+                with self._patch_which(), self._patch_popen(proc):
+                    self.recorder.start()
+                    path = self.recorder._path
+                    if valid:
+                        with wave.open(str(path), "wb") as wav:
+                            wav.setnchannels(1)
+                            wav.setsampwidth(2)
+                            wav.setframerate(16000)
+                            wav.writeframes(b"\0" * 3200)
+                        self.assertEqual(self.recorder.stop_to_wav(), path)
+                        path.unlink()
+                    else:
+                        path.write_bytes(b"\0" * 3200)
+                        with self.assertRaisesRegex(RuntimeError, "exit code 1"):
+                            self.recorder.stop_to_wav()
+                        self.assertFalse(path.exists())
 
     def test_an_empty_recording_is_reported_and_removed(self):
         proc = FakeProc(alive=True, stderr="no streams", hang_first=True)

@@ -5,6 +5,7 @@ import shutil
 import signal
 import subprocess
 import tempfile
+import wave
 from pathlib import Path
 
 from .deps import describe_missing
@@ -164,20 +165,44 @@ class AudioRecorder:
         proc, path = self._proc, self._path
         if proc is None or path is None:
             raise RuntimeError("Запись не активна.")
+        interrupted = False
+        forced = False
         try:
             if proc.poll() is None:
                 proc.send_signal(signal.SIGINT)
+                interrupted = True
                 try:
                     proc.wait(timeout=2.0)
                 except subprocess.TimeoutExpired:
+                    forced = True
                     proc.terminate()
                     try:
                         proc.wait(timeout=0.7)
                     except subprocess.TimeoutExpired:
                         proc.kill()
                         proc.wait(timeout=0.5)
-            if proc.poll() not in (0, -signal.SIGINT):
-                raise RuntimeError(self._stderr_message(proc) or "PipeWire could not finish the recording.")
+            code = proc.poll()
+            if code not in (0, -signal.SIGINT):
+                error = self._stderr_message(proc)
+                # pw-cat 1.4.2 returns 1 after a clean recording SIGINT: only
+                # playback reaching drained sets EXIT_SUCCESS. Accept that case
+                # only after our graceful stop and a readable, complete PCM WAV.
+                valid = False
+                if code == 1 and interrupted and not forced and not error:
+                    try:
+                        with wave.open(str(path), "rb") as wav:
+                            frames = wav.getnframes()
+                            valid = (frames > 0 and wav.getnchannels() == 1
+                                     and wav.getframerate() == 16000)
+                            remaining = frames
+                            while valid and remaining:
+                                count = min(remaining, 16384)
+                                valid = len(wav.readframes(count)) == count * wav.getsampwidth()
+                                remaining -= count
+                    except (OSError, EOFError, wave.Error):
+                        pass
+                if not valid:
+                    raise RuntimeError(error or f"PipeWire could not finish the recording (exit code {code}).")
             if not path.exists() or path.stat().st_size < 128:
                 raise RuntimeError(self._stderr_message(proc) or "Запись микрофона получилась пустой.")
         except Exception as exc:
