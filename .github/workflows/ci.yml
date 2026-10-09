@@ -93,7 +93,7 @@ jobs:
           test "$PACKAGE_ARCH" = "$(dpkg --print-architecture)"
 
       - name: Upload native packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: wayvoice-native-${{ github.sha }}
           path: |
