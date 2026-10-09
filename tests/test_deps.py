@@ -17,10 +17,6 @@ def _fake_which(present: set[str]):
     return lambda name: f"/usr/bin/{name}" if name in present else None
 
 
-def _which_returning(mapping):
-    def _which(name):
-        return mapping.get(name)
-    return _which
 
 
 class RegistryTests(unittest.TestCase):
@@ -132,26 +128,8 @@ class StatusTests(unittest.TestCase):
     def test_status_all_reports_missing_binary(self):
         with mock.patch("shutil.which", _fake_which(set())):
             rows = deps.status_all()
-            required_missing = deps.missing_required()
         self.assertTrue(all(not row["found"] for row in rows))
         self.assertTrue(all(row["missing"] for row in rows))
-        blocking = [row["id"] for row in deps.status_all() if row["required"]]
-        self.assertEqual([row["id"] for row in required_missing], blocking)
-
-    def test_missing_helpers_split_required_and_optional(self):
-        # Only pw-record exists: the required pipewire entry stays missing while
-        # the optional notify entry is satisfied.
-        with mock.patch("shutil.which", _which_returning({"pw-record": "/usr/bin/pw-record"})):
-            required_ids = [row["id"] for row in deps.missing_required()]
-            optional_ids = [row["id"] for row in deps.missing_optional()]
-        self.assertEqual(required_ids, ["wl-clipboard"])
-        self.assertEqual(optional_ids, ["notify", "ydotool"])
-
-    def test_missing_helpers_empty_when_everything_present(self):
-        present = {name for dep in deps.dependencies() for name in dep.binaries}
-        with mock.patch("shutil.which", _fake_which(present)):
-            self.assertEqual(deps.missing_required(), [])
-            self.assertEqual(deps.missing_optional(), [])
 
 
 class DescribeMissingTests(unittest.TestCase):

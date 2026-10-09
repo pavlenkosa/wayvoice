@@ -268,7 +268,7 @@ class EngineSetupLockTests(unittest.TestCase):
             self.assertGreater(engine_setup.LOCK_TIMEOUT, 0)
 
     def test_the_log_names_the_running_version(self):
-        from wayvoice import __version__, engine_setup
+        from wayvoice import engine_setup
 
         source = (engine_setup.__file__ or "")
         with open(source, encoding="utf-8") as handle:

@@ -1,22 +1,14 @@
 """Behavioral characterization of the owned settings controller units."""
 
 from tests.ui_support import controller_context
-try:
-    from gi.repository import GLib
-    from wayvoice.ui.controllers.status import StatusController
-    from wayvoice.ui.controllers.models import ModelsController
-except Exception:
-    pass
 
-import ast
-import importlib.util
 import unittest
-from pathlib import Path
 from unittest import mock
 
 try:
     from wayvoice import ui
     from wayvoice.ui.controllers.settings import SettingsController
+    from wayvoice.ui.controllers.models import ModelsController
 except Exception as _exc:  # no GTK bindings for this interpreter
     ui = None
     _why = f"{type(_exc).__name__}: {_exc}"
@@ -24,18 +16,6 @@ else:
     _why = ""
 
 needs_window = unittest.skipIf(ui is None, f"the settings window is unavailable ({_why})")
-
-#: The methods phase 2E moved out of the legacy class body.
-SETTINGS_METHODS = (
-    "_on_engine_selected", "_selected_engine", "_selected_engine_object",
-    "_selected_engine_uses_models", "_update_engine_visibility", "_save",
-    "_prepare_selected_engine", "_setup_engine", "_pending_engine_config",
-    "_poll_engine_settings",
-)
-
-
-
-
 
 
 @needs_window

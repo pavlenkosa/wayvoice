@@ -9,7 +9,6 @@ import signal
 import socket
 import struct
 import subprocess
-import sys
 import threading
 import time
 import uuid
@@ -1193,10 +1192,6 @@ def _worker_request(payload: dict[str, Any], request_id: str, timeout: float, ca
         return reply
 
 
-def _worker_transcribe(payload, request_id, timeout, cancel_event):
-    return _worker_request(payload, request_id, timeout, cancel_event)
-
-
 def _language(cfg: dict[str, Any]) -> str:
     """Effective recognition language for a config.
 
@@ -1225,7 +1220,7 @@ def _transcribe_via_worker(audio: Path, cfg: dict[str, Any], cancel_event: Event
         "language": _language(cfg),
         "request_id": request_id,
     }
-    reply = _worker_transcribe(
+    reply = _worker_request(
         payload,
         request_id,
         number(cfg, "transcription_timeout_sec", 90),

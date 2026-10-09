@@ -1,11 +1,7 @@
 """Test that UI widgets were extracted faithfully."""
 
 import unittest
-import sys
 import os
-
-# Add the src directory to the path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../app/src'))
 
 
 def _gtk_available() -> bool:
@@ -130,7 +126,7 @@ class TestWidgetsExtracted(unittest.TestCase):
         import gi
         gi.require_version("Gtk", "4.0")
         gi.require_version("Pango", "1.0")
-        from gi.repository import Gtk, Pango
+        from gi.repository import Gtk
 
         label = make_label("Test Label", "test-css-class", wrap=True, xalign=0.5)
 
@@ -144,9 +140,6 @@ class TestWidgetsExtracted(unittest.TestCase):
         self.assertEqual(label.get_xalign(), 0.5)
 
 
-if __name__ == '__main__':
-    unittest.main()
-
 class PublicWidgetImportTests(unittest.TestCase):
     def test_picker_keeps_public_import_contract(self):
         try:
@@ -157,3 +150,7 @@ class PublicWidgetImportTests(unittest.TestCase):
         codes, labels = ui.language_choices('en')
         self.assertIn('en', codes)
         self.assertEqual(len(codes), len(labels))
+
+
+if __name__ == '__main__':
+    unittest.main()

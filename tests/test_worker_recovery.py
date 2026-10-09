@@ -1,8 +1,6 @@
 """Bounded recovery against a real local fake worker; no model or microphone."""
-import json
 import itertools
 import os
-import socket
 import subprocess
 import struct
 import sys
@@ -81,7 +79,7 @@ class WorkerRecoveryTests(unittest.TestCase):
         return proc
 
     def request(self, cancel=None, timeout=2, request_id='take'):
-        return engine._worker_transcribe({'cmd':'transcribe','request_id':request_id}, request_id, timeout, cancel)
+        return engine._worker_request({'cmd':'transcribe','request_id':request_id}, request_id, timeout, cancel)
 
     def test_hung_cancel_retires_worker_and_next_request_succeeds(self):
         proc = self.worker('hang')
@@ -161,7 +159,7 @@ class WorkerRecoveryTests(unittest.TestCase):
         proc=self.worker('instant')
         identity=engine._worker_identity(proc.pid)
         with mock.patch.object(engine, 'stop_worker') as stop:
-            engine._worker_transcribe({'cmd':'transcribe','request_id':'finished'}, 'finished', 2, None)
+            engine._worker_request({'cmd':'transcribe','request_id':'finished'}, 'finished', 2, None)
             engine._recover_worker_request('finished', identity)
         stop.assert_not_called()
         self.assertIsNone(proc.poll())

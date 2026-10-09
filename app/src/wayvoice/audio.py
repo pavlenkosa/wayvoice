@@ -17,8 +17,6 @@ class AudioRecorder:
     def __init__(self) -> None:
         self._proc: subprocess.Popen | None = None
         self._path: Path | None = None
-        #: Recording handed to the caller and not yet deleted by it.
-        self._finished: Path | None = None
         # A recorder that outlives the process that started it keeps the microphone
         # open and keeps writing to /tmp, and nothing else knows it is there. The
         # daemon stops it on the way out; this hook covers the paths that bypass
@@ -131,10 +129,9 @@ class AudioRecorder:
         It belongs to the transcription thread, and this runs first on the way out -
         so deleting it turned every quit or SIGTERM during a dictation into a
         ``FileNotFoundError`` inside the recognizer. If that thread never runs, the
-        recording is swept at the next start.
+        daemon owns cleanup of recordings handed to transcription.
         """
         proc, path = self._proc, self._path
-        self._finished = None
         try:
             if proc and proc.poll() is None:
                 proc.terminate()
@@ -216,5 +213,4 @@ class AudioRecorder:
                 self._close_stderr(proc)
         self._proc = None
         self._path = None
-        self._finished = path
         return path

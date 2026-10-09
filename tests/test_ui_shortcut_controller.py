@@ -2,15 +2,11 @@
 
 from tests.ui_support import controller_context
 
-import ast
-import importlib.util
 import unittest
-from pathlib import Path
 from unittest import mock
 
 try:
     from wayvoice import ui
-    from wayvoice.ui.controllers.shortcut import ShortcutController
 except Exception as _exc:  # no GTK bindings for this interpreter
     ui = None
     _why = f"{type(_exc).__name__}: {_exc}"
@@ -18,15 +14,6 @@ else:
     _why = ""
 
 needs_window = unittest.skipIf(ui is None, f"the settings window is unavailable ({_why})")
-
-#: The methods phase 2F moved out of the legacy class body.
-SHORTCUT_METHODS = (
-    "_open_shortcut_capture", "_disable_shortcut", "_capture_shortcut_key",
-)
-
-
-
-
 
 
 class FakeRow:

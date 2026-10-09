@@ -1,7 +1,6 @@
 """Isolated controller/view fixtures; no services or GTK widget construction."""
 from types import SimpleNamespace
 from unittest import mock
-import threading
 
 
 class ImmediateTasks:

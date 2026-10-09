@@ -26,7 +26,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from wayvoice import audio, daemon as daemon_mod
+from wayvoice import daemon as daemon_mod
 from wayvoice.audio import AudioRecorder
 from wayvoice.daemon import WayVoiceDaemon
 
@@ -93,7 +93,6 @@ class HandedOutFileTests(DaemonCase):
     def _handed_out(self) -> Path:
         path = Path(self.tmp.name) / "take.wav"
         path.write_bytes(b"RIFF" + b"\x00" * 200)
-        self.recorder._finished = path
         return path
 
     def test_cancel_leaves_a_file_it_handed_out(self):
@@ -139,7 +138,6 @@ class HandedOutFileTests(DaemonCase):
             recorder = AudioRecorder()
             recorder._proc = None
             recorder._path = None
-            recorder._finished = path
             d = _daemon(self, recorder)
             self.patch("wayvoice.daemon.load_config", return_value=dict(CONFIG))
             d._stop_work()

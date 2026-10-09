@@ -1,28 +1,14 @@
 """Behavioral characterization of the owned models controller units."""
 
 from tests.ui_support import controller_context
-try:
-    from gi.repository import GLib
-    from wayvoice.ui.controllers.status import StatusController
-    from wayvoice.ui.controllers.models import ModelsController
-except Exception:
-    pass
-try:
-    from wayvoice.ui.model_presentation import model_state_text, hero_preparation_caption, show_hero_preparation
-except Exception:
-    pass
 
-import ast
-import importlib.util
 import unittest
-from pathlib import Path
 
 from wayvoice import model_store
 from wayvoice.i18n import tr
 
 try:
     from wayvoice import ui
-    from wayvoice.ui.controllers.models import ModelsController
 except Exception as _exc:  # no GTK bindings for this interpreter
     ui = None
     _why = f"{type(_exc).__name__}: {_exc}"
@@ -30,23 +16,6 @@ else:
     _why = ""
 
 needs_window = unittest.skipIf(ui is None, f"the settings window is unavailable ({_why})")
-
-#: The methods phase 2B moved out of the legacy class body.
-MODEL_METHODS = (
-    "_selected_model_preset", "_selected_model_id", "_on_model_selected",
-    "_decide_what_to_do_about_the_selected_model", "_ask_about_download",
-    "_download_confirmed", "_ask_daemon_to_prepare_model",
-    "_handle_prepare_model_reply", "_sync_model_ui", "_model_state_text",
-    "_apply_model_state", "_refresh_fetch_button", "_ask_to_fetch_the_model",
-    "_apply_download_state", "_cancel_model_download", "_cancel_download_worker",
-    "_hero_preparation_caption", "_show_hero_preparation", "_refresh_model_state",
-    "_model_state_worker", "_model_state_ready", "_ask_delete_model",
-    "_delete_model_confirmed", "_delete_model_worker", "_delete_model_ready",
-)
-
-
-
-
 
 
 class FakeButton:

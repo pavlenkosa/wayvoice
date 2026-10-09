@@ -208,21 +208,6 @@ def status_all() -> list[dict]:
     return rows
 
 
-def missing_required() -> list[dict]:
-    """Return the status rows of blocking dependencies that are not usable."""
-    return [row for row in status_all() if row["required"] and not _row_ok(row)]
-
-
-def missing_optional() -> list[dict]:
-    """Return the status rows of optional dependencies that are not usable."""
-    return [row for row in status_all() if not row["required"] and not _row_ok(row)]
-
-
-def _row_ok(row: dict) -> bool:
-    """Return ``True`` when a :func:`status_all` row has nothing missing."""
-    return not row.get("missing")
-
-
 def describe_missing(dep_or_id, language: str | None = None) -> str:
     """Return a localized "what is missing and why" sentence.
 

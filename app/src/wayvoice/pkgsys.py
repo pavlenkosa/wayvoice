@@ -273,23 +273,6 @@ def resolve_packages(dep_or_id, manager: str | None = None) -> list[str] | None:
     return [name]
 
 
-def resolve_all(entries, manager: str | None = None) -> list[str] | None:
-    """Return de-duplicated package names for several dependencies.
-
-    ``None`` is returned as soon as one entry has no confidently known package
-    name, so a partial install command is never built.
-    """
-    names: list[str] = []
-    for entry in entries:
-        resolved = resolve_packages(entry, manager)
-        if resolved is None:
-            return None
-        for name in resolved:
-            if name not in names:
-                names.append(name)
-    return names
-
-
 def dry_run_command(packages, manager: str | None = None) -> list[str] | None:
     """Return the argv that :func:`install_packages` would run.
 

@@ -11,7 +11,7 @@ without its constructor, because that one starts threads and talks to a daemon.
 
 from tests.ui_support import controller_context
 try:
-    from wayvoice.ui.model_presentation import model_state_text, hero_preparation_caption, show_hero_preparation
+    from wayvoice.ui.model_presentation import hero_preparation_caption, show_hero_preparation
 except Exception:
     pass
 

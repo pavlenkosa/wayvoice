@@ -12,7 +12,6 @@ Checked against this machine, where the situation is real rather than hypothetic
 ``package_available("ydotool")`` is ``False`` and the other three are ``True``.
 """
 
-import subprocess
 import unittest
 from unittest import mock
 

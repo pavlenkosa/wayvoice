@@ -18,7 +18,6 @@ from tests.ui_support import controller_context
 try:
     from gi.repository import GLib
     from wayvoice.ui.controllers.status import StatusController
-    from wayvoice.ui.controllers.models import ModelsController
 except Exception:
     pass
 

@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from wayvoice import engine, model_store
+from wayvoice import engine
 
 from tests.support import isolate_environment
 

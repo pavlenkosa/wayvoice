@@ -9,7 +9,6 @@ SCHEMA = "org.gnome.settings-daemon.plugins.media-keys"
 BASE = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings"
 KEY = f"{BASE}/wayvoice/"
 
-DEFAULT_SHORTCUT = "F8"
 
 
 def label_for(binding: str) -> str:

@@ -110,11 +110,6 @@ class DryRunCommandTests(unittest.TestCase):
                 self.assertEqual(names, [dep.packages[manager]])
                 self.assertIsNotNone(pkgsys.dry_run_command(names, manager))
 
-    def test_resolve_all_deduplicates_and_rejects_unknown(self):
-        entries = [deps.get("pipewire"), deps.get("pipewire")]
-        self.assertEqual(pkgsys.resolve_all(entries, "apt"), ["pipewire-bin"])
-        self.assertIsNone(pkgsys.resolve_all([deps.get("ydotool")], "apk"))
-        self.assertIsNone(pkgsys.resolve_all(["wayvoice-nonexistent-id"], "apt"))
 
     def test_detected_manager_is_used_by_default(self):
         with mock.patch("shutil.which", _which_returning({"pacman": "/usr/bin/pacman"})):
