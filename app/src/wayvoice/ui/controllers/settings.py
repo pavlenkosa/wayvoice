@@ -42,8 +42,7 @@ class SettingsController:
 
 
     def _queue_mutation(self, work, done, failed):
-        # Both Save and engine preparation write config.json. Preserve click order
-        # and keep the atomic writer's temporary file owned by one job at a time.
+        # Preserve Save/setup click order and finish accepted mutations before close.
         self._mutations.append((work, done, failed))
         if len(self._mutations) == 1:
             self._start_mutation()

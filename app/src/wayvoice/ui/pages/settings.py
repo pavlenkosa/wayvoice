@@ -39,13 +39,25 @@ class SettingsPage:
         clamp.set_child(page)
         scroller.set_child(clamp)
 
+        profiles = Adw.PreferencesGroup(title=self.ctx.state.t("profiles.title"),
+                                        description=self.ctx.state.t("profiles.description"))
+        for name in ("fast", "balanced", "accurate"):
+            row = Adw.ActionRow(title=self.ctx.state.t(f"profiles.{name}"),
+                               subtitle=self.ctx.state.t(f"profiles.{name}_detail"))
+            button = Gtk.Button(label=self.ctx.state.t("profiles.choose"), valign=Gtk.Align.CENTER)
+            button.connect("clicked", lambda _button, profile=name: self.ctx.profiles.select(profile))
+            row.add_suffix(button)
+            row.set_activatable_widget(button)
+            profiles.add(row)
+        page.add(profiles)
+
         engine_group = Adw.PreferencesGroup(title=self.ctx.state.t("settings.recognition"), description=self.ctx.state.t("settings.draft_hint"))
         page.add(engine_group)
         engine_choice_ids, engine_choice_labels = engine_choices()
         self.engine = Adw.ComboRow(title=self.ctx.state.t("settings.engine"))
         self.engine.set_model(Gtk.StringList.new(engine_choice_labels))
         self.engine.set_selected(index_or_zero(engine_choice_ids, self.ctx.state.cfg.get("engine", DEFAULT_ENGINE)))
-        self.engine.connect("notify::selected", self.ctx.preferences._on_engine_selected)
+        self.engine_selection_handler = self.engine.connect("notify::selected", self.ctx.preferences._on_engine_selected)
         engine_group.add(self.engine)
 
         self.engine_status_row = Adw.ActionRow(title=self.ctx.state.t("settings.engine_state"), subtitle=self.ctx.state.t("health.checking"))
@@ -60,7 +72,7 @@ class SettingsPage:
         self.model = Adw.ComboRow(title=self.ctx.state.t("settings.model"))
         self.model.set_model(Gtk.StringList.new(PRESET_LABELS))
         self.model.set_selected(preset_index(str(self.ctx.state.cfg.get("model", "small"))))
-        self.model.connect("notify::selected", self.ctx.models._on_model_selected)
+        self.model_selection_handler = self.model.connect("notify::selected", self.ctx.models._on_model_selected)
         engine_group.add(self.model)
 
         self.custom_model = Adw.EntryRow(title=self.ctx.state.t("settings.custom_model"))

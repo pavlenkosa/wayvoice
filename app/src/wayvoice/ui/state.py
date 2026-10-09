@@ -37,4 +37,5 @@ class UiContext:
     integration: Any = None
     status: Any = None
     preferences: Any = None
+    profiles: Any = None
     shortcut: Any = None

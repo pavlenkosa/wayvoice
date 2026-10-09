@@ -10,6 +10,7 @@ from .style import CSS
 from .pages.home import HomePage
 from .pages.settings import SettingsPage
 from .controllers.models import ModelsController
+from .controllers.profiles import ProfilesController
 from .controllers.integration import IntegrationController
 from .controllers.settings import SettingsController
 from .controllers.shortcut import ShortcutController
@@ -36,6 +37,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         ctx.status = StatusController(ctx)
         ctx.preferences = SettingsController(ctx)
         ctx.shortcut = ShortcutController(ctx)
+        ctx.profiles = ProfilesController(ctx)
         self.home = HomePage(ctx)
         self.settings = SettingsPage(ctx)
         self._install_css()

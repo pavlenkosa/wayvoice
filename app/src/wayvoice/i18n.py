@@ -676,6 +676,36 @@ _EN.update({'setup.title': 'Before your first dictation',
  'help.releases': 'WayVoice releases',
  'help.issues': 'Report a problem'})
 
+_RU.update({'profiles.title': 'Простой выбор распознавания',
+ 'profiles.description': 'Локальный Faster-Whisper на CPU, без требования видеокарты. Меняются '
+                         'только движок, модель и вычислитель в черновике. Выбор ничего не '
+                         'скачивает. Сохранение может начать подготовку движка; файлы модели '
+                         'скачиваются отдельно. Скорость и качество зависят от речи и компьютера.',
+ 'profiles.fast': 'Быстро',
+ 'profiles.fast_detail': 'Tiny · самая лёгкая многоязычная модель; возможны ошибки на сложной '
+                         'речи.',
+ 'profiles.balanced': 'Сбалансированно',
+ 'profiles.balanced_detail': 'Small · больше ресурсов, чем Tiny; баланс скорости и точности.',
+ 'profiles.accurate': 'Точнее',
+ 'profiles.accurate_detail': 'Medium · больше памяти и времени, чем Small; для сложной речи.',
+ 'profiles.choose': 'Выбрать',
+ 'profiles.selected': 'Пресет выбран. При наличии изменений нажмите «Сохранить». Файлы модели '
+                      'скачиваются отдельно.'})
+_EN.update({'profiles.title': 'Simple recognition choices',
+ 'profiles.description': 'Local Faster-Whisper on CPU; no GPU required. Only engine, model and '
+                         'compute device change in the draft. Choosing a preset downloads nothing. '
+                         'Saving may start engine setup; model files are downloaded separately. '
+                         'Speed and quality depend on speech and hardware.',
+ 'profiles.fast': 'Fast',
+ 'profiles.fast_detail': 'Tiny · lightest multilingual model; may struggle with complex speech.',
+ 'profiles.balanced': 'Balanced',
+ 'profiles.balanced_detail': 'Small · more resources than Tiny; balances speed and accuracy.',
+ 'profiles.accurate': 'More accurate',
+ 'profiles.accurate_detail': 'Medium · more memory and time than Small; for complex speech.',
+ 'profiles.choose': 'Choose',
+ 'profiles.selected': 'Preset selected. Save if there are changes. Model files are downloaded '
+                      'separately.'})
+
 _TRANSLATIONS = {"ru": _RU, "en": _EN}
 
 
