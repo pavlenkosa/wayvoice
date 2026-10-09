@@ -10,6 +10,8 @@ BuildRequires:  python3
 BuildRequires:  systemd-rpm-macros
 Requires:       python3 >= 3.11
 Requires:       python3-gobject
+# Fedora keeps cairo-1.0.typelib here; Gtk/Adw introspection needs it at runtime.
+Requires:       gobject-introspection
 Requires:       python3-pip
 Requires:       gtk4
 Requires:       libadwaita

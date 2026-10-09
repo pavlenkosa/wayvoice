@@ -2,6 +2,8 @@
 
 ## 0.6.8 — 2026-10-10
 
+- Fedora RPM explicitly requires the Cairo introspection provider so GTK/Adwaita can load on minimal installations.
+
 - Simplified UI background completions and cleared obsolete engine error tooltips.
 - Fedora CI and release builds use Fedora's own image registry with bounded pull retries, avoiding Docker Hub anonymous rate limits; build failures remain visible.
 - Clipboard delivery waits for wl-copy's selection acknowledgement instead of a fixed 500 ms delay. Successful clipboard owners survive closing Settings; failed attempts, including descendants, are cleaned up with a bounded timeout.
