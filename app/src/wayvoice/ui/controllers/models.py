@@ -201,7 +201,7 @@ class ModelsController:
         if deletable and held.get("running") and str(held.get("model") or "") == str(entry.get("id") or ""):
             text = f"{text} · {self.ctx.state.t('store.delete_held_hint')}"
         self.ctx.settings.model_state_row.set_subtitle(text)
-        self.ctx.settings.model_delete_btn.set_sensitive(deletable)
+        self.ctx.settings.model_delete_btn.set_sensitive(deletable and not self._model_deleting)
         # A model that is not there has no button to show; a local folder is greyed out
         # rather than hidden, so "you cannot delete this" is visible instead of looking
         # like a missing feature.
@@ -264,6 +264,8 @@ class ModelsController:
         def boundary(value):
             return (value.get("model"), value.get("state"), bool(value.get("warming")))
         self._download_report = report
+        self.ctx.settings.model_download_cancel_btn.set_sensitive(
+            download.get("state") in {"downloading", "warming"} and not self._cancel_pending)
         if download.get('operation_id') != self._operation_error_id or download.get('state') in {'ready', 'idle', 'cancelled'}:
             self._operation_error = ""
             show_model_error_details(self.ctx, "")

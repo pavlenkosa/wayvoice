@@ -102,6 +102,11 @@ class DownloadRowTests(unittest.TestCase):
         return {"supported": True, "present": False, "model": "medium",
                 "download": base, "warming": bool(download.get("warming"))}
 
+    def test_error_after_download_disables_cancel(self):
+        self.window.models._apply_download_state({'download': {'state': 'downloading', 'model': 'small'}})
+        self.window.models._apply_download_state({'download': {'state': 'error', 'model': 'small', 'error': 'network'}})
+        self.assertFalse(self.window.settings.model_download_cancel_btn.sensitive)
+
     def test_a_download_shows_the_row(self):
         self._apply(self._downloading(done_bytes=10, total_bytes=100))
         self.assertTrue(self.row.visible)

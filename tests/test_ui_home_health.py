@@ -83,6 +83,23 @@ class HomeHealthTests(unittest.TestCase):
         self.ctx.window.stack.set_visible_child_name.assert_called_once_with('settings')
         self.ctx.window.settings.focus_section.assert_called_once_with('model_state_row')
 
+    def test_double_microphone_click_and_poll_cannot_repeat_pending_command(self):
+        self.ctx.tasks = mock.Mock()
+        self.snapshot()
+        self.ctx.status._toggle()
+        self.ctx.status._toggle()
+        self.snapshot()
+        self.ctx.tasks.run.assert_called_once()
+        self.ctx.home.mic_button.set_sensitive.assert_called_with(False)
+        self.ctx.status._toggle_finished({'ok': True})
+        self.ctx.status._toggle()
+        self.snapshot(_toggle_ack_seq=0)
+        self.assertTrue(self.ctx.status._toggle_pending)
+        self.ctx.tasks.run.assert_called_once()
+        self.snapshot(_toggle_ack_seq=self.ctx.status._toggle_seq)
+        self.assertFalse(self.ctx.status._toggle_pending)
+        self.ctx.home.mic_button.set_sensitive.assert_called_with(True)
+
     def test_empty_text_replaces_previous_transcript(self):
         self.snapshot(last_text='private words')
         self.snapshot(last_text='')

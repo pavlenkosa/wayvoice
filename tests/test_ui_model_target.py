@@ -25,6 +25,17 @@ class ModelTargetTests(unittest.TestCase):
         self.controller._apply_download_state = mock.Mock()
         self.controller._refresh_model_state = mock.Mock()
 
+    def test_refresh_does_not_enable_delete_while_delete_is_running(self):
+        page = self.ctx.settings
+        for name in ('model_disk_row', 'model_state_row', 'model_delete_btn'):
+            setattr(page, name, mock.Mock())
+        self.controller._model_deleting = True
+        with mock.patch('wayvoice.ui.controllers.models.model_state_text', return_value=('downloaded', True)), \
+             mock.patch.object(self.controller, '_refresh_fetch_button'), \
+             mock.patch.object(self.controller, '_decide_what_to_do_about_the_selected_model'):
+            self.controller._apply_model_state({'id': 'medium'}, 0, 0, {})
+        page.model_delete_btn.set_sensitive.assert_called_with(False)
+
     def test_confirmation_captures_target_before_later_selection_changes(self):
         with mock.patch("wayvoice.ui.dialogs.confirmations.download_confirmation") as dialog:
             self.controller._ask_about_download("MyOrg/MyModel", 20)

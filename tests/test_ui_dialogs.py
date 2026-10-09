@@ -11,7 +11,8 @@ try:
     gi.require_version('Adw','1')
     from gi.repository import Gtk, Adw
     from wayvoice.ui.dialogs.about import show_about
-    from wayvoice.ui.dialogs.confirmations import download_confirmation, delete_confirmation
+    from wayvoice.ui.dialogs.confirmations import download_confirmation
+    from wayvoice.ui.dialogs.model_delete import delete_confirmation
     from wayvoice.ui.dialogs.shortcut_window import shortcut_capture
 except Exception:
     Gtk = None

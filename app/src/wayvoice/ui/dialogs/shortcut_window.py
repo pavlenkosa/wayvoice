@@ -8,7 +8,7 @@ from ..widgets.labels import make_label
 
 def shortcut_capture(window, binding, t, disable_binding, capture_key):
     """Show shortcut capture dialog."""
-    win = Gtk.Window(title=t("shortcut.title"), transient_for=window, modal=True)
+    win = Gtk.Window(title=t("shortcut.title"), transient_for=window, modal=True, destroy_with_parent=True)
     win.set_default_size(420, 190)
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
     for side in ("top", "bottom", "start", "end"):

@@ -706,6 +706,9 @@ _EN.update({'profiles.title': 'Simple recognition choices',
  'profiles.selected': 'Preset selected. Save if there are changes. Model files are downloaded '
                       'separately.'})
 
+_RU.update({"settings.saved_warning": "Настройки сохранены. Для подготовки или клавиши нужны дополнительные действия; причина доступна на главной."})
+_EN.update({"settings.saved_warning": "Settings saved. Setup or shortcut needs attention; details are available on Home."})
+
 _TRANSLATIONS = {"ru": _RU, "en": _EN}
 
 

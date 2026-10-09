@@ -38,7 +38,7 @@ def controller_context():
     window.state = state
     window.toast = mock.Mock()
     ctx = UiContext(window, state, ImmediateTasks())
-    ctx.home = SimpleNamespace()
+    ctx.home = SimpleNamespace(mic_button=mock.Mock())
     ctx.settings = SimpleNamespace()
     ctx.models = ModelsController(ctx)
     ctx.preferences = SettingsController(ctx)

@@ -161,9 +161,20 @@ class SettingsController:
             cfg = load_config()
             cfg.update(updates)
             save_config(cfg)
-            ok, msg = apply_shortcut(str(updates["shortcut"]), self.ctx.state.ui_lang)
-            self._prepare_selected_engine(cfg)
-            return cfg, ok, msg
+            problems = []
+            try:
+                ok, msg = apply_shortcut(str(updates["shortcut"]), self.ctx.state.ui_lang)
+                if not ok:
+                    problems.append(msg)
+            except Exception as exc:
+                problems.append(str(exc))
+            try:
+                self._prepare_selected_engine(cfg)
+            except Exception as exc:
+                problems.append(str(exc))
+            # Persistence succeeded. Optional integration/setup errors must not
+            # leave the UI claiming the old draft is still unsaved.
+            return cfg, not problems, "\n".join(problems)
 
         self._queue_mutation(work, self._save_finished, self._save_failed)
         return True
@@ -177,7 +188,7 @@ class SettingsController:
 
     def _save_finished(self, result):
         cfg, ok, msg = result
-        self.ctx.status._action_error = ""
+        self.ctx.status._action_error = "" if ok else msg
         self._saving = False
         if hasattr(self.ctx.window, "save_button"):
             self.ctx.window.save_button.set_sensitive(True)
@@ -187,7 +198,7 @@ class SettingsController:
         proceed, self._leave_after_save = self._leave_after_save, None
         new_ui_setting = cfg["ui_language"]
         language_changed = new_ui_setting != self.ctx.state.ui_lang_setting
-        if language_changed and not self.has_unsaved_changes():
+        if language_changed and ok and not self.has_unsaved_changes():
             # Restart the UI so the new interface language is applied. The settings
             # binary path is resolved explicitly and passed as $0, so the restart never
             # depends on a login-shell PATH.
@@ -195,7 +206,7 @@ class SettingsController:
             return
         self.ctx.home.hotkey_label.set_text(label_for(str(cfg["shortcut"])))
         self.ctx.status._update_cards()
-        self.ctx.window.toast.add_toast(Adw.Toast(title=self.ctx.state.t("settings.language_pending" if language_changed else "settings.saved") if ok else msg))
+        self.ctx.window.toast.add_toast(Adw.Toast(title=self.ctx.state.t("settings.language_pending" if language_changed else "settings.saved") if ok else self.ctx.state.t("settings.saved_warning")))
         self.ctx.models._refresh_model_state()
         self._poll_engine_settings()
         if proceed and not self.has_unsaved_changes():

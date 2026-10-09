@@ -8,7 +8,7 @@ from .help import REPOSITORY
 
 def show_about(window):
     """Show the about dialog."""
-    about = Adw.AboutWindow(transient_for=window, modal=True)
+    about = Adw.AboutWindow(transient_for=window, modal=True, destroy_with_parent=True)
     about.set_application_name("WayVoice")
     about.set_application_icon("io.github.stepan.WayVoice")
     about.set_version(__version__)

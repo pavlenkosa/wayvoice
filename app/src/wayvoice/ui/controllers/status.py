@@ -35,6 +35,9 @@ class StatusController:
     def __init__(self, context):
         self.ctx = context
         self.transcript = TranscriptController(context)
+        self._toggle_pending = False
+        self._toggle_seq = 0
+        self._toggle_ack_seq = 0
         self._action_error = ""
         self._integration_error = ""
         self._offline_since = None
@@ -60,6 +63,11 @@ class StatusController:
     JOURNAL_TIMEOUT = 5.0
 
     def _toggle(self, *_args):
+        if self._toggle_pending:
+            return
+        self._toggle_pending = True
+        self._toggle_seq += 1
+        self.ctx.home.mic_button.set_sensitive(False)
         command = "cancel" if self._ui_busy else "toggle-clipboard"
         self.ctx.tasks.run(
             lambda: request(command, timeout=0.8),
@@ -68,6 +76,9 @@ class StatusController:
         )
 
     def _toggle_finished(self, reply):
+        # ACK does not contain the new recording state. Keep the action locked
+        # until a poll started after this response paints the actual state.
+        self._toggle_ack_seq = self._toggle_seq
         if not reply.get("ok"):
             show_operation_error(self.ctx, reply.get("error") or self.ctx.state.t("toast.dictation_failed"))
         else:
@@ -83,6 +94,8 @@ class StatusController:
         self.ctx.home.paste_card.set_text({"standard": "Ctrl+V", "terminal": "Ctrl+Shift+V", "copy": self.ctx.state.t("paste.clipboard_short")}.get(str(cfg.get("paste_mode")), "—"))
 
     def _set_state_style(self, state):
+        if self._toggle_pending:
+            self.ctx.home.mic_button.set_sensitive(False)
         if state != self._accessible_state:
             microphone_accessibility(self.ctx, state)
             self._accessible_state = state
@@ -105,8 +118,10 @@ class StatusController:
 
     def _status_snapshot(self):
         epoch = self.transcript.epoch
+        toggle_ack = self._toggle_ack_seq
         reply = request("status", timeout=0.12)
         reply["_transcript_epoch"] = epoch
+        reply["_toggle_ack_seq"] = toggle_ack
         now = time.monotonic()
         if self._shortcut_probe_at is None or now - self._shortcut_probe_at >= 5:
             self._shortcut_support = shortcut_support(self.ctx.state.ui_lang)
@@ -182,6 +197,8 @@ class StatusController:
     def _apply_status_snapshot(self, snapshot):
         self._poll_running = False
         reply, cfg, missing_deps = snapshot
+        if self._toggle_pending and self._toggle_ack_seq == self._toggle_seq and reply.get("_toggle_ack_seq") == self._toggle_seq:
+            self._toggle_pending = False
         self._update_cards(cfg)
         paint_setup(self.ctx, reply, cfg, missing_deps)
         restarting = self._maybe_restart(reply)
