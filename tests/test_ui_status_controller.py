@@ -1,17 +1,8 @@
 """Behavioral characterization of the owned status controller units."""
 
 from tests.ui_support import controller_context
-try:
-    from gi.repository import GLib
-    from wayvoice.ui.controllers.status import StatusController
-    from wayvoice.ui.controllers.models import ModelsController
-except Exception:
-    pass
 
-import ast
-import importlib.util
 import unittest
-from pathlib import Path
 from unittest import mock
 
 try:
@@ -24,19 +15,6 @@ else:
     _why = ""
 
 needs_window = unittest.skipIf(ui is None, f"the settings window is unavailable ({_why})")
-
-#: The methods and class attributes phase 2D moved out of the legacy class body.
-STATUS_METHODS = (
-    "JOURNAL_LINES", "JOURNAL_TIMEOUT",
-    "_toggle", "_update_cards", "_set_state_style", "_poll_status",
-    "_language_label", "_diagnostics_text", "_copy_diagnostics",
-    "_copy_logs", "_copy_logs_finished", "_journal_tail",
-)
-
-
-
-
-
 
 @needs_window
 class ToggleTests(unittest.TestCase):
@@ -65,12 +43,10 @@ class ToggleTests(unittest.TestCase):
             request.assert_called_once_with("cancel", timeout=0.8)
             window.window.toast.add_toast.assert_called_once()
 
-
 class FakeProcess:
     def __init__(self, returncode, stderr=""):
         self.returncode = returncode
         self.stderr = stderr
-
 
 @needs_window
 class JournalTailTests(unittest.TestCase):
@@ -85,7 +61,6 @@ class JournalTailTests(unittest.TestCase):
             with self.assertRaises(SubprocessError) as caught:
                 window.status._journal_tail()
             self.assertIn("boom", str(caught.exception))
-
 
 if __name__ == "__main__":
     unittest.main()
@@ -191,7 +166,6 @@ class RestartRecoveryTests(unittest.TestCase):
         self.assertTrue(finished.wait(2))
         glib.drain()
         self.ctx.window._toast.assert_not_called()
-
 
     def test_offline_invalidates_confirmation_before_failed_completion(self):
         self.ctx.tasks = mock.Mock()

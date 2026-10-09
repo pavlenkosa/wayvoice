@@ -2,11 +2,8 @@
 
 from tests.ui_support import controller_context
 
-import ast
-import importlib.util
 import time
 import unittest
-from pathlib import Path
 from unittest import mock
 
 from wayvoice import deps as deps_mod
@@ -22,26 +19,11 @@ else:
 
 needs_window = unittest.skipIf(ui is None, f"the settings window is unavailable ({_why})")
 
-#: The methods phase 2C moved out of the legacy class body.
-INTEGRATION_METHODS = (
-    "_apply_desktop_integration", "_apply_desktop_integration_worker",
-    "_background_start", "_build_dependencies_group",
-    "_refresh_dependency_rows", "_install_dependency",
-    "_install_dependency_worker", "_install_dependency_done",
-    "_missing_required",
-)
-
-
-
-
-
-
 class FakeDep:
     def __init__(self, dep_id, label, required):
         self.id = dep_id
         self.label = label
         self.required = required
-
 
 @needs_window
 class MissingRequiredTests(unittest.TestCase):
@@ -65,7 +47,6 @@ class MissingRequiredTests(unittest.TestCase):
              mock.patch.object(deps_mod, "status_of", side_effect=lambda d: statuses[d.id]):
             self.assertEqual([d.id for d in self.window.integration._missing_required()], ["a"])
 
-
 class FakeButton:
     def __init__(self):
         self.sensitive = True
@@ -76,7 +57,6 @@ class FakeButton:
 
     def set_visible(self, value):
         self.visible = value
-
 
 class FakeSpinner:
     def __init__(self):
@@ -92,7 +72,6 @@ class FakeSpinner:
     def set_visible(self, value):
         self.visible = value
 
-
 class FakeRow:
     def __init__(self):
         self.subtitle = ""
@@ -103,7 +82,6 @@ class FakeRow:
 
     def set_visible(self, value):
         self.visible = value
-
 
 @needs_window
 class RefreshThrottleTests(unittest.TestCase):
@@ -130,7 +108,6 @@ class RefreshThrottleTests(unittest.TestCase):
             window.integration._refresh_dependency_rows(force=True)
             status_all.assert_called_once_with()
 
-
 @needs_window
 class DesktopIntegrationResultTests(unittest.TestCase):
     def test_setup_failure_is_returned_separately_from_daemon_failure(self):
@@ -151,7 +128,6 @@ class DesktopIntegrationResultTests(unittest.TestCase):
         self.assertEqual(work, controller._apply_desktop_integration_worker)
         done("setup denied")
         context.window._toast.assert_called_once_with("setup denied")
-
 
     def test_repeated_requests_queue_one_followup_even_after_failure(self):
         context = mock.Mock()
