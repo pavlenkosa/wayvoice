@@ -190,6 +190,54 @@ class BusySurvivesAFailedUnlinkTests(DaemonCase):
         self.assertEqual(d.last_text, "текст")
         self.assertEqual(d.last_error, "")
 
+    def test_failed_cleanup_is_retained_then_retried_on_next_start(self):
+        d = self._work(PermissionError(13, "denied"))
+        wav = Path(tempfile.gettempdir()) / "wayvoice-test-busy.wav"
+        self.assertEqual(d._pending_asr_cleanup, {wav})
+        # Refuse before microphone preflight; cleanup must still be attempted.
+        d._shutdown.set()
+        with mock.patch.object(daemon_mod.Path, "unlink") as unlink:
+            self.assertFalse(d.start_recording()["ok"])
+        unlink.assert_called_once_with(missing_ok=True)
+        self.assertFalse(d._pending_asr_cleanup)
+
+    def test_retry_failure_keeps_owner_and_does_not_delete_active_wav(self):
+        d = self._work(PermissionError(13, "denied"))
+        active = Path("/tmp/wayvoice-active-asr.wav")
+        d._transcribe_wav = active
+        with mock.patch.object(daemon_mod.Path, "unlink", side_effect=PermissionError("denied")) as unlink:
+            d._retry_asr_cleanup()
+        self.assertTrue(d._pending_asr_cleanup)
+        self.assertEqual(unlink.call_count, 1)
+        self.assertEqual(d._transcribe_wav, active)
+
+    def test_idle_cancel_retries_cleanup(self):
+        d = self._work(PermissionError("denied"))
+        with mock.patch.object(daemon_mod.Path, "unlink") as unlink:
+            self.assertTrue(d.cancel()["ok"])
+        self.assertTrue(unlink.called)
+        self.assertFalse(d._pending_asr_cleanup)
+
+    def test_shutdown_retries_completed_wav(self):
+        d = self._work(PermissionError("denied"))
+        with mock.patch.object(daemon_mod.Path, "unlink") as unlink:
+            d._stop_work()
+        self.assertTrue(unlink.called)
+        self.assertFalse(d._pending_asr_cleanup)
+
+    def test_thread_creation_failure_retains_wav_and_original_error(self):
+        d = _daemon(self)
+        wav = Path("/tmp/wayvoice-handoff.wav")
+        d.recorder = mock.Mock(recording=True)
+        d.recorder.stop_to_wav.return_value = wav
+        with mock.patch.object(d, "_reconcile_recorder", return_value=""), \
+             mock.patch.object(daemon_mod.threading, "Thread", side_effect=RuntimeError("thread unavailable")), \
+             mock.patch.object(daemon_mod.Path, "unlink", side_effect=PermissionError("denied")):
+            result = d.stop_recording()
+        self.assertEqual(result["error"], "thread unavailable")
+        self.assertFalse(d.busy)
+        self.assertEqual(d._pending_asr_cleanup, {wav})
+
 
 class RecordingLimitTests(DaemonCase):
     """A limit that cannot be read is refused before the microphone opens."""

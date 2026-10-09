@@ -135,6 +135,7 @@ class WayVoiceDaemon:
         self._transcribe_cancel = threading.Event()
         self._transcribe_thread: threading.Thread | None = None
         self._transcribe_wav: Path | None = None
+        self._pending_asr_cleanup: set[Path] = set()
         self._record_timer: threading.Timer | None = None
         self._record_started = 0.0
         self._busy_started = 0.0
@@ -417,8 +418,25 @@ class WayVoiceDaemon:
         notify(self.last_warning, enabled=cfg.get("notify", True))
         self.stop_recording()
 
+    def _remove_finished_wav(self, wav: Path) -> None:
+        """Called only after the ASR reader has released this recording."""
+        with self._lock:
+            try:
+                wav.unlink(missing_ok=True)
+            except OSError as exc:
+                self._pending_asr_cleanup.add(wav)
+                print(f"WayVoice: could not remove {wav}: {exc}", file=sys.stderr)
+            else:
+                self._pending_asr_cleanup.discard(wav)
+
+    def _retry_asr_cleanup(self) -> None:
+        with self._lock:
+            for wav in tuple(self._pending_asr_cleanup):
+                self._remove_finished_wav(wav)
+
     def start_recording(self) -> dict:
         with self._lock:
+            self._retry_asr_cleanup()
             failure = self._reconcile_recorder()
             if failure:
                 return {"ok": False, "error": failure}
@@ -518,6 +536,7 @@ class WayVoiceDaemon:
             if self.busy:
                 self._transcribe_cancel.set()
                 return {"ok": True, "state": "cancelling"}
+            self._retry_asr_cleanup()
             # A stopped recorder may still own a WAV whose unlink failed.
             try:
                 self.recorder.cancel()
@@ -550,26 +569,27 @@ class WayVoiceDaemon:
             self._busy_started = time.monotonic()
             self._transcribe_cancel.clear()
 
-        with self._lock:
-            if self._shutdown.is_set():
-                self.busy = False
-                self._busy_started = 0.0
-                wav.unlink(missing_ok=True)
-                return {"ok": False, "error": "Daemon is shutting down."}
-            thread = threading.Thread(target=self._transcribe_worker, args=(wav,), daemon=True)
-            self._transcribe_thread = thread
-            self._transcribe_wav = wav
         try:
+            with self._lock:
+                if self._shutdown.is_set():
+                    self.busy = False
+                    self._busy_started = 0.0
+                    self._remove_finished_wav(wav)
+                    return {"ok": False, "error": "Daemon is shutting down."}
+                thread = threading.Thread(target=self._transcribe_worker, args=(wav,), daemon=True)
+                self._transcribe_thread = thread
+                self._transcribe_wav = wav
             thread.start()
         except Exception as exc:
-            self._transcribe_thread = None
-            self._transcribe_wav = None
-            self.busy = False
-            self._busy_started = 0.0
-            if not self._shutdown.is_set():
-                self._transcribe_cancel.clear()
-            wav.unlink(missing_ok=True)
-            self.last_error = str(exc)
+            with self._lock:
+                self._transcribe_thread = None
+                self._transcribe_wav = None
+                self.busy = False
+                self._busy_started = 0.0
+                if not self._shutdown.is_set():
+                    self._transcribe_cancel.clear()
+                self._remove_finished_wav(wav)
+                self.last_error = str(exc)
             return {"ok": False, "error": str(exc)}
         return {"ok": True, "state": "transcribing"}
 
@@ -665,21 +685,16 @@ class WayVoiceDaemon:
                 self._busy_started = 0.0
                 if not self._shutdown.is_set():
                     self._transcribe_cancel.clear()
+                self._remove_finished_wav(wav)
             # The result is the last thing this notification says. It stays in the
             # history, and the next dictation starts a new entry instead of
             # overwriting a transcript the user may still be reading.
             reset_notification_id()
-            try:
-                wav.unlink(missing_ok=True)
-            except OSError as exc:
-                # A leftover recording is swept at the next start; it is not worth
-                # turning into an error state after the text is already inserted.
-                print(f"WayVoice: could not remove {wav}: {exc}", file=sys.stderr)
-            finally:
-                with self._lock:
-                    if self._transcribe_thread is threading.current_thread():
-                        self._transcribe_thread = None
-                        self._transcribe_wav = None
+            with self._lock:
+                if self._transcribe_thread is threading.current_thread():
+                    self._transcribe_thread = None
+                    self._transcribe_wav = None
+
 
 
     def dispatch(self, command: str) -> dict:
@@ -1002,15 +1017,13 @@ class WayVoiceDaemon:
                 # A published thread can be stuck in start(). It checks cancellation
                 # before reading audio if it eventually begins, so nobody owns a read.
                 if self._transcribe_wav is not None:
-                    try:
-                        self._transcribe_wav.unlink(missing_ok=True)
-                    except OSError as exc:
-                        print(f"WayVoice: could not remove {self._transcribe_wav}: {exc}", file=sys.stderr)
+                    self._remove_finished_wav(self._transcribe_wav)
                 self.busy = False
                 self._busy_started = 0.0
         for thread in threads:
             if thread is not None and thread.ident is not None and thread is not threading.current_thread():
                 thread.join(timeout=max(0.0, deadline - time.monotonic()))
+        self._retry_asr_cleanup()
 
 
     def _drain_commands(self, commands: "queue.Queue", worker: threading.Thread,
