@@ -229,5 +229,24 @@ class ExitPolicyTests(unittest.TestCase):
         self.assertFalse(ctx.preferences._setup_running)
 
 
+
+
+@needs_window
+class EngineTooltipRecoveryTests(unittest.TestCase):
+    def test_recovered_engine_clears_previous_error_tooltip(self):
+        ctx = controller_context()
+        ctx.settings.engine_status_row = mock.Mock()
+        ctx.settings.engine_setup_btn = mock.Mock()
+        ctx.settings.engine_spinner = mock.Mock()
+        controller = ctx.preferences
+        controller._pending_engine_config = lambda: {}
+        controller._selected_engine_object = lambda: mock.Mock(needs_setup=True)
+        for state in ('ready', 'installing'):
+            with self.subTest(state=state):
+                controller._engine_status_ready({}, {'state': 'error', 'message': 'old error'})
+                ctx.settings.engine_status_row.set_tooltip_text.assert_called_with('old error')
+                controller._engine_status_ready({}, {'state': state})
+                ctx.settings.engine_status_row.set_tooltip_text.assert_called_with(None)
+
 if __name__ == "__main__":
     unittest.main()

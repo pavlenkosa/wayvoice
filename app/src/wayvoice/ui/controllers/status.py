@@ -3,10 +3,7 @@ from ..setup_presentation import model_missing, paint_setup
 import platform
 import os
 import subprocess
-import threading
 import time
-
-from ..widgets.labels import clip_subtitle
 
 import gi
 
@@ -435,33 +432,18 @@ class StatusController:
         if button is not None:
             button.set_sensitive(False)
 
-        def worker() -> None:
-            try:
-                report = self._journal_tail()
-            except (OSError, subprocess.SubprocessError) as exc:
-                self.ctx.tasks.idle(self._copy_logs_finished, str(exc))
-                return
-            if not report.strip():
-                self.ctx.tasks.idle(self._copy_logs_finished, None, True)
-                return
-            try:
-                injector.copy_to_clipboard(report, self.ctx.state.ui_lang)
-            except injector.InjectionError as exc:
-                self.ctx.tasks.idle(self._copy_logs_finished, str(exc))
-                return
-            self.ctx.tasks.idle(self._copy_logs_finished, None)
+        language = self.ctx.state.ui_lang
 
-        try:
-            threading.Thread(target=worker, daemon=True).start()
-        except RuntimeError as exc:
-            # No thread could be started. Nothing has begun, so nothing has to be
-            # undone - but the button must not stay greyed out, which is what happens
-            # when the flag is set before start() and never cleared.
-            self._logs_copying = False
-            self._logs_button = None
-            if button is not None:
-                button.set_sensitive(True)
-            self.ctx.window._toast(self.ctx.state.t("toast.logs_failed", detail=str(exc)))
+        def worker():
+            report = self._journal_tail()
+            if not report.strip():
+                return True
+            injector.copy_to_clipboard(report, language)
+            return False
+
+        self.ctx.tasks.run(worker,
+                           lambda empty: self._copy_logs_finished(None, empty),
+                           lambda exc: self._copy_logs_finished(str(exc)))
 
     def _copy_logs_finished(self, problem, empty: bool = False) -> bool:
         button, self._logs_button = self._logs_button, None

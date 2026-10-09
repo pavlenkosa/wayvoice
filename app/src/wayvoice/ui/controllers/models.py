@@ -381,7 +381,8 @@ class ModelsController:
         self._model_refresh_busy = True
         self._model_refresh_pending = False
         model_id = self._selected_model_id()
-        self.ctx.tasks.run(lambda: self._model_state_worker(model_id), lambda _: None,
+        self.ctx.tasks.run(lambda: self._model_state_worker(model_id),
+                           lambda result: self._model_state_ready(*result),
                            self._model_refresh_failed)
 
     def _model_refresh_failed(self, exc):
@@ -389,7 +390,7 @@ class ModelsController:
         self._model_refresh_pending = False
         show_operation_error(self.ctx, exc)
 
-    def _model_state_worker(self, model_id: str) -> None:
+    def _model_state_worker(self, model_id: str) -> tuple:
         try:
             entry = model_store.describe(model_id)
             try:
@@ -408,7 +409,7 @@ class ModelsController:
             free_bytes = total_bytes = cache_bytes = 0
             held = {"running": False, "model": ""}
             print(f"WayVoice: model state refresh failed: {exc}", file=sys.stderr)
-        self.ctx.tasks.idle(self._model_state_ready, entry, free_bytes, total_bytes, held, cache_bytes)
+        return entry, free_bytes, total_bytes, held, cache_bytes
 
     def _model_state_ready(self, entry, free_bytes, total_bytes, held, cache_bytes=0):
         self._model_refresh_busy = False
@@ -442,13 +443,12 @@ class ModelsController:
         self.ctx.settings.model_delete_btn.set_label(self.ctx.state.t("store.deleting"))
         # rmtree of half a gigabyte plus a full rescan of the hub: seconds, not
         # milliseconds, so it must not run where the main loop draws.
-        self.ctx.tasks.run(lambda: self._delete_model_worker(model_id), lambda _: None,
+        self.ctx.tasks.run(lambda: self._delete_model_worker(model_id), self._delete_model_ready,
                            lambda exc: self._delete_model_ready({
                                "ok": False, "error_key": "store.delete_failed", "detail": str(exc)}))
 
-    def _delete_model_worker(self, model_id: str) -> None:
-        result = request("delete-model " + json.dumps({"model": model_id}), timeout=30.0)
-        self.ctx.tasks.idle(self._delete_model_ready, result)
+    def _delete_model_worker(self, model_id: str) -> dict:
+        return request("delete-model " + json.dumps({"model": model_id}), timeout=30.0)
 
     def _delete_model_ready(self, result: dict) -> None:
         self._model_deleting = False

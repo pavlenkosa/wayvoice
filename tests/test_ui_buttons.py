@@ -124,8 +124,7 @@ class DiagnosticsButtonTests(unittest.TestCase):
         )
         patcher.start()
         self.addCleanup(patcher.stop)
-        # The journal is read on a thread now, so the answer comes back through
-        # GLib.idle_add. There is no main loop here, so it is run where it lands.
+        # Workers queue completions; the test drains them on the calling thread.
         patcher = mock.patch.object(
             GLib, "idle_add",
             side_effect=lambda callback, *args, **kwargs: callback(*args, **kwargs),
@@ -170,6 +169,10 @@ class LogsButtonTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         self.window = controller_context()
+        from tests.test_ui_async_tasks import FakeGLib, TaskRunner
+        self.glib = FakeGLib()
+        self.window.tasks = TaskRunner(self.glib)
+        self.addCleanup(self.window.tasks.close)
         self.window.state.ui_lang = "en"
         self.window.state.t = lambda key, **kwargs: tr(key, "en", **kwargs)
         self.window.window.toast = FakeToast()
@@ -182,20 +185,14 @@ class LogsButtonTests(unittest.TestCase):
         )
         patcher.start()
         self.addCleanup(patcher.stop)
-        # The journal is read on a thread now, so the answer comes back through
-        # GLib.idle_add. There is no main loop here, so it is run where it lands.
-        patcher = mock.patch.object(
-            GLib, "idle_add",
-            side_effect=lambda callback, *args, **kwargs: callback(*args, **kwargs),
-        )
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        # Workers queue completions; the test drains them on the calling thread.
 
     def _wait(self):
         """Join the worker, so the assertions see a finished run."""
         for thread in threading.enumerate():
             if thread is not threading.current_thread():
                 thread.join(timeout=10)
+        self.glib.drain()
 
     def _journal(self, stdout="2026-10-05 01:00:00 line\n", returncode=0, stderr=""):
         cp = subprocess.CompletedProcess(["journalctl"], returncode, stdout, stderr)
@@ -294,17 +291,15 @@ class MainLoopTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         self.window = controller_context()
+        from tests.test_ui_async_tasks import FakeGLib, TaskRunner
+        self.glib = FakeGLib()
+        self.window.tasks = TaskRunner(self.glib)
+        self.addCleanup(self.window.tasks.close)
         self.window.state.ui_lang = "en"
         self.window.state.t = lambda key, **kwargs: tr(key, "en", **kwargs)
         self.window.window.toast = FakeToast()
         self.window.status._logs_copying = False
         self.window.status._logs_button = None
-        patcher = mock.patch.object(
-            GLib, "idle_add",
-            side_effect=lambda callback, *args, **kwargs: callback(*args, **kwargs),
-        )
-        patcher.start()
-        self.addCleanup(patcher.stop)
         patcher = mock.patch.object(injector, "copy_to_clipboard")
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -328,6 +323,7 @@ class MainLoopTests(unittest.TestCase):
             for thread in threading.enumerate():
                 if thread is not threading.current_thread():
                     thread.join(timeout=10)
+        self.glib.drain()
         self.assertTrue(where, "journalctl never ran at all")
         for thread in where:
             self.assertIsNot(thread, clicked_on,

@@ -299,6 +299,7 @@ class SettingsController:
             return GLib.SOURCE_REMOVE
         state = str(st.get("state") or "")
         engine = self._selected_engine_object()
+        self.ctx.settings.engine_status_row.set_tooltip_text(None)
         if state == "ready":
             self.ctx.settings.engine_status_row.set_subtitle(self.ctx.state.t("status.ready"))
             self.ctx.settings.engine_setup_btn.set_visible(False)

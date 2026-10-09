@@ -96,9 +96,10 @@ class ModelTargetTests(unittest.TestCase):
     def test_worker_adds_inference_readiness_without_changing_disk_predicate(self):
         entry = {"id": "medium", "kind": "repo", "downloaded": True}
         with mock.patch.object(models.model_store, "describe", return_value=entry), mock.patch.object(models.model_store, "inference_dir", side_effect=RuntimeError("missing tokenizer")), mock.patch.object(models.model_store, "disk_free", return_value=0), mock.patch.object(models.model_store, "total_size", return_value=0), mock.patch.object(models.model_store, "hub_size", return_value=0), mock.patch.object(models, "worker_info", return_value={}), mock.patch.object(self.controller, "_model_state_ready") as ready:
-            self.controller._model_state_worker("medium")
-        self.assertTrue(ready.call_args.args[0]["downloaded"])
-        self.assertFalse(ready.call_args.args[0]["inference_ready"])
+            result = self.controller._model_state_worker("medium")
+        ready.assert_not_called()
+        self.assertTrue(result[0]["downloaded"])
+        self.assertFalse(result[0]["inference_ready"])
 
     def test_draft_progress_and_completion_refresh_without_restart(self):
         controller = self.controller

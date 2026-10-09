@@ -2,6 +2,10 @@
 
 ## 0.6.7 — 2026-10-10
 
+- Simplified UI background completions and cleared obsolete engine error tooltips.
+- Fedora CI and release builds use Fedora's own image registry with bounded pull retries, avoiding Docker Hub anonymous rate limits; build failures remain visible.
+- Clipboard delivery waits for wl-copy's selection acknowledgement instead of a fixed 500 ms delay. Successful clipboard owners survive closing Settings; failed attempts, including descendants, are cleaned up with a bounded timeout.
+
 - Model availability and download progress now follow the selected model and refresh after completion without restarting the UI.
 - Unsaved settings are confirmed before leaving; saving respects language changes, window closure and later edits. Repeated actions and delayed replies are guarded.
 - Fixed graceful PipeWire recording completion and improved recovery and preparation feedback.
