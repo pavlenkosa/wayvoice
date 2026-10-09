@@ -3,6 +3,7 @@
 from gi.repository import Adw, Gtk
 
 from ... import __version__
+from .help import REPOSITORY
 
 
 def show_about(window):
@@ -16,6 +17,6 @@ def show_about(window):
     about.set_developers([window.t("about.developer")])
     about.set_license_type(Gtk.License.AGPL_3_0)
     about.set_copyright("© 2026 WayVoice contributors")
-    about.set_website("https://github.com/pavlenkosa/wayvoice")
-    about.set_issue_url("https://github.com/pavlenkosa/wayvoice/issues")
+    about.set_website(REPOSITORY)
+    about.set_issue_url(REPOSITORY + "/issues")
     about.present()

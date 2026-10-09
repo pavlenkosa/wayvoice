@@ -1,4 +1,5 @@
 """StatusController owns its operations; pages own widgets."""
+from ..setup_presentation import model_missing, paint_setup
 import platform
 import os
 import subprocess
@@ -182,6 +183,7 @@ class StatusController:
         self._poll_running = False
         reply, cfg, missing_deps = snapshot
         self._update_cards(cfg)
+        paint_setup(self.ctx, reply, cfg, missing_deps)
         restarting = self._maybe_restart(reply)
         if not reply.get("ok"):
             now = time.monotonic()
@@ -256,6 +258,20 @@ class StatusController:
                 state = "preparing"
                 self.ctx.home.mic_button.set_sensitive(False)
                 show_hero_preparation(self.ctx, *preparation)
+            elif est == "ready" and model_missing(reply):
+                state = "offline"
+                self.ctx.home.mic_button.set_sensitive(False)
+                self.ctx.home.status_pill.set_text(self.ctx.state.t("health.attention"))
+                self.ctx.home.hero_state.set_text(self.ctx.state.t("setup.model_missing"))
+                self.ctx.home.hero_caption.set_text(self.ctx.state.t("setup.model_next"))
+                self.ctx.home.mic_icon.set_from_icon_name("folder-download-symbolic")
+            elif est == "ready" and missing_deps:
+                state = "offline"
+                self.ctx.home.mic_button.set_sensitive(False)
+                self.ctx.home.status_pill.set_text(self.ctx.state.t("health.attention"))
+                self.ctx.home.hero_state.set_text(self.ctx.state.t("health.deps_missing", names=", ".join(dep.label for dep in missing_deps)))
+                self.ctx.home.hero_caption.set_text(self.ctx.state.t("hero.open_settings"))
+                self.ctx.home.mic_icon.set_from_icon_name("emblem-system-symbolic")
             elif est == "ready":
                 state = "ready"
                 self.ctx.home.mic_button.set_sensitive(True)
@@ -287,6 +303,10 @@ class StatusController:
             paint_health(self.ctx, self._integration_error, warning=True)
         elif warning:
             paint_health(self.ctx, warning, warning=True)
+        elif model_missing(reply):
+            paint_health(self.ctx)
+            self.ctx.home.health_summary.set_text(self.ctx.state.t('health.attention'))
+            self.ctx.home.health_detail.set_text(self.ctx.state.t('setup.model_next'))
         elif est != 'ready':
             paint_health(self.ctx, str(engine.get('message') or ''), 'backend')
         else:

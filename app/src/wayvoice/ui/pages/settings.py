@@ -22,6 +22,14 @@ class SettingsPage:
         context.settings = self
         self.root = self._build_settings()
 
+    def focus_section(self, target):
+        widget = self.engine if target == 'engine_status_row' else getattr(self, target, None)
+        if target == 'model_state_row' and not self.model_state_row.get_visible():
+            widget = self.engine
+        if widget is not None:
+            widget.set_focusable(True)
+            widget.grab_focus()
+
     def _build_settings(self):
         scroller = Gtk.ScrolledWindow()
         scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)

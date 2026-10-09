@@ -15,6 +15,7 @@ from .controllers.settings import SettingsController
 from .controllers.shortcut import ShortcutController
 from .controllers.status import StatusController
 from .dialogs.about import show_about
+from .dialogs.help import show_help
 from .widgets.labels import clip_subtitle
 
 
@@ -38,7 +39,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         self.home = HomePage(ctx)
         self.settings = SettingsPage(ctx)
         self._install_css()
-        for name, callback in (('about', self._show_about), ('diagnostics', ctx.status._copy_diagnostics), ('quit', self._quit)):
+        for name, callback in (('help', self._show_help), ('about', self._show_about), ('diagnostics', ctx.status._copy_diagnostics), ('quit', self._quit)):
             action = Gio.SimpleAction.new(name, None)
             action.connect('activate', callback)
             self.add_action(action)
@@ -53,7 +54,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         header.set_title_widget(switcher)
         menu_button = Gtk.MenuButton(icon_name='open-menu-symbolic', tooltip_text=self.t('nav.settings'))
         menu = Gio.Menu()
-        for label, action in (('menu.diagnostics', 'diagnostics'), ('menu.about', 'about'), ('menu.close_settings', 'quit')):
+        for label, action in (('menu.help', 'help'), ('menu.diagnostics', 'diagnostics'), ('menu.about', 'about'), ('menu.close_settings', 'quit')):
             menu.append(self.t(label), f'win.{action}')
         menu_button.set_menu_model(menu)
         header.pack_end(menu_button)
@@ -102,8 +103,15 @@ class WayVoiceWindow(Adw.ApplicationWindow):
             self.context.preferences.confirm_leaving(proceed)
         self.save_button.set_visible(self.stack.get_visible_child_name() == 'settings')
 
+    def open_settings(self, target):
+        self.stack.set_visible_child_name('settings')
+        self.tasks.idle(self.settings.focus_section, target)
+
     def _toast(self, title, timeout=3):
         self.toast.add_toast(Adw.Toast(title=clip_subtitle(title, 160), timeout=timeout))
+
+    def _show_help(self, *_args):
+        show_help(self)
 
     def _show_about(self, *_args):
         show_about(self)

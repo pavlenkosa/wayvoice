@@ -69,6 +69,20 @@ class HomeHealthTests(unittest.TestCase):
         self.ctx.home.health_detail.set_text.assert_called_with('health.recorder_error\nhealth.recorder_hint')
         self.ctx.home.health_raw.set_text.assert_called_with('pw-record: PipeWire stream failed')
 
+    def test_runtime_ready_without_model_does_not_offer_recording(self):
+        self.snapshot(model={'supported': True, 'present': False, 'model': 'small'})
+        self.ctx.home.mic_button.set_sensitive.assert_called_with(False)
+        self.ctx.home.hero_state.set_text.assert_called_with('setup.model_missing')
+        self.ctx.home.health_summary.set_text.assert_called_with('health.attention')
+
+    def test_setup_navigation_keeps_draft_and_does_not_start_operations(self):
+        from wayvoice.ui.window import WayVoiceWindow
+        self.ctx.window.stack = mock.Mock()
+        self.ctx.window.settings = mock.Mock()
+        self.ctx.window.open_settings('model_state_row')
+        self.ctx.window.stack.set_visible_child_name.assert_called_once_with('settings')
+        self.ctx.window.settings.focus_section.assert_called_once_with('model_state_row')
+
     def test_empty_text_replaces_previous_transcript(self):
         self.snapshot(last_text='private words')
         self.snapshot(last_text='')

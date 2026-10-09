@@ -53,7 +53,8 @@ class HomePage:
         self.mic_button.set_child(self.mic_icon)
         microphone_accessibility(self.ctx, "offline")
         hero.append(self.mic_button)
-        self.hero_state = make_label(self.ctx.state.t("hero.starting"), "hero-title", xalign=0.5)
+        self.hero_state = make_label(self.ctx.state.t("hero.starting"), "hero-title", wrap=True, xalign=0.5)
+        self.hero_state.set_justify(Gtk.Justification.CENTER)
         self.hero_state.set_halign(Gtk.Align.CENTER)
         hero.append(self.hero_state)
         self.hero_caption = make_label("", "hero-subtitle", wrap=True, xalign=0.5)
@@ -74,6 +75,22 @@ class HomePage:
         self.shortcut_manual.set_selectable(True)
         hero.append(self.shortcut_manual)
         outer.append(hero)
+
+        setup = Adw.PreferencesGroup(title=self.ctx.state.t("setup.title"),
+                                     description=self.ctx.state.t("setup.description"))
+        self.setup_rows = {}
+        for target, key in (("engine_status_row", "settings.recognition"),
+                            ("model_state_row", "settings.model"),
+                            ("dependencies", "setup.capture"),
+                            ("paste", "card.paste"), ("shortcut_row", "shortcut.global")):
+            row = Adw.ActionRow(title=self.ctx.state.t(key), subtitle=self.ctx.state.t("health.checking"))
+            button = Gtk.Button(label=self.ctx.state.t("setup.configure"), valign=Gtk.Align.CENTER)
+            button.connect("clicked", lambda _button, name=target: self.ctx.window.open_settings(name))
+            row.add_suffix(button)
+            row.set_activatable_widget(button)
+            setup.add(row)
+            self.setup_rows[target] = row
+        outer.append(setup)
 
         grid = Gtk.Grid(column_spacing=12, row_spacing=12)
         grid.set_column_homogeneous(True)

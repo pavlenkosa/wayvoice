@@ -89,6 +89,7 @@ class IntegrationController:
             description=self.ctx.state.t("settings.deps_sub"),
         )
         page.add(group)
+        self.ctx.settings.dependencies = group
         for dep in deps_mod.dependencies():
             row = Adw.ActionRow(title=dep.label)
             button = Gtk.Button(label=self.ctx.state.t("settings.install"), valign=Gtk.Align.CENTER)

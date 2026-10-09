@@ -10,11 +10,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/stepan-pavlenko/wayvoice/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/stepan-pavlenko/wayvoice/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://github.com/stepan-pavlenko/wayvoice/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/stepan-pavlenko/wayvoice?display_name=tag&sort=semver"></a>
+  <a href="https://github.com/pavlenkosa/wayvoice/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/pavlenkosa/wayvoice/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/pavlenkosa/wayvoice/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/pavlenkosa/wayvoice?display_name=tag&sort=semver"></a>
   <img alt="Linux" src="https://img.shields.io/badge/Linux-Wayland-ffbc00?logo=linux&logoColor=black">
   <img alt="GTK 4" src="https://img.shields.io/badge/GTK-4-4a86cf?logo=gtk&logoColor=white">
-  <img alt="License" src="https://img.shields.io/github/license/stepan-pavlenko/wayvoice">
+  <img alt="License" src="https://img.shields.io/github/license/pavlenkosa/wayvoice">
 </p>
 
 <p align="center">
@@ -50,7 +50,7 @@ If you are looking for a Linux alternative to built-in voice typing on other des
 
 ### Debian / Ubuntu
 
-Download the latest `.deb` package from [GitHub Releases](https://github.com/stepan-pavlenko/wayvoice/releases), then install it with APT:
+Download the latest `.deb` package from [GitHub Releases](https://github.com/pavlenkosa/wayvoice/releases), then install it with APT:
 
 ```bash
 sudo apt install ./wayvoice_*_amd64.deb
@@ -68,7 +68,7 @@ The recognition runtime and model weights are downloaded only when they are need
 
 The repository includes a Flatpak manifest at [`io.github.stepan.WayVoice.json`](io.github.stepan.WayVoice.json). WayVoice can run without systemd, which keeps the application usable in sandboxed environments as well.
 
-Prebuilt release assets are currently published on the [Releases](https://github.com/stepan-pavlenko/wayvoice/releases) page.
+Prebuilt release assets are currently published on the [Releases](https://github.com/pavlenkosa/wayvoice/releases) page.
 
 ## How it works
 
@@ -225,7 +225,7 @@ The model may still need to be downloaded or loaded into memory. Keeping the Fas
 
 **Need more detail?**
 
-See the [changelog](CHANGELOG.md), open an [issue](https://github.com/stepan-pavlenko/wayvoice/issues), or inspect the service log shown above.
+See the [changelog](CHANGELOG.md), open an [issue](https://github.com/pavlenkosa/wayvoice/issues), or inspect the service log shown above.
 
 ## Development and contributing
 
@@ -234,7 +234,7 @@ Contributions, bug reports and testing on different Linux/Wayland setups are wel
 - [Contributing guide](CONTRIBUTING.md)
 - [Changelog](CHANGELOG.md)
 - [Security policy](SECURITY.md)
-- [Releases](https://github.com/stepan-pavlenko/wayvoice/releases)
+- [Releases](https://github.com/pavlenkosa/wayvoice/releases)
 
 ## License
 

@@ -602,6 +602,80 @@ _EN.update({'store.download_recovery': 'Check the connection and free disk space
  'diagnostics.save_failed': 'Could not save report: {detail}',
  'diagnostics.log_missing': 'No direct-process log is available yet: {path}'})
 
+_RU.update({'setup.title': 'Перед первой диктовкой',
+ 'setup.description': 'Это проверка подготовки, а не проверка микрофона или вставки. Настройки '
+                      'применяются кнопкой «Сохранить».',
+ 'setup.configure': 'Настроить',
+ 'setup.capture': 'Запись звука',
+ 'setup.waiting': 'Ожидаем связь с WayVoice',
+ 'setup.runtime_ready': 'Движок настроен; качество проверьте первой записью',
+ 'setup.runtime_missing': 'Нужно подготовить или настроить движок',
+ 'setup.model_ready': 'Файлы выбранной модели доступны',
+ 'setup.model_missing': 'Модель не скачана',
+ 'setup.model_pending': 'Модель скачивается или готовится',
+ 'setup.model_external': 'Файлы задаются в настройках движка; их работоспособность ещё не '
+                         'проверена',
+ 'setup.capture_missing': 'Не найдена программа записи — проверьте зависимости',
+ 'setup.capture_available': 'Программа записи найдена; микрофон ещё не проверен',
+ 'setup.clipboard_missing': 'Не найден wl-copy — установите wl-clipboard в зависимостях',
+ 'setup.clipboard_available': 'wl-copy найден; вставку в нужное приложение проверьте горячей '
+                              'клавишей',
+ 'setup.shortcut_disabled': 'Горячая клавиша отключена',
+ 'setup.shortcut_configured': 'GNOME поддерживает настройку; сохраните клавишу и проверьте её в '
+                              'другом приложении',
+ 'setup.shortcut_manual': 'Требуется ручная привязка команды в окружении рабочего стола',
+ 'setup.model_next': 'Откройте шаг «Модель» ниже и скачайте файлы.',
+ 'menu.help': 'Помощь и обновления',
+ 'help.title': 'Первый диктант и обновления',
+ 'help.steps': '1. Подготовьте движок и файлы модели в настройках.\n'
+               '2. Сохраните изменения и настройте горячую клавишу.\n'
+               '3. Перейдите в текстовое поле другого приложения. Нажмите клавишу, скажите фразу и '
+               'нажмите ещё раз.\n'
+               '4. Если автовставка недоступна, вставьте текст из буфера вручную. Кнопка в окне '
+               'WayVoice всегда использует буфер.',
+ 'help.native': 'Для пакетной установки используйте обновления вашего дистрибутива. Если '
+                'устанавливали .deb из GitHub, скачайте новую версию на странице выпусков и '
+                'установите её тем же способом.',
+ 'help.flatpak': 'Обновите WayVoice через магазин приложений или flatpak update. Для локально '
+                 'установленного bundle скачайте новую сборку из того же источника.',
+ 'help.releases': 'Выпуски WayVoice',
+ 'help.issues': 'Сообщить об ошибке'})
+_EN.update({'setup.title': 'Before your first dictation',
+ 'setup.description': 'Preparation checks, not a microphone or paste test. Apply settings with '
+                      'Save.',
+ 'setup.configure': 'Configure',
+ 'setup.capture': 'Audio recording',
+ 'setup.waiting': 'Waiting for WayVoice',
+ 'setup.runtime_ready': 'Engine configured; verify it with your first recording',
+ 'setup.runtime_missing': 'Prepare or configure the engine',
+ 'setup.model_ready': 'Selected model files available',
+ 'setup.model_missing': 'Model not downloaded',
+ 'setup.model_pending': 'Model downloading or preparing',
+ 'setup.model_external': 'Files are configured in engine settings; their operation is unverified',
+ 'setup.capture_missing': 'Recording program missing — check dependencies',
+ 'setup.capture_available': 'Recording program found; microphone unverified',
+ 'setup.clipboard_missing': 'wl-copy missing — install wl-clipboard in dependencies',
+ 'setup.clipboard_available': 'wl-copy found; test pasting into your application with the shortcut',
+ 'setup.shortcut_disabled': 'Shortcut disabled',
+ 'setup.shortcut_configured': 'GNOME supports configuration; save the shortcut and test it in '
+                              'another application',
+ 'setup.shortcut_manual': 'Bind the command manually in your desktop settings',
+ 'setup.model_next': 'Open the Model step below and download the files.',
+ 'menu.help': 'Help and updates',
+ 'help.title': 'First dictation and updates',
+ 'help.steps': '1. Prepare the engine and model files in Settings.\n'
+               '2. Save changes and configure the shortcut.\n'
+               '3. Focus a text field in another application. Press the shortcut, speak, then '
+               'press again.\n'
+               '4. If automatic paste is unavailable, paste from the clipboard manually. The '
+               'WayVoice window button always uses the clipboard.',
+ 'help.native': 'For a packaged installation, use your distribution updates. If you installed a '
+                'GitHub .deb, download a new version from Releases and install it in the same way.',
+ 'help.flatpak': 'Update WayVoice through your application store or flatpak update. For a locally '
+                 'installed bundle, obtain the new build from the same source.',
+ 'help.releases': 'WayVoice releases',
+ 'help.issues': 'Report a problem'})
+
 _TRANSLATIONS = {"ru": _RU, "en": _EN}
 
 
