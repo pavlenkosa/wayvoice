@@ -94,8 +94,8 @@ class StatusController:
     RESTART_DELAY = 5.0
 
     def _maybe_restart(self, reply):
+        self._restart_confirmed = bool(reply.get("ok")) and str(reply.get("version") or "") == __version__
         if reply.get("ok"):
-            self._restart_confirmed = str(reply.get("version") or "") == __version__
             if self._restart_confirmed:
                 if not self._restart_requested:
                     self._restart_needed = False

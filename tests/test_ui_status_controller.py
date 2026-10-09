@@ -191,3 +191,18 @@ class RestartRecoveryTests(unittest.TestCase):
         self.assertTrue(finished.wait(2))
         glib.drain()
         self.ctx.window._toast.assert_not_called()
+
+
+    def test_offline_invalidates_confirmation_before_failed_completion(self):
+        self.ctx.tasks = mock.Mock()
+        self.ctx.tasks.run.return_value = True
+        self.controller._maybe_restart(self.old)
+        done = self.ctx.tasks.run.call_args.args[1]
+        self.controller._maybe_restart({"ok": True, "version": self.module.__version__})
+        self.controller._maybe_restart({"ok": False})
+        done(False)
+        self.assertTrue(self.controller._restart_needed)
+        self.assertEqual(self.controller._restart_attempts, 1)
+        self.ctx.window._toast.assert_called_once_with("toast.restart_failed")
+        self.now.return_value = 5
+        self.assertTrue(self.controller._maybe_restart({"ok": False}))
