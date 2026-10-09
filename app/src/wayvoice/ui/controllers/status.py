@@ -3,6 +3,7 @@ import platform
 import os
 import subprocess
 import threading
+import time
 
 from ..widgets.labels import clip_subtitle
 
@@ -32,6 +33,11 @@ class StatusController:
         self.ctx = context
         self._ui_busy = False
         self._restart_requested = False
+        self._restart_attempts = 0
+        self._restart_after = 0.0
+        self._restart_needed = False
+        self._restart_exhausted = False
+        self._restart_confirmed = False
         self._logs_copying = False
         self._logs_button = None
         self._poll_running = False
@@ -84,10 +90,63 @@ class StatusController:
         return (request("status", timeout=0.12), load_config(),
                 self.ctx.integration._missing_required())
 
+    RESTART_LIMIT = 3
+    RESTART_DELAY = 5.0
+
+    def _maybe_restart(self, reply):
+        if reply.get("ok"):
+            self._restart_confirmed = str(reply.get("version") or "") == __version__
+            if self._restart_confirmed:
+                if not self._restart_requested:
+                    self._restart_needed = False
+                    self._restart_attempts = 0
+                    self._restart_after = 0.0
+                    self._restart_exhausted = False
+                return False
+            self._restart_needed = True
+        if not self._restart_needed or self._restart_requested:
+            return False
+        if reply.get("recording") or reply.get("busy"):
+            return False
+        if self._restart_attempts >= self.RESTART_LIMIT:
+            if not self._restart_exhausted:
+                self._restart_exhausted = True
+                self.ctx.window._toast(self.ctx.state.t("toast.restart_exhausted"))
+            return False
+        if time.monotonic() < self._restart_after:
+            return False
+        self._restart_requested = True
+        self._restart_attempts += 1
+        # If the daemon disappeared, restore service without forcing a restart
+        # of a process whose recording/busy state we cannot observe.
+        work = service.restart_daemon if reply.get("ok") else service.start_daemon
+        accepted = self.ctx.tasks.run(work, self._restart_finished,
+                                      lambda exc: self._restart_finished(False, str(exc)))
+        if not accepted:
+            self._restart_requested = False
+        return bool(accepted)
+
+    def _restart_finished(self, ready, detail=""):
+        self._restart_requested = False
+        if self._restart_confirmed:
+            self._restart_needed = False
+            self._restart_attempts = 0
+            self._restart_after = 0.0
+            self._restart_exhausted = False
+            return
+        self._restart_after = time.monotonic() + self.RESTART_DELAY * self._restart_attempts
+        # A successful ping does not prove the new version; the next status does.
+        if not ready:
+            message = self.ctx.state.t("toast.restart_failed")
+            if detail:
+                message += f": {detail}"
+            self.ctx.window._toast(message)
+
     def _apply_status_snapshot(self, snapshot):
         self._poll_running = False
         reply, cfg, missing_deps = snapshot
         self._update_cards(cfg)
+        restarting = self._maybe_restart(reply)
         if not reply.get("ok"):
             self._ui_busy = False
             self.ctx.home.mic_button.set_sensitive(False)
@@ -99,12 +158,7 @@ class StatusController:
             self._set_state_style("offline")
             return GLib.SOURCE_CONTINUE
 
-        daemon_version = str(reply.get("version") or "")
-        if daemon_version != __version__ and not self._restart_requested and not reply.get("recording") and not reply.get("busy"):
-            self._restart_requested = True
-            # Restarting waits for the new daemon to answer, so it must not block the GTK
-            # main loop the polling runs on.
-            threading.Thread(target=service.restart_daemon, daemon=True).start()
+        if restarting:
             return GLib.SOURCE_CONTINUE
 
         engine = reply.get("engine") or {}
