@@ -75,3 +75,35 @@ def delete_confirmation(window, model_id, name, t, confirmed):
     box.append(buttons)
     win.set_child(box)
     win.present()
+
+
+def unsaved_confirmation(window, t, respond):
+    """Navigation confirmation compatible with the supported GTK versions."""
+    win = Gtk.Window(title=t("settings.unsaved_title"), transient_for=window, modal=True)
+    win.set_default_size(490, 180)
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+    for side in ("top", "bottom", "start", "end"):
+        getattr(box, f"set_margin_{side}")(24)
+    box.append(make_label(t("settings.unsaved_body"), wrap=True, xalign=0.5))
+    buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+    buttons.set_halign(Gtk.Align.CENTER)
+    answered = False
+
+    def answer(choice):
+        nonlocal answered
+        if answered:
+            return
+        answered = True
+        win.close()
+        respond(choice)
+
+    for choice, key in (("stay", "settings.stay"), ("leave", "settings.leave_unsaved"), ("save", "settings.save")):
+        button = Gtk.Button(label=t(key))
+        if choice == "save":
+            button.add_css_class("suggested-action")
+        button.connect("clicked", lambda _button, value=choice: answer(value))
+        buttons.append(button)
+    box.append(buttons)
+    win.connect("close-request", lambda *_: answer("stay"))
+    win.set_child(box)
+    win.present()

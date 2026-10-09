@@ -33,6 +33,10 @@ class SettingsController:
         self._setup_running = False
         self._mutations = []
         self._restart_command = None
+        self._baseline_draft = None
+        self._saved_draft = None
+        self._leave_after_save = None
+        self._leave_dialog_open = False
 
 
     def _queue_mutation(self, work, done, failed):
@@ -87,18 +91,12 @@ class SettingsController:
         if hasattr(self.ctx.settings, "engine_setup_btn"):
             self.ctx.settings.engine_setup_btn.set_visible(bool(engine and engine.needs_setup))
 
-    def _save(self, *_args):
-        if self._saving:
-            return
-        preset = self.ctx.models._selected_model_preset()
-        if self._selected_engine_uses_models() and str(preset["id"]) == "__custom__" and not self.ctx.settings.custom_model.get_text().strip():
-            self.ctx.window.toast.add_toast(Adw.Toast(title=self.ctx.state.t("toast.custom_model")))
-            return
+    def _draft_values(self):
         model_id = self.ctx.models._selected_model_id()
         forced = forced_language(model_id)
         language = languages.normalize(forced or self.ctx.settings.language.selected_code())
         new_ui_setting = UI_LANGUAGE_IDS[self.ctx.settings.ui_language.get_selected()]
-        updates = {
+        return {
             "engine": self._selected_engine(),
             "model": model_id,
             "custom_model": self.ctx.settings.custom_model.get_text().strip(),
@@ -121,6 +119,39 @@ class SettingsController:
             "max_recording_sec": RECORD_VALUES[self.ctx.settings.max_recording.get_selected()],
             "ui_language": new_ui_setting,
         }
+
+    def remember_draft(self):
+        self._baseline_draft = self._draft_values()
+
+    def has_unsaved_changes(self):
+        return self._baseline_draft is not None and self._draft_values() != self._baseline_draft
+
+    def confirm_leaving(self, proceed):
+        if self._leave_dialog_open or self._leave_after_save:
+            return
+        from ..dialogs.confirmations import unsaved_confirmation
+        self._leave_dialog_open = True
+
+        def response(choice):
+            self._leave_dialog_open = False
+            if choice == "leave":
+                proceed()
+            elif choice == "save":
+                self._leave_after_save = proceed
+                if not self._save():
+                    self._leave_after_save = None
+
+        unsaved_confirmation(self.ctx.window, self.ctx.state.t, response)
+
+    def _save(self, *_args):
+        if self._saving:
+            return
+        preset = self.ctx.models._selected_model_preset()
+        if self._selected_engine_uses_models() and str(preset["id"]) == "__custom__" and not self.ctx.settings.custom_model.get_text().strip():
+            self.ctx.window.toast.add_toast(Adw.Toast(title=self.ctx.state.t("toast.custom_model")))
+            return
+        updates = self._draft_values()
+        self._saved_draft = dict(updates)
         self._saving = True
         if hasattr(self.ctx.window, "save_button"):
             self.ctx.window.save_button.set_sensitive(False)
@@ -134,8 +165,10 @@ class SettingsController:
             return cfg, ok, msg
 
         self._queue_mutation(work, self._save_finished, self._save_failed)
+        return True
 
     def _save_failed(self, exc):
+        self._leave_after_save = None
         self._saving = False
         if hasattr(self.ctx.window, "save_button"):
             self.ctx.window.save_button.set_sensitive(True)
@@ -147,8 +180,12 @@ class SettingsController:
         if hasattr(self.ctx.window, "save_button"):
             self.ctx.window.save_button.set_sensitive(True)
         self.ctx.state.cfg = cfg
+        if self._saved_draft is not None:
+            self._baseline_draft = dict(self._saved_draft)
+        proceed, self._leave_after_save = self._leave_after_save, None
         new_ui_setting = cfg["ui_language"]
-        if new_ui_setting != self.ctx.state.ui_lang_setting:
+        language_changed = new_ui_setting != self.ctx.state.ui_lang_setting
+        if language_changed and not self.has_unsaved_changes():
             # Restart the UI so the new interface language is applied. The settings
             # binary path is resolved explicitly and passed as $0, so the restart never
             # depends on a login-shell PATH.
@@ -156,9 +193,11 @@ class SettingsController:
             return
         self.ctx.home.hotkey_label.set_text(label_for(str(cfg["shortcut"])))
         self.ctx.status._update_cards()
-        self.ctx.window.toast.add_toast(Adw.Toast(title=self.ctx.state.t("settings.saved") if ok else msg))
+        self.ctx.window.toast.add_toast(Adw.Toast(title=self.ctx.state.t("settings.language_pending" if language_changed else "settings.saved") if ok else msg))
         self.ctx.models._refresh_model_state()
         self._poll_engine_settings()
+        if proceed and not self.has_unsaved_changes():
+            proceed()
 
     def _restart_ui(self):
         restart_cmd, self._restart_command = self._restart_command, None

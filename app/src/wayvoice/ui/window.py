@@ -68,11 +68,13 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         self.toast.add_css_class('window-root')
         self.set_content(self.toast)
         self.save_button.set_visible(False)
+        self._previous_page = self.stack.get_visible_child_name()
         self.stack.connect('notify::visible-child', self._save_button_visibility)
         self.connect('close-request', self._close_requested)
         self.connect('unrealize', self._dispose_ui)
         ctx.preferences._update_engine_visibility()
         ctx.models._sync_model_ui()
+        ctx.preferences.remember_draft()
         self.tasks.idle(ctx.integration._background_start)
         self.tasks.idle(ctx.models._refresh_model_state)
         self.tasks.every(650, ctx.status._poll_status)
@@ -89,6 +91,15 @@ class WayVoiceWindow(Adw.ApplicationWindow):
             Gtk.StyleContext.add_provider_for_display(display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
     def _save_button_visibility(self, *_args):
+        page = self.stack.get_visible_child_name()
+        previous = self._previous_page
+        self._previous_page = page
+        if previous == 'settings' and page != 'settings' and self.context.preferences.has_unsaved_changes():
+            self.stack.set_visible_child_name('settings')
+            def proceed():
+                self._previous_page = None
+                self.stack.set_visible_child_name(page)
+            self.context.preferences.confirm_leaving(proceed)
         self.save_button.set_visible(self.stack.get_visible_child_name() == 'settings')
 
     def _toast(self, title, timeout=3):
