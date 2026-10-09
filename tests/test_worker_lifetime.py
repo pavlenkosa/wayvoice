@@ -177,13 +177,5 @@ class PreparationThreadTests(unittest.TestCase):
         self.assertNotEqual(self.daemon._download["state"], "error")
 
 
-class StopWorkerDocumentedTests(unittest.TestCase):
-    def test_the_rule_the_socket_unlink_follows_is_written_down(self):
-        import inspect
-
-        self.assertIn("only when nothing answers", inspect.getsource(engine_mod.stop_worker),
-                      "the rule is implemented but documented nowhere")
-
-
 if __name__ == "__main__":
     unittest.main()

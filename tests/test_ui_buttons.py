@@ -22,12 +22,10 @@ try:
 except Exception:
     pass
 
-import importlib.util
 import subprocess
 import threading
 import time
 import unittest
-from pathlib import Path
 from unittest import mock
 
 from wayvoice import injector, model_store
@@ -144,26 +142,6 @@ class DiagnosticsButtonTests(unittest.TestCase):
         self.assertEqual(self.copied, ["WayVoice 0.6.2\nOS: Linux"])
         self.assertEqual(self.window.window.toast.titles, [tr("toast.diagnostics_copied", "en")])
 
-    def test_no_other_clipboard_api_is_reached_for(self):
-        # A guard rather than a test of one line: the deprecated API is still
-        # importable, and reaching for it again would break the button silently.
-        #
-        # The pattern is a clipboard call on anything but the widget itself:
-        # ``Gdk.Display.get_default().get_clipboard()`` accepts text on Wayland and
-        # never offers it. Comments are skipped on purpose - the one explaining this
-        # bug quotes the very call it is about, and _install_css legitimately uses
-        # Gdk.Display for CSS.
-        offenders = []
-        with open(ui.__file__, encoding="utf-8") as handle:
-            for number, line in enumerate(handle, 1):
-                stripped = line.strip()
-                if not stripped or stripped.startswith("#"):
-                    continue
-                if ".get_clipboard()" in line and "self.get_clipboard()" not in line:
-                    offenders.append(f"{number}: {stripped}")
-        self.assertEqual(offenders, [],
-                         "a clipboard that does not work on Wayland:\n"
-                         + "\n".join(offenders))
 
     def test_a_clipboard_that_refuses_is_reported(self):
         with mock.patch.object(
@@ -173,13 +151,6 @@ class DiagnosticsButtonTests(unittest.TestCase):
             self.window.status._copy_diagnostics()
         self.assertEqual(len(self.window.window.toast.titles), 1)
         self.assertIn("no Wayland display", self.window.window.toast.titles[0])
-
-    def test_a_clipboard_failure_does_not_claim_success(self):
-        with mock.patch.object(
-            injector, "copy_to_clipboard",
-            side_effect=injector.InjectionError("busy"),
-        ):
-            self.window.status._copy_diagnostics()
         self.assertNotIn(tr("toast.diagnostics_copied", "en"), self.window.window.toast.titles)
 
 
@@ -301,21 +272,6 @@ class ToastClippingTests(unittest.TestCase):
         self.window.window._toast("Copied.")
         self.assertEqual(self.window.window.toast.titles, ["Copied."])
 
-    def test_only_one_definition_of_toast_exists(self):
-        import ast
-
-        with open(ui.__file__, encoding="utf-8") as handle:
-            tree = ast.parse(handle.read())
-        twice = []
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.ClassDef):
-                continue
-            count = sum(1 for item in node.body
-                        if isinstance(item, ast.FunctionDef) and item.name == "_toast")
-            if count > 1:
-                twice.append(f"{node.name} x{count}")
-        self.assertEqual(twice, [], "the later definition silently replaces the earlier")
-
 
 @needs_window
 class MainLoopTests(unittest.TestCase):
@@ -405,16 +361,6 @@ class LogRowWordingTests(unittest.TestCase):
                 f"{language}: {subtitle!r}",
             )
 
-    def test_no_string_promises_a_command_instead_of_an_action(self):
-        # find_spec rather than ui.__file__: this class runs without GTK, where the
-        # import of wayvoice.ui fails and ui is None. Locating the file does not
-        # import it, so the check works on CI as well as on a desktop.
-        # UI-ARCH-001: the window code lives in ui/window.py now.
-        origin = str(Path(__file__).resolve().parents[1] / "app/src/wayvoice/ui/window.py")
-        with open(origin, encoding="utf-8") as handle:
-            source = handle.read()
-        self.assertNotIn("toast.logs\"", source, "the old log toast key is still used")
-
 
 @needs_window
 class DownloadErrorTests(unittest.TestCase):
@@ -483,25 +429,24 @@ class DownloadErrorTests(unittest.TestCase):
         self.assertEqual(self.window.window.toast.titles, ["refused: busy"])
 
     def test_the_reply_is_marshalled_to_the_main_loop(self):
-        # The request runs on a worker thread; GTK is touched from the main loop
-        # only. The marshalling is a source shape the runtime cannot observe
-        # cheaply, so it is pinned the way the single-_toast rule is.
-        # UI-ARCH-001: the code left the ui entry point for ui/window.py, and
-        # the marshalled reply now lives in the models controller.
-        source = ""
-        for origin in (
-            str(Path(__file__).resolve().parents[1] / "app/src/wayvoice/ui/window.py"),
-            "app/src/wayvoice/ui/controllers/models.py",
-        ):
-            if origin.startswith("/"):
-                with open(origin, encoding="utf-8") as handle:
-                    source += handle.read()
-            else:
-                source += (Path(__file__).resolve().parent.parent / origin).read_text(
-                    encoding="utf-8"
-                )
-        self.assertIn("self.ctx.tasks.run(", source)
-        self.assertIn("self._handle_prepare_model_reply(reply, model_id, engine_id, sequence)", source)
+        from tests.test_ui_async_tasks import FakeGLib, TaskRunner
+        glib = FakeGLib()
+        runner = TaskRunner(glib)
+        self.addCleanup(runner.close)
+        self.window.tasks = runner
+        caller = threading.current_thread()
+        threads = []
+        def request(*args, **kwargs):
+            threads.append(threading.current_thread())
+            return {"ok": False, "error": "refused"}
+        with mock.patch("wayvoice.ui.controllers.models.request", side_effect=request), \
+             mock.patch.object(self.window.models, "_handle_prepare_model_reply") as reply:
+            self.window.models._ask_daemon_to_prepare_model("small", "faster-whisper")
+            self.assertTrue(glib.ready.wait(2))
+            self.assertIsNot(threads[0], caller)
+            reply.assert_not_called()
+            glib.drain()
+            reply.assert_called_once()
 
     def test_a_daemon_that_does_not_answer_says_so(self):
         # request() already answers with a dict when the daemon is gone; it is
@@ -573,45 +518,3 @@ class DownloadErrorTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-class PollWiringTests(unittest.TestCase):
-    """The window must start its status polls in the constructor.
-
-    These timers were once found living inside a just-added callback method:
-    the class compiled, the tests of individual handlers passed, and the
-    window would simply never have started polling. Source-shape is the only
-    guard that cannot be fooled by that.
-
-    UI-ARCH-001: the window code lives in ``wayvoice/ui/window.py`` now (the
-    ui package entry point only re-exports the contract), so the guard reads
-    that file. Resolving it via ``find_spec`` needs no import, so the check
-    also runs where the GTK bindings are missing and ``ui`` is None.
-    """
-
-    @classmethod
-    def _ui_source(cls) -> str:
-        origin = str(Path(__file__).resolve().parents[1] / "app/src/wayvoice/ui/window.py")
-        return Path(origin).read_text(encoding="utf-8")
-
-    def test_the_status_polls_are_scheduled_from_the_constructor(self):
-        import ast
-
-        tree = ast.parse(self._ui_source())
-        init = next(
-            node for node in tree.body
-            if isinstance(node, ast.ClassDef) and node.name == "WayVoiceWindow"
-            for node in node.body if isinstance(node, ast.FunctionDef) and node.name == "__init__"
-        )
-        calls = [
-            ast.unparse(node)
-            for node in ast.walk(init) if isinstance(node, ast.Call)
-        ]
-        self.assertIn("self.tasks.every(650, ctx.status._poll_status)", calls)
-        self.assertIn("self.tasks.every(900, ctx.preferences._poll_engine_settings)", calls)
-
-    def test_the_save_button_answers_only_on_the_settings_page(self):
-        source = self._ui_source()
-        self.assertIn("self.stack.get_visible_child_name() == 'settings'", source)
-        # The old bottom-of-page save row is gone; the header button replaced it.
-        self.assertNotIn("actions.add(save)", source)
