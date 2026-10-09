@@ -12,6 +12,7 @@ import tempfile
 import threading
 import time
 import traceback
+import uuid
 from pathlib import Path
 
 from . import __version__
@@ -46,7 +47,7 @@ CLIENT_TIMEOUT = 5.0
 #: Commands answered on the accept loop itself, because they are questions and must
 #: not queue behind work that takes time. ``quit`` belongs here too: it only sets a
 #: flag, and answering it first is what lets the window close cleanly.
-INLINE_COMMANDS = frozenset({"ping", "status", "clear-status", "quit"})
+INLINE_COMMANDS = frozenset({"ping", "status", "clear-status", "clear-text", "quit"})
 
 #: How many commands may wait for the worker at once. A queue that grew without
 #: bound would turn a stuck command into a daemon that accepts requests and answers
@@ -136,6 +137,8 @@ class WayVoiceDaemon:
         self._transcribe_thread: threading.Thread | None = None
         self._transcribe_wav: Path | None = None
         self._pending_asr_cleanup: set[Path] = set()
+        self._model_maintenance = None
+        self._record_delivery_mode = None
         self._record_timer: threading.Timer | None = None
         self._record_started = 0.0
         self._busy_started = 0.0
@@ -199,7 +202,7 @@ class WayVoiceDaemon:
         "already done", which used to leave someone who had just picked a different model
         facing a slow first dictation with nothing having told them it was coming.
         """
-        if self._shutdown.is_set():
+        if self._shutdown.is_set() or self._model_maintenance:
             return ""
         settings = dict(cfg or load_config())
         engine = engine_from_config(settings)
@@ -216,13 +219,15 @@ class WayVoiceDaemon:
             # Asked to warm up a model that is not there.
             return ""
         with self._lock:
-            if self._shutdown.is_set() or self._prepare_running:
+            if self._shutdown.is_set() or self._prepare_running or self._model_maintenance:
                 return ""
             self._prepare_running = True
             self._prepare_cancel.clear()
             phase = "downloading" if download else "warming"
             self._download = {
                 "state": phase,
+                "operation_id": uuid.uuid4().hex,
+                "engine": engine.id,
                 "model": state["model"],
                 "done_bytes": 0,
                 "total_bytes": 0,
@@ -302,6 +307,8 @@ class WayVoiceDaemon:
                 self._download = {
                     "state": str(result.get("state") or "ready"),
                     "model": reported.get("model", ""),
+                    "operation_id": reported.get("operation_id", ""),
+                    "engine": reported.get("engine", ""),
                     "done_bytes": int(result.get("done") or 0),
                     "total_bytes": int(result.get("total") or 0),
                     "error": str(result.get("error") or ""),
@@ -315,25 +322,14 @@ class WayVoiceDaemon:
                 self._prepare_running = False
                 self._prepare_thread = None
 
-    def _cancel_model_prepare(self) -> str:
-        """Stop a running preparation; report which part was actually stopped.
-
-        The two halves are not alike. Cancelling a download stops the transfer and the model
-        is not going to be there; what follows the weights is a read into memory, which cannot
-        be half-done and takes no notice of the flag, so saying "stopped" about that would be
-        a lie the window would wait on.
-        """
+    def _cancel_model_prepare(self, operation_id=None) -> str:
         with self._lock:
-            download = dict(self._download)
-            running = self._prepare_running
-            if not running:
-                phase = "nothing"
-            elif download.get("warming") or download.get("state") == "warming":
-                phase = "warming"
-            else:
-                phase = "download"
-                self._prepare_cancel.set()
-        return phase
+            if operation_id is not None and operation_id != self._download.get("operation_id"):
+                return "stale"
+            if not self._prepare_running:
+                return "nothing"
+            self._prepare_cancel.set()
+            return "warming" if self._download.get("warming") or self._download.get("state") == "warming" else "download"
 
     def _model_report(self, cfg: dict) -> dict:
         """Model state for :meth:`status`, merged with any run in flight."""
@@ -434,7 +430,7 @@ class WayVoiceDaemon:
             for wav in tuple(self._pending_asr_cleanup):
                 self._remove_finished_wav(wav)
 
-    def start_recording(self) -> dict:
+    def start_recording(self, delivery_mode=None) -> dict:
         with self._lock:
             self._retry_asr_cleanup()
             failure = self._reconcile_recorder()
@@ -442,6 +438,8 @@ class WayVoiceDaemon:
                 return {"ok": False, "error": failure}
             if self._shutdown.is_set():
                 return {"ok": False, "error": "Daemon is shutting down."}
+            if self._model_maintenance:
+                return {"ok": False, "error": tr("store.maintenance_busy", self._language())}
             if self.busy:
                 return {
                     "ok": False,
@@ -489,6 +487,7 @@ class WayVoiceDaemon:
                 self.last_warning = ""
                 self._transcribe_cancel.clear()
                 self.recorder.start()
+                self._record_delivery_mode = delivery_mode
                 self._record_started = time.monotonic()
                 self._cancel_record_timer()
                 self._record_timer = threading.Timer(max_seconds, self._auto_stop_recording)
@@ -505,6 +504,7 @@ class WayVoiceDaemon:
                 # Startup owns the take until both recorder and timer are ready.
                 # Roll back even if failure follows opening the microphone.
                 self._cancel_record_timer()
+                self._record_delivery_mode = None
                 self._record_started = 0.0
                 error = str(exc)
                 try:
@@ -530,6 +530,7 @@ class WayVoiceDaemon:
                     self.last_error = str(exc)
                     return {"ok": False, "error": str(exc)}
                 self._record_started = 0.0
+                self._record_delivery_mode = None
                 notify(tr("daemon.recording_cancelled", cfg.get("ui_language")), enabled=cfg.get("notify", True))
                 reset_notification_id()
                 return {"ok": True, "state": "idle"}
@@ -545,7 +546,7 @@ class WayVoiceDaemon:
                 return {"ok": False, "error": str(exc)}
             return {"ok": True, "state": "idle"}
 
-    def stop_recording(self) -> dict:
+    def stop_recording(self, delivery_mode=None) -> dict:
         with self._lock:
             failure = self._reconcile_recorder()
             if failure:
@@ -563,8 +564,12 @@ class WayVoiceDaemon:
             except Exception as exc:
                 self.last_error = str(exc)
                 self._record_started = 0.0
+                if not self.recorder.recording:
+                    self._record_delivery_mode = None
                 return {"ok": False, "error": str(exc)}
             self._record_started = 0.0
+            take_delivery_mode = delivery_mode or getattr(self, "_record_delivery_mode", None)
+            self._record_delivery_mode = None
             self.busy = True
             self._busy_started = time.monotonic()
             self._transcribe_cancel.clear()
@@ -576,7 +581,7 @@ class WayVoiceDaemon:
                     self._busy_started = 0.0
                     self._remove_finished_wav(wav)
                     return {"ok": False, "error": "Daemon is shutting down."}
-                thread = threading.Thread(target=self._transcribe_worker, args=(wav,), daemon=True)
+                thread = threading.Thread(target=self._transcribe_worker, args=(wav,), kwargs={"delivery_mode": take_delivery_mode}, daemon=True)
                 self._transcribe_thread = thread
                 self._transcribe_wav = wav
             thread.start()
@@ -612,17 +617,17 @@ class WayVoiceDaemon:
         """
         self._shutdown.set()
 
-    def toggle(self) -> dict:
+    def toggle(self, delivery_mode=None) -> dict:
         failure = self._reconcile_recorder()
         if failure:
             return {"ok": False, "error": failure}
         if self.recorder.recording:
-            return self.stop_recording()
+            return self.stop_recording(delivery_mode=delivery_mode)
         if self.busy:
             return self.cancel()
-        return self.start_recording()
+        return self.start_recording(delivery_mode=delivery_mode)
 
-    def _transcribe_worker(self, wav: Path) -> None:
+    def _transcribe_worker(self, wav: Path, delivery_mode=None) -> None:
         cfg = {}
         try:
             cfg = load_config()
@@ -652,7 +657,10 @@ class WayVoiceDaemon:
                         enabled=cfg.get("notify", True),
                     )
                     return
-                result = inject(text, cfg)
+                delivery_cfg = dict(cfg)
+                if delivery_mode == "copy":
+                    delivery_cfg["paste_mode"] = "copy"
+                result = inject(text, delivery_cfg)
                 if result.warning:
                     self.last_warning = result.warning
                     notify(result.warning, enabled=cfg.get("notify", True))
@@ -702,8 +710,10 @@ class WayVoiceDaemon:
             return {"ok": False, "state": "shutting_down", "error": "Daemon is shutting down."}
         raw = command.strip()
         name, _, target_json = raw.partition(" ")
-        addressed = name.lower() == "prepare-model" and bool(target_json)
+        addressed = name.lower() in {"prepare-model", "cancel-download", "delete-model"} and bool(target_json)
         command = name.lower() if addressed else raw.lower()
+        if command == "toggle-clipboard":
+            return self.toggle(delivery_mode="copy")
         if command == "toggle":
             return self.toggle()
         if command == "start":
@@ -714,11 +724,17 @@ class WayVoiceDaemon:
             return self.cancel()
         if command == "status":
             return {"ok": True, **self.status()}
+        if command == "clear-text":
+            with self._lock:
+                self.last_text = ""
+            return {"ok": True}
         if command == "clear-status":
             self.last_error = ""
             self.last_warning = ""
             return {"ok": True}
         if command == "prepare-model":
+            if self._model_maintenance:
+                return {"ok": False, "error": tr("store.maintenance_busy", self._language())}
             cfg = dict(load_config())
             if addressed:
                 try:
@@ -745,7 +761,8 @@ class WayVoiceDaemon:
                 # "downloading" for both would promise the user a progress bar
                 # that never moves.
                 return {"ok": True, "state": phase, "model": cfg.get("model"),
-                        "engine": cfg.get("engine", DEFAULT_ENGINE)}
+                        "engine": cfg.get("engine", DEFAULT_ENGINE),
+                        "operation_id": self._download.get("operation_id", "")}
             with self._lock:
                 if self._prepare_running:
                     return {"ok": False, "state": "busy", "model": cfg.get("model"),
@@ -763,23 +780,40 @@ class WayVoiceDaemon:
                 }
             if state["present"]:
                 return {"ok": True, "state": "ready", "model": cfg.get("model"),
-                        "engine": cfg.get("engine", DEFAULT_ENGINE)}
+                        "engine": cfg.get("engine", DEFAULT_ENGINE),
+                        "operation_id": self._download.get("operation_id", "")}
             # Not started: a download is already running, or one just failed.
             download = state["download"]
             return {
                 "ok": False,
                 "error": str(download.get("error") or tr("daemon.model_prepare_busy", cfg.get("ui_language"))),
             }
+        if command == "delete-model":
+            try:
+                target = json.loads(target_json)
+                if not isinstance(target, dict) or set(target) != {"model"} or not isinstance(target["model"], str) or not target["model"].strip():
+                    raise ValueError("Expected a model")
+            except (ValueError, TypeError) as exc:
+                return {"ok": False, "error": str(exc)}
+            from .daemon_models import delete_model
+            return delete_model(self, target["model"])
         if command == "cancel-download":
-            phase = self._cancel_model_prepare()
-            return {
-                "ok": phase != "nothing",
-                "phase": phase,
-                # Kept for a window built against the older reply, which only
-                # knew whether anything was running.
-                "stopped": phase != "nothing",
-            }
+            operation_id = None
+            if addressed:
+                try:
+                    target = json.loads(target_json)
+                    if not isinstance(target, dict) or set(target) != {"operation_id"} or not isinstance(target["operation_id"], str) or not target["operation_id"]:
+                        raise ValueError("Expected operation_id")
+                    operation_id = target["operation_id"]
+                except (ValueError, TypeError) as exc:
+                    return {"ok": False, "error": str(exc)}
+            phase = self._cancel_model_prepare(operation_id)
+            accepted = phase in {"warming", "download"}
+            return {"ok": accepted, "phase": phase, "stopped": False, "cancelling": accepted,
+                    "error": tr("store.cancel_stale", self._language()) if phase == "stale" else ""}
         if command == "engine-setup":
+            if self._model_maintenance:
+                return {"ok": False, "error": tr("store.maintenance_busy", self._language())}
             cfg = load_config()
             engine = engine_from_config(cfg)
             if engine is None:
@@ -994,6 +1028,7 @@ class WayVoiceDaemon:
         recognition.
         """
         self._shutdown.set()
+        self._record_delivery_mode = None
         deadline = time.monotonic() + JOB_DRAIN_TIMEOUT
         self._shutdown_deadline = deadline
         self._cancel_record_timer()

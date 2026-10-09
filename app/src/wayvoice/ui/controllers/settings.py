@@ -1,5 +1,7 @@
 """SettingsController owns its operations; pages own widgets."""
 
+from ..health_presentation import show_operation_error
+
 import subprocess
 
 
@@ -160,7 +162,7 @@ class SettingsController:
             cfg = load_config()
             cfg.update(updates)
             save_config(cfg)
-            ok, msg = apply_shortcut(str(updates["shortcut"]))
+            ok, msg = apply_shortcut(str(updates["shortcut"]), self.ctx.state.ui_lang)
             self._prepare_selected_engine(cfg)
             return cfg, ok, msg
 
@@ -172,10 +174,11 @@ class SettingsController:
         self._saving = False
         if hasattr(self.ctx.window, "save_button"):
             self.ctx.window.save_button.set_sensitive(True)
-        self.ctx.window._toast(str(exc))
+        show_operation_error(self.ctx, exc)
 
     def _save_finished(self, result):
         cfg, ok, msg = result
+        self.ctx.status._action_error = ""
         self._saving = False
         if hasattr(self.ctx.window, "save_button"):
             self.ctx.window.save_button.set_sensitive(True)
@@ -228,17 +231,17 @@ class SettingsController:
         def work():
             cfg = load_config()
             cfg["engine"] = engine_id
-            save_config(cfg)
             return request_engine_setup(engine_from_config(cfg))
 
         self._queue_mutation(work, lambda started: self._setup_finished(engine_id, started), self._setup_failed)
 
     def _setup_failed(self, exc):
         self._setup_running = False
-        self.ctx.window._toast(str(exc))
+        show_operation_error(self.ctx, exc)
         self._poll_engine_settings()
 
     def _setup_finished(self, engine_id, started):
+        self.ctx.status._action_error = ""
         self._setup_running = False
         if started and engine_id == self._selected_engine():
             self.ctx.settings.engine_status_row.set_subtitle(self.ctx.state.t("settings.preparing"))
@@ -261,7 +264,14 @@ class SettingsController:
                 cfg[key] = bool(row.get_active())
         return cfg
 
+    def _refresh_save_state(self):
+        if hasattr(self.ctx.window, "save_button") and self._baseline_draft is not None:
+            dirty = self.has_unsaved_changes()
+            self.ctx.window.save_button.set_label(self.ctx.state.t("settings.save_dirty" if dirty else "settings.save"))
+            self.ctx.window.save_button.set_sensitive(dirty and not self._saving)
+
     def _poll_engine_settings(self):
+        self._refresh_save_state()
         if not self._poll_running:
             self._poll_running = True
             cfg = self._pending_engine_config()
@@ -288,7 +298,9 @@ class SettingsController:
             self.ctx.settings.engine_spinner.set_visible(True)
             self.ctx.settings.engine_spinner.start()
         else:
-            self.ctx.settings.engine_status_row.set_subtitle(str(st.get("message") or self.ctx.state.t("health.not_ready")))
+            key = "settings.engine_needs_setup" if engine and engine.needs_setup else "settings.engine_settings_required"
+            self.ctx.settings.engine_status_row.set_subtitle(self.ctx.state.t(key))
+            self.ctx.settings.engine_status_row.set_tooltip_text(str(st.get("message") or ""))
             self.ctx.settings.engine_spinner.stop()
             self.ctx.settings.engine_spinner.set_visible(False)
             self.ctx.settings.engine_setup_btn.set_visible(bool(engine and engine.needs_setup))

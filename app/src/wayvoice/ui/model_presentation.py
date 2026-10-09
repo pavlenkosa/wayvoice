@@ -25,7 +25,7 @@ def hero_preparation_caption(ctx, model_report) -> tuple[str, str, str] | None:
 
     Reads the same report the settings window paints its download row from.
     Returns ``None`` when the hero has nothing preparation-shaped to say: no
-    report, work on a different model than the one selected here, or an
+    report or an
     error - an error belongs to the settings row and the toast, and quoting
     it in the hero would repeat it every 650 ms.
     """
@@ -40,10 +40,7 @@ def hero_preparation_caption(ctx, model_report) -> tuple[str, str, str] | None:
     if state not in {"downloading", "warming"}:
         return None
     model_id = str(download.get("model") or "")
-    if not model_id or model_id != str(ctx.models._selected_model_id() or ""):
-        # Work on a model other than the one this window names: painting it
-        # here would describe a download the user may have already abandoned
-        # by selecting something else.
+    if not model_id:
         return None
     if state == "warming":
         return (
@@ -77,3 +74,12 @@ def show_hero_preparation(ctx, title: str, caption: str, icon: str) -> None:
     ctx.home.hero_state.set_text(title)
     ctx.home.hero_caption.set_text(caption)
     ctx.home.mic_icon.set_from_icon_name(icon)
+
+
+def show_model_error_details(ctx, error):
+    """Keep backend wording selectable, separate from localized recovery guidance."""
+    if hasattr(ctx.settings, 'model_error_detail'):
+        ctx.settings.model_error_detail.set_text(str(error or ''))
+        ctx.settings.model_error_expander.set_visible(bool(error))
+    elif hasattr(getattr(ctx.settings, 'model_download_row', None), 'set_tooltip_text'):
+        ctx.settings.model_download_row.set_tooltip_text(str(error or ''))

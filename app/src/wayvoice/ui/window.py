@@ -23,7 +23,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         super().__init__(application=app)
         self.set_title('WayVoice')
         self.set_default_size(780, 760)
-        self.set_size_request(640, 620)
+        self.set_size_request(420, 360)
         self.state = UiState(load_config())
         self.tasks = TaskRunner()
         self._close_pending = False
@@ -53,7 +53,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         header.set_title_widget(switcher)
         menu_button = Gtk.MenuButton(icon_name='open-menu-symbolic', tooltip_text=self.t('nav.settings'))
         menu = Gio.Menu()
-        for label, action in (('menu.diagnostics', 'diagnostics'), ('menu.about', 'about'), ('menu.quit', 'quit')):
+        for label, action in (('menu.diagnostics', 'diagnostics'), ('menu.about', 'about'), ('menu.close_settings', 'quit')):
             menu.append(self.t(label), f'win.{action}')
         menu_button.set_menu_model(menu)
         header.pack_end(menu_button)
@@ -111,23 +111,41 @@ class WayVoiceWindow(Adw.ApplicationWindow):
     def _dispose_ui(self, *_args):
         self.tasks.close()
 
+    def _confirm_exit(self, action):
+        if getattr(self, '_exit_confirmed', False):
+            self._exit_confirmed = False
+            return False
+        if not self.context.preferences.has_unsaved_changes():
+            return False
+        def proceed():
+            self._exit_confirmed = True
+            action()
+        self.context.preferences.confirm_leaving(proceed)
+        return True
+
     def _close_requested(self, *_args):
         if self.context.preferences._mutations:
             # An accepted Save must finish; the GTK loop remains responsive.
             self._close_pending = True
+            return True
+        if self._confirm_exit(self.close):
             return True
         self._dispose_ui()
         return False
 
     def _mutations_finished(self):
         if self._quit_pending:
+            self._quit_pending = False
             self._quit()
         elif self._close_pending:
+            self._close_pending = False
             self.close()
 
     def _quit(self, *_args):
         if self.context.preferences._mutations:
             self._quit_pending = True
+            return
+        if self._confirm_exit(self._quit):
             return
         self._dispose_ui()
         app = self.get_application()

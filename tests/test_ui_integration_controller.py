@@ -127,7 +127,8 @@ class DesktopIntegrationResultTests(unittest.TestCase):
         work, done, failed = context.tasks.run.call_args.args
         self.assertEqual(work, controller._apply_desktop_integration_worker)
         done("setup denied")
-        context.window._toast.assert_called_once_with("setup denied")
+        context.window._toast.assert_called_once_with(context.state.t("health.backend_error"))
+        self.assertEqual(context.status._action_error, "setup denied")
 
     def test_repeated_requests_queue_one_followup_even_after_failure(self):
         context = mock.Mock()

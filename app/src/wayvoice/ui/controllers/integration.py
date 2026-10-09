@@ -1,5 +1,7 @@
 """IntegrationController owns its operations; pages own widgets."""
 
+from ..health_presentation import show_operation_error
+
 from ... import deps as deps_mod
 from ... import pkgsys
 from ... import service
@@ -65,12 +67,13 @@ class IntegrationController:
         return detail
 
     def _desktop_integration_finished(self, detail):
+        self.ctx.status._integration_error = str(detail or "")
         self._integration_running = False
         pending = self._integration_pending
         self._integration_pending = False
         try:
             if detail:
-                self.ctx.window._toast(detail)
+                show_operation_error(self.ctx, detail)
         finally:
             if pending:
                 self._apply_desktop_integration()
@@ -126,7 +129,7 @@ class IntegrationController:
     def _dependency_rows_failed(self, exc):
         self._refresh_running = False
         self._refresh_pending = False
-        self.ctx.window._toast(str(exc))
+        show_operation_error(self.ctx, exc)
 
     def _dependency_rows_ready(self, snapshot):
         self._refresh_running = False

@@ -334,7 +334,7 @@ def apply_shortcut_now() -> tuple[bool, str]:
         if systemd_available():
             return True, ""
         cfg = load_config()
-        return apply_shortcut(str(cfg.get("shortcut", "F8")))
+        return apply_shortcut(str(cfg.get("shortcut", "F8")), cfg.get("ui_language"))
     except Exception as exc:
         print(f"WayVoice: could not apply the global shortcut: {exc}", file=sys.stderr)
         return False, str(exc)

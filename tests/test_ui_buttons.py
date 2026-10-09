@@ -56,6 +56,9 @@ class FakeRow:
         self.subtitle = ""
         self.visible = None
 
+    def set_tooltip_text(self, text):
+        self.tooltip = text
+
     def set_title(self, text):
         self.title = text
 
@@ -107,6 +110,13 @@ class DiagnosticsButtonTests(unittest.TestCase):
         self.window.window.toast = FakeToast()
         self.window.status._logs_copying = False
         self.window.status._logs_button = None
+        patcher = mock.patch.object(self.window.status, '_diagnostics_preview',
+            side_effect=lambda report: self.window.status.ctx.tasks.run(
+                lambda: injector.copy_to_clipboard(report, self.window.state.ui_lang),
+                lambda _: self.window.status._diagnostics_finished(None),
+                self.window.status._diagnostics_finished))
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.copied = []
         patcher = mock.patch.object(
             injector, "copy_to_clipboard",
@@ -156,6 +166,9 @@ class DiagnosticsButtonTests(unittest.TestCase):
 @needs_window
 class LogsButtonTests(unittest.TestCase):
     def setUp(self):
+        patcher = mock.patch('wayvoice.ui.diagnostics.service.systemd_available', return_value=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.window = controller_context()
         self.window.state.ui_lang = "en"
         self.window.state.t = lambda key, **kwargs: tr(key, "en", **kwargs)
@@ -277,6 +290,9 @@ class MainLoopTests(unittest.TestCase):
     """Nothing slow may run inside a GTK signal handler."""
 
     def setUp(self):
+        patcher = mock.patch('wayvoice.ui.diagnostics.service.systemd_available', return_value=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.window = controller_context()
         self.window.state.ui_lang = "en"
         self.window.state.t = lambda key, **kwargs: tr(key, "en", **kwargs)
@@ -414,7 +430,8 @@ class DownloadErrorTests(unittest.TestCase):
                          "error": "The Faster-Whisper runtime is not prepared"},
         })
         self.assertTrue(self.window.settings.model_download_row.visible)
-        self.assertIn("runtime is not prepared", self.window.settings.model_download_row.subtitle)
+        self.assertEqual(self.window.settings.model_download_row.subtitle, self.window.state.t("store.download_recovery"))
+        self.assertIn("runtime is not prepared", self.window.settings.model_download_row.tooltip)
 
     def test_refresh_fetch_button_shows_button_after_error_for_same_model(self):
         # A download that failed may succeed on the second press: the network
@@ -433,7 +450,8 @@ class DownloadErrorTests(unittest.TestCase):
         # the real path crosses a worker thread, and asserting on it from here
         # would race the thread instead of testing the handler.
         self.window.models._handle_prepare_model_reply({"ok": False, "error": "refused: busy"})
-        self.assertEqual(self.window.window.toast.titles, ["refused: busy"])
+        self.assertEqual(self.window.window.toast.titles, [self.window.state.t("store.download_recovery")])
+        self.assertEqual(self.window.settings.model_download_row.tooltip, "refused: busy")
 
     def test_the_reply_is_marshalled_to_the_main_loop(self):
         from tests.test_ui_async_tasks import FakeGLib, TaskRunner
@@ -459,7 +477,8 @@ class DownloadErrorTests(unittest.TestCase):
         # request() already answers with a dict when the daemon is gone; it is
         # handled like any other refusal instead of vanishing with the thread.
         self.window.models._handle_prepare_model_reply({"ok": False, "error": "no answer"})
-        self.assertEqual(self.window.window.toast.titles, ["no answer"])
+        self.assertEqual(self.window.window.toast.titles, [self.window.state.t("store.download_recovery")])
+        self.assertEqual(self.window.settings.model_download_row.tooltip, "no answer")
 
     def test_a_local_folder_is_not_toasted_on_every_selection(self):
         # A local path is a perfectly good model: its row already says "not

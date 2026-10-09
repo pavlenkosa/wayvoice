@@ -540,6 +540,7 @@ class DaemonSetupTests(unittest.TestCase):
         ):
             instance = self.daemon.WayVoiceDaemon.__new__(self.daemon.WayVoiceDaemon)
             instance._shutdown = threading.Event()
+            instance._model_maintenance = None
             reply = instance.dispatch("engine-setup")
         return reply, request
 

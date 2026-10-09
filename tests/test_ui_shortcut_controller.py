@@ -60,11 +60,12 @@ class DisableTests(unittest.TestCase):
         window.state.shortcut_binding = "<Control>r"
         window.settings.shortcut_row = FakeRow()
         window.home.hotkey_label = FakeLabel()
+        window.home.hotkey_label.set_text("F8")
         win = FakeWin()
         window.shortcut._disable_shortcut(None, win)
         self.assertEqual(window.state.shortcut_binding, "")
         self.assertEqual(window.settings.shortcut_row.subtitle, "shortcut.disabled")
-        self.assertEqual(window.home.hotkey_label.text, "shortcut.disabled")
+        self.assertEqual(window.home.hotkey_label.text, "F8")
         self.assertTrue(win.closed)
 
 

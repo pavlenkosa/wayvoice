@@ -62,14 +62,16 @@ class ModelTargetTests(unittest.TestCase):
         self.controller._apply_download_state.assert_not_called()
         self.controller._refresh_model_state.assert_called_once()
 
-    def test_selection_change_without_new_request_does_not_paint_old_progress(self):
+    def test_selection_change_keeps_global_progress_named_for_captured_target(self):
         jobs = []
         self.ctx.tasks.run = lambda work, done, failed: jobs.append(done)
         self.controller._selected_model_id = lambda: "small"
         self.controller._ask_daemon_to_prepare_model("small", "faster-whisper")
         self.controller._selected_model_id = lambda: "medium"
         jobs[0]({"ok": True, "state": "downloading"})
-        self.controller._apply_download_state.assert_not_called()
+        self.controller._apply_download_state.assert_called_once()
+        self.assertEqual(self.controller._apply_download_state.call_args.args[0]["download"]["model"], "small")
+        self.assertEqual(self.controller._selected_model_id(), "medium")
 
     def test_incomplete_cached_weights_require_confirmation_before_request(self):
         self.controller._download_confirmation_for = "medium"

@@ -68,7 +68,7 @@ class OwnedJobTests(unittest.TestCase):
         ctx.preferences._poll_engine_settings = mock.Mock()
         entered, release = threading.Event(), threading.Event()
         threads = []
-        def shortcut(binding):
+        def shortcut(binding, language=None):
             threads.append(threading.current_thread())
             entered.set()
             release.wait(2)
@@ -167,7 +167,7 @@ class OwnedJobTests(unittest.TestCase):
             release.wait(2)
             return 'report'
         ctx.status._diagnostics_text = report
-        with mock.patch('wayvoice.ui.controllers.status.injector.copy_to_clipboard') as copy:
+        with mock.patch.object(ctx.status, '_diagnostics_preview') as preview, mock.patch('wayvoice.ui.controllers.status.injector.copy_to_clipboard') as copy:
             ctx.status._copy_diagnostics()
             self.assertTrue(entered.wait(2))
             self.assertIsNot(where[0], threading.current_thread())
@@ -177,9 +177,9 @@ class OwnedJobTests(unittest.TestCase):
             release.set()
             self.assertTrue(glib.ready.wait(2))
             glib.drain()
-            copy.assert_called_once_with('report','en')
-        self.assertFalse(ctx.status._diagnostics_copying)
-        ctx.window._toast.assert_called_once()
+            preview.assert_called_once_with('report')
+            copy.assert_not_called()
+        ctx.window._toast.assert_not_called()
 
     def test_model_refresh_thread_failure_restores_flags(self):
         ctx = self.ctx
@@ -190,7 +190,8 @@ class OwnedJobTests(unittest.TestCase):
         with mock.patch('threading.Thread', side_effect=RuntimeError('no worker')):
             ctx.models._refresh_model_state()
         self.assertFalse(ctx.models._model_refresh_busy)
-        ctx.window._toast.assert_called_once_with('no worker')
+        ctx.window._toast.assert_called_once_with(ctx.state.t('health.backend_error'))
+        self.assertEqual(ctx.status._action_error, 'no worker')
 
     def test_painting_model_state_never_walks_cache(self):
         ctx = self.ctx

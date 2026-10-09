@@ -265,7 +265,7 @@ def main() -> None:
         return
     if command == "apply-shortcut":
         cfg = load_config()
-        ok, msg = apply_shortcut(str(cfg.get("shortcut", "F8")))
+        ok, msg = apply_shortcut(str(cfg.get("shortcut", "F8")), cfg.get("ui_language"))
         if not ok:
             print(msg, file=sys.stderr)
             raise SystemExit(1)

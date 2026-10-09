@@ -162,5 +162,36 @@ class UnsavedNavigationTests(unittest.TestCase):
         self.assertTrue(self.controller.has_unsaved_changes())
 
 
+@needs_window
+class ExitPolicyTests(unittest.TestCase):
+    def test_close_and_quit_require_unsaved_choice(self):
+        for method in ("_close_requested", "_quit"):
+            with self.subTest(method=method):
+                ctx = controller_context()
+                ctx.preferences.has_unsaved_changes = mock.Mock(return_value=True)
+                ctx.preferences.confirm_leaving = mock.Mock()
+                ctx.window._dispose_ui = mock.Mock()
+                getattr(ctx.window, method)()
+                ctx.preferences.confirm_leaving.assert_called_once()
+                ctx.window._dispose_ui.assert_not_called()
+
+    def test_deferred_close_request_is_consumed_once(self):
+        ctx = controller_context()
+        ctx.window._close_pending = True
+        ctx.window.close = mock.Mock()
+        ctx.window._mutations_finished()
+        ctx.window._mutations_finished()
+        ctx.window.close.assert_called_once()
+        self.assertFalse(ctx.window._close_pending)
+
+    def test_prepare_engine_does_not_save_draft(self):
+        ctx = controller_context()
+        ctx.preferences._selected_engine = lambda: "faster-whisper"
+        with mock.patch("wayvoice.ui.controllers.settings.load_config", return_value={"engine": "whisper-cpp"}), mock.patch("wayvoice.ui.controllers.settings.save_config") as save, mock.patch("wayvoice.ui.controllers.settings.request_engine_setup", return_value=False):
+            ctx.preferences._setup_engine()
+        save.assert_not_called()
+        self.assertFalse(ctx.preferences._setup_running)
+
+
 if __name__ == "__main__":
     unittest.main()

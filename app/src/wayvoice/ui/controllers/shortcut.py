@@ -22,7 +22,6 @@ class ShortcutController:
     def _disable_shortcut(self, _button, win):
         self.ctx.state.shortcut_binding = ""
         self.ctx.settings.shortcut_row.set_subtitle(self.ctx.state.t("shortcut.disabled"))
-        self.ctx.home.hotkey_label.set_text(self.ctx.state.t("shortcut.disabled"))
         win.close()
 
     def _capture_shortcut_key(self, _controller, keyval, _keycode, state, win, key_label):
@@ -44,6 +43,5 @@ class ShortcutController:
             self.ctx.state.shortcut_binding = binding
             shown = label_for(binding)
             self.ctx.settings.shortcut_row.set_subtitle(shown)
-            self.ctx.home.hotkey_label.set_text(shown)
             win.close()
         return True

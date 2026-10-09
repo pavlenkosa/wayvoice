@@ -1,16 +1,17 @@
 """ModelsController owns its operations; pages own widgets."""
 
+from ..health_presentation import show_operation_error
+
 import json
 import sys
-import threading
 
 from gi.repository import GLib
 
 from ... import model_store
 from ...models import MODEL_PRESETS, display_name, preset_subtitle
 from ...cli import request
-from ...engine import stop_worker, worker_info
-from ..model_presentation import model_state_text
+from ...engine import worker_info
+from ..model_presentation import model_state_text, show_model_error_details
 
 
 class ModelsController:
@@ -23,6 +24,10 @@ class ModelsController:
         self._download_confirmation_for = None
         self._model_deleting = False
         self._prepare_request_seq = 0
+        self._cancel_pending = False
+        self._held_model = {}
+        self._operation_error = ""
+        self._operation_error_id = None
 
 
     def _selected_model_preset(self):
@@ -119,20 +124,23 @@ class ModelsController:
                 return
             error = str(reply.get("error") or "")
             if error:
-                self.ctx.window._toast(error)
+                self._operation_error = error
+                self._operation_error_id = (self._download_report.get('download') or {}).get('operation_id')
+                show_model_error_details(self.ctx, error)
+                self.ctx.window._toast(self.ctx.state.t('store.download_recovery'))
             return
         model_id = str(model_id or reply.get("model") or "")
         if not model_id:
             return
         name = display_name(model_id)
+        self._operation_error = ""
+        show_model_error_details(self.ctx, "")
         self.ctx.window._toast(self.ctx.state.t("toast.prepare_started", model=name))
         # Optimistic row: the daemon is now fetching or loading the selected
         # model, but the poll that would say so may be up to an interval away.
         # Painting the accepted state at once is the difference between a
         # button that visibly started something and one the user presses
         # again because nothing seemed to happen.
-        if engine_id and engine_id != self.ctx.preferences._selected_engine_object().id:
-            return
         phase = str(reply.get("state") or "ready")
         if phase not in {"downloading", "warming"}:
             self._refresh_model_state()
@@ -142,14 +150,14 @@ class ModelsController:
             "download": {
                 "state": phase,
                 "model": model_id,
+                "operation_id": reply.get("operation_id", ""),
                 "done_bytes": 0,
                 "total_bytes": 0,
                 "error": "",
                 "warming": phase == "warming",
             },
         }
-        if model_id == self._selected_model_id():
-            self._apply_download_state(self._download_report)
+        self._apply_download_state(self._download_report)
 
     def _sync_model_ui(self):
         if not hasattr(self.ctx.settings, "model"):
@@ -177,6 +185,7 @@ class ModelsController:
     def _apply_model_state(self, entry: dict, free_bytes: int, total_bytes: int, held: dict, cache_bytes: int = 0) -> None:
         """Paint the row from a result computed off the UI thread."""
         self._model_entry = dict(entry) if isinstance(entry, dict) else {}
+        self._held_model = dict(held) if isinstance(held, dict) else {}
         text, deletable = model_state_text(self.ctx, entry)
         # The whole hub is shown next to our own total: the cache is shared with other
         # applications, and a number that explains the folder beats one that looks
@@ -187,12 +196,10 @@ class ModelsController:
             cache=model_store.human_size(cache_bytes, self.ctx.state.ui_lang),
             free=model_store.human_size(free_bytes, self.ctx.state.ui_lang),
         ))
-        # A model held in the warm worker cannot go away while the worker keeps it: the
-        # next dictation would claim a model that is not on disk. The button explains
-        # that instead of silently doing nothing.
+        # The confirmation names the worker stop. The daemon checks ownership again
+        # and refuses maintenance while a dictation or preparation is active.
         if deletable and held.get("running") and str(held.get("model") or "") == str(entry.get("id") or ""):
-            deletable = False
-            text = f"{text} · {self.ctx.state.t('store.delete_busy')}"
+            text = f"{text} · {self.ctx.state.t('store.delete_held_hint')}"
         self.ctx.settings.model_state_row.set_subtitle(text)
         self.ctx.settings.model_delete_btn.set_sensitive(deletable)
         # A model that is not there has no button to show; a local folder is greyed out
@@ -214,6 +221,8 @@ class ModelsController:
         report = self._download_report if isinstance(self._download_report, dict) else {}
         download = report.get("download") if isinstance(report.get("download"), dict) else {}
         phase = str(download.get("state") or "idle")
+        if str(download.get("model") or "") != str(entry.get("id") or ""):
+            phase = "idle"
         # Check if the model is a repo model (hub model) and not downloaded
         is_repo_model = str(entry.get("kind") or "") == model_store.KIND_REPO
         is_not_downloaded = not entry.get("inference_ready", entry.get("downloaded"))
@@ -255,6 +264,9 @@ class ModelsController:
         def boundary(value):
             return (value.get("model"), value.get("state"), bool(value.get("warming")))
         self._download_report = report
+        if download.get('operation_id') != self._operation_error_id or download.get('state') in {'ready', 'idle', 'cancelled'}:
+            self._operation_error = ""
+            show_model_error_details(self.ctx, "")
         if boundary(previous) != boundary(download) and (
             download.get("state") in {"ready", "error", "idle", "warming"}
             or download.get("warming")
@@ -265,18 +277,11 @@ class ModelsController:
         # about both what is on disk and what is being done about it.
         self._refresh_fetch_button()
         state = str(download.get("state") or "idle")
-        model_id = self._selected_model_id()
-        if str(download.get("model") or "") != model_id:
-            # Work on a different model than the selected one - the user changed the row
-            # while the old model was still coming down or being loaded. Painting its
-            # bytes, or its warm-up, next to the new model would be a lie, and this has
-            # to come before the warm-up below.
-            self.ctx.settings.model_download_row.set_visible(False)
-            return
+        model_id = str(download.get("model") or "")
         if state == "warming":
             # No download: the model is on disk and is being read into memory so that the
             # first dictation is as fast as the rest.
-            self.ctx.settings.model_download_cancel_btn.set_sensitive(False)
+            self.ctx.settings.model_download_cancel_btn.set_sensitive(not self._cancel_pending)
             self.ctx.settings.model_download_bar.pulse()
             self.ctx.settings.model_download_row.set_title(
                 self.ctx.state.t("store.warming", model=display_name(model_id) if model_id else "")
@@ -288,7 +293,7 @@ class ModelsController:
             done = int(download.get("done_bytes") or 0)
             total = int(download.get("total_bytes") or 0)
             name = display_name(model_id) if model_id else ""
-            self.ctx.settings.model_download_cancel_btn.set_sensitive(True)
+            self.ctx.settings.model_download_cancel_btn.set_sensitive(not self._cancel_pending)
             if download.get("warming"):
                 # The weights are down and the model is going into memory: for a moment
                 # there is nothing to measure, and it would look like a download that
@@ -298,7 +303,7 @@ class ModelsController:
                 self.ctx.settings.model_download_row.set_subtitle(self.ctx.state.t("store.warming_sub"))
                 # A load that cannot be interrupted: offering to stop it would be a button
                 # that reports success and changes nothing.
-                self.ctx.settings.model_download_cancel_btn.set_sensitive(False)
+                self.ctx.settings.model_download_cancel_btn.set_sensitive(not self._cancel_pending)
             elif total > 0:
                 if done > 0:
                     self.ctx.settings.model_download_bar.set_fraction(min(1.0, done / total))
@@ -321,27 +326,41 @@ class ModelsController:
             return
         if state == "error" and str(download.get("error") or ""):
             self.ctx.settings.model_download_bar.set_fraction(0.0)
-            self.ctx.settings.model_download_row.set_title(self.ctx.state.t("store.download_failed"))
-            self.ctx.settings.model_download_row.set_subtitle(str(download.get("error")))
+            self.ctx.settings.model_download_row.set_title(f"{display_name(model_id)} · {self.ctx.state.t('store.download_failed')}")
+            self.ctx.settings.model_download_row.set_subtitle(self.ctx.state.t('store.download_recovery'))
+            show_model_error_details(self.ctx, str(download.get('error')))
             self.ctx.settings.model_download_row.set_visible(True)
             return
         self.ctx.settings.model_download_row.set_visible(False)
 
     def _cancel_model_download(self, *_args) -> None:
-        """Stop a running download through the daemon.
+        if self._cancel_pending:
+            return
+        download = self._download_report.get("download") or {}
+        operation_id = str(download.get("operation_id") or "")
+        if not operation_id:
+            self.ctx.window._toast(self.ctx.state.t("store.cancel_stale"))
+            return
+        self._cancel_pending = True
+        self.ctx.settings.model_download_cancel_btn.set_sensitive(False)
+        self.ctx.settings.model_download_row.set_subtitle(self.ctx.state.t("store.cancel_pending"))
+        command = "cancel-download " + json.dumps({"operation_id": operation_id})
+        self.ctx.tasks.run(lambda: request(command, timeout=5.0), lambda reply: self._cancel_download_ready(reply, operation_id),
+                           lambda exc: self._cancel_download_ready({"ok": False, "error": str(exc)}, operation_id))
 
-        Cancelling is the daemon's job: the download is its child process, and only it can
-        end it without leaving a helper running.
-        """
-        threading.Thread(target=self._cancel_download_worker, daemon=True).start()
-
-    def _cancel_download_worker(self) -> None:
-        try:
-            request("cancel-download", timeout=2.0)
-        except Exception as exc:
-            print(f"WayVoice: could not stop the download: {exc}", file=sys.stderr)
-
-
+    def _cancel_download_ready(self, reply, operation_id=None):
+        self._cancel_pending = False
+        if isinstance(reply, dict) and reply.get("ok") and reply.get("cancelling"):
+            message = self.ctx.state.t("store.cancel_requested")
+        else:
+            error = str(reply.get('error') or '') if isinstance(reply, dict) else str(reply)
+            message = self.ctx.state.t('store.cancel_failed', detail='')
+            if operation_id == (self._download_report.get('download') or {}).get('operation_id'):
+                self._operation_error = error
+                self._operation_error_id = operation_id
+                show_model_error_details(self.ctx, error)
+        self.ctx.window._toast(message)
+        self._apply_download_state(self._download_report)
 
     def _refresh_model_state(self) -> None:
         """Recompute the model row, off the GTK main loop.
@@ -366,7 +385,7 @@ class ModelsController:
     def _model_refresh_failed(self, exc):
         self._model_refresh_busy = False
         self._model_refresh_pending = False
-        self.ctx.window._toast(str(exc))
+        show_operation_error(self.ctx, exc)
 
     def _model_state_worker(self, model_id: str) -> None:
         try:
@@ -408,8 +427,9 @@ class ModelsController:
         if model_store.repo_dir_name(model_id) is None:
             self.ctx.window._toast(self.ctx.state.t("store.refuse_local"))
             return
-        from ..dialogs.confirmations import delete_confirmation
-        delete_confirmation(self.ctx.window, model_id, display_name(model_id), self.ctx.state.t, self._delete_model_confirmed)
+        from ..dialogs.model_delete import delete_confirmation
+        delete_confirmation(self.ctx.window, model_id, display_name(model_id), self.ctx.state.t, self._delete_model_confirmed,
+                            held=bool(self._held_model.get("running") and self._held_model.get("model") == model_id))
 
     def _delete_model_confirmed(self, _button, win, model_id: str) -> None:
         win.close()
@@ -425,18 +445,7 @@ class ModelsController:
                                "ok": False, "error_key": "store.delete_failed", "detail": str(exc)}))
 
     def _delete_model_worker(self, model_id: str) -> None:
-        try:
-            # A warm worker holds the model in memory and may be mid-request, so it is
-            # stopped first: that is what makes the deletion honest rather than a claim.
-            # Best effort - a worker that is not there needs no stopping.
-            held = worker_info()
-            if held.get("running") and str(held.get("model") or "") == model_id:
-                stop_worker()
-            result = model_store.delete(model_id)
-        except model_store.RefusedError as exc:
-            result = {"ok": False, "error_key": exc.key, "detail": exc.detail, "model_id": model_id}
-        except Exception as exc:  # never let a worker kill the process
-            result = {"ok": False, "error_key": "store.delete_failed", "detail": str(exc), "model_id": model_id}
+        result = request("delete-model " + json.dumps({"model": model_id}), timeout=30.0)
         self.ctx.tasks.idle(self._delete_model_ready, result)
 
     def _delete_model_ready(self, result: dict) -> None:

@@ -13,6 +13,8 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import GLib
 
+from .transcript import TranscriptController
+from ..health_presentation import show_operation_error, paint_health, microphone_accessibility
 from ..model_presentation import hero_preparation_caption, show_hero_preparation
 from ... import __version__
 from ... import deps as deps_mod
@@ -25,12 +27,20 @@ from ...config import load_config, number
 from ...engine import engine_from_config, engine_label
 from ...i18n import tr
 from ...models import display_name
-from ...shortcut import label_for
+from ...shortcut import label_for, shortcut_support, manual_command
 
 
 class StatusController:
     def __init__(self, context):
         self.ctx = context
+        self.transcript = TranscriptController(context)
+        self._action_error = ""
+        self._integration_error = ""
+        self._offline_since = None
+        self._last_cause = ""
+        self._accessible_state = None
+        self._shortcut_probe_at = None
+        self._shortcut_support = None
         self._ui_busy = False
         self._restart_requested = False
         self._restart_attempts = 0
@@ -49,7 +59,7 @@ class StatusController:
     JOURNAL_TIMEOUT = 5.0
 
     def _toggle(self, *_args):
-        command = "cancel" if self._ui_busy else "toggle"
+        command = "cancel" if self._ui_busy else "toggle-clipboard"
         self.ctx.tasks.run(
             lambda: request(command, timeout=0.8),
             self._toggle_finished,
@@ -58,7 +68,9 @@ class StatusController:
 
     def _toggle_finished(self, reply):
         if not reply.get("ok"):
-            self.ctx.window._toast(str(reply.get("error") or self.ctx.state.t("toast.dictation_failed")))
+            show_operation_error(self.ctx, reply.get("error") or self.ctx.state.t("toast.dictation_failed"))
+        else:
+            self._action_error = ""
 
     def _update_cards(self, cfg=None):
         cfg = self.ctx.state.cfg if cfg is None else cfg
@@ -70,13 +82,17 @@ class StatusController:
         self.ctx.home.paste_card.set_text({"standard": "Ctrl+V", "terminal": "Ctrl+Shift+V", "copy": self.ctx.state.t("paste.clipboard_short")}.get(str(cfg.get("paste_mode")), "—"))
 
     def _set_state_style(self, state):
+        if state != self._accessible_state:
+            microphone_accessibility(self.ctx, state)
+            self._accessible_state = state
+        style = 'busy' if state == 'preparing' else state
         for css in ("recording", "busy", "ready"):
             self.ctx.home.status_pill.remove_css_class(css)
             self.ctx.home.mic_button.remove_css_class(css)
-        if state in {"recording", "busy", "ready"}:
-            self.ctx.home.status_pill.add_css_class(state)
-        if state in {"recording", "busy"}:
-            self.ctx.home.mic_button.add_css_class(state)
+        if style in {"recording", "busy", "ready"}:
+            self.ctx.home.status_pill.add_css_class(style)
+        if style in {"recording", "busy"}:
+            self.ctx.home.mic_button.add_css_class(style)
 
     def _poll_status(self):
         if not self._poll_running:
@@ -87,11 +103,30 @@ class StatusController:
         return GLib.SOURCE_CONTINUE
 
     def _status_snapshot(self):
-        return (request("status", timeout=0.12), load_config(),
-                self.ctx.integration._missing_required())
+        epoch = self.transcript.epoch
+        reply = request("status", timeout=0.12)
+        reply["_transcript_epoch"] = epoch
+        now = time.monotonic()
+        if self._shortcut_probe_at is None or now - self._shortcut_probe_at >= 5:
+            self._shortcut_support = shortcut_support(self.ctx.state.ui_lang)
+            self._shortcut_probe_at = now
+        reply['shortcut_support'] = self._shortcut_support
+        return (reply, load_config(), self.ctx.integration._missing_required())
 
     RESTART_LIMIT = 3
     RESTART_DELAY = 5.0
+
+    def _retry_service(self, *_args):
+        if self._restart_requested:
+            return
+        self._restart_needed = True
+        self._restart_attempts = 0
+        self._restart_after = 0
+        self._restart_exhausted = False
+        self._restart_confirmed = False
+        if hasattr(self.ctx.home, 'retry_button'):
+            self.ctx.home.retry_button.set_sensitive(False)
+        self._maybe_restart({'ok': False})
 
     def _maybe_restart(self, reply):
         self._restart_confirmed = bool(reply.get("ok")) and str(reply.get("version") or "") == __version__
@@ -137,6 +172,7 @@ class StatusController:
         self._restart_after = time.monotonic() + self.RESTART_DELAY * self._restart_attempts
         # A successful ping does not prove the new version; the next status does.
         if not ready:
+            self._last_cause = detail or self.ctx.state.t("toast.restart_failed")
             message = self.ctx.state.t("toast.restart_failed")
             if detail:
                 message += f": {detail}"
@@ -148,15 +184,30 @@ class StatusController:
         self._update_cards(cfg)
         restarting = self._maybe_restart(reply)
         if not reply.get("ok"):
+            now = time.monotonic()
+            if self._offline_since is None:
+                self._offline_since = now
+            attention = bool(self._integration_error or self._last_cause or now - self._offline_since >= 3)
             self._ui_busy = False
             self.ctx.home.mic_button.set_sensitive(False)
-            self.ctx.home.status_pill.set_text(self.ctx.state.t("status.start"))
-            self.ctx.home.hero_state.set_text(self.ctx.state.t("hero.starting"))
-            self.ctx.home.hero_caption.set_text("")
-            self.ctx.home.health_summary.set_text(self.ctx.state.t("status.waiting"))
-            self.ctx.home.health_detail.set_text("")
+            self.ctx.home.status_pill.set_text(self.ctx.state.t("health.attention" if attention else "status.start"))
+            self.ctx.home.hero_state.set_text(self.ctx.state.t("health.attention" if attention else "hero.starting"))
+            self.ctx.home.hero_caption.set_text(self.ctx.state.t("health.retry_hint") if attention else "")
+            if attention:
+                detail = self._integration_error or self._last_cause or str(reply.get("error") or "")
+                paint_health(self.ctx, detail, 'daemon')
+            else:
+                self.ctx.home.health_summary.set_text(self.ctx.state.t("status.waiting"))
+                paint_health(self.ctx)
+            if hasattr(self.ctx.home, "retry_button"):
+                self.ctx.home.retry_button.set_visible(attention)
+                self.ctx.home.retry_button.set_sensitive(not self._restart_requested)
             self._set_state_style("offline")
             return GLib.SOURCE_CONTINUE
+        self._offline_since = None
+        self._last_cause = ""
+        if hasattr(self.ctx.home, "retry_button"):
+            self.ctx.home.retry_button.set_visible(False)
 
         if restarting:
             return GLib.SOURCE_CONTINUE
@@ -167,11 +218,16 @@ class StatusController:
         recording = bool(reply.get("recording"))
         busy = bool(reply.get("busy"))
         self._ui_busy = busy
-        error = str(reply.get("last_error") or "")
+        error = str(reply.get("last_error") or self._action_error or "")
         warning = str(reply.get("last_warning") or "")
         text = str(reply.get("last_text") or "")
-        shortcut = str(reply.get("shortcut") or label_for(self.ctx.state.shortcut_binding))
+        shortcut = str(reply.get("shortcut") or label_for(str(cfg.get("shortcut", "F8"))))
         self.ctx.home.hotkey_label.set_text(shortcut)
+        support = reply.get('shortcut_support')
+        if support is not None and hasattr(self.ctx.home, 'shortcut_support'):
+            supported, message = support
+            self.ctx.home.shortcut_support.set_text(message)
+            self.ctx.home.shortcut_manual.set_text('' if supported else manual_command())
 
         if recording:
             state = "recording"
@@ -197,22 +253,22 @@ class StatusController:
                 # paints its row, but this window used to keep saying "press and
                 # speak" for the whole wait - an invitation the hot key cannot
                 # honour yet, since starting now answers "model missing".
-                state = "busy"
-                self.ctx.home.mic_button.set_sensitive(True)
+                state = "preparing"
+                self.ctx.home.mic_button.set_sensitive(False)
                 show_hero_preparation(self.ctx, *preparation)
             elif est == "ready":
                 state = "ready"
                 self.ctx.home.mic_button.set_sensitive(True)
                 self.ctx.home.status_pill.set_text(self.ctx.state.t("status.ready"))
                 self.ctx.home.hero_state.set_text(self.ctx.state.t("hero.record"))
-                self.ctx.home.hero_caption.set_text(f"{self.ctx.state.t('shortcut.global')}: {shortcut}")
+                self.ctx.home.hero_caption.set_text(self.ctx.state.t("home.button_clipboard"))
                 self.ctx.home.mic_icon.set_from_icon_name("audio-input-microphone-symbolic")
             else:
                 state = "offline"
                 self.ctx.home.mic_button.set_sensitive(False)
                 self.ctx.home.status_pill.set_text(self.ctx.state.t("status.engine"))
                 self.ctx.home.hero_state.set_text(self.ctx.state.t("hero.not_ready"))
-                self.ctx.home.hero_caption.set_text(str(engine.get("message") or self.ctx.state.t("hero.open_settings")))
+                self.ctx.home.hero_caption.set_text(self.ctx.state.t("hero.open_settings"))
                 self.ctx.home.mic_icon.set_from_icon_name("emblem-system-symbolic")
 
         self._set_state_style(state)
@@ -222,43 +278,25 @@ class StatusController:
         dep_warning = self.ctx.state.t("health.deps_missing", names=", ".join(d.label for d in missing_deps)) if missing_deps else ""
         config_broken = str(reply.get("config_error") or "")
         if config_broken:
-            # Above a warning and below a real error: the daemon works, but on
-            # settings the user did not choose, and they should know that before
-            # they start wondering why their shortcut or model changed.
-            self.ctx.home.health_summary.set_text(self.ctx.state.t("health.warning"))
-            self.ctx.home.health_detail.set_text(clip_subtitle(config_broken))
-            self.ctx.home.health_detail.remove_css_class("error-text")
-            self.ctx.home.health_detail.add_css_class("warning-text")
+            paint_health(self.ctx, config_broken, 'config', warning=True)
         elif error:
-            self.ctx.home.health_summary.set_text(self.ctx.state.t("health.error"))
-            self.ctx.home.health_detail.set_text(error)
-            self.ctx.home.health_detail.remove_css_class("warning-text")
-            self.ctx.home.health_detail.add_css_class("error-text")
+            paint_health(self.ctx, error)
         elif dep_warning:
-            self.ctx.home.health_summary.set_text(self.ctx.state.t("health.warning"))
-            self.ctx.home.health_detail.set_text(dep_warning)
-            self.ctx.home.health_detail.remove_css_class("error-text")
-            self.ctx.home.health_detail.add_css_class("warning-text")
+            paint_health(self.ctx, dep_warning, warning=True)
+        elif self._integration_error:
+            paint_health(self.ctx, self._integration_error, warning=True)
         elif warning:
-            self.ctx.home.health_summary.set_text(self.ctx.state.t("health.warning"))
-            self.ctx.home.health_detail.set_text(warning)
-            self.ctx.home.health_detail.remove_css_class("error-text")
-            self.ctx.home.health_detail.add_css_class("warning-text")
+            paint_health(self.ctx, warning, warning=True)
+        elif est != 'ready':
+            paint_health(self.ctx, str(engine.get('message') or ''), 'backend')
         else:
-            self.ctx.home.health_summary.set_text(self.ctx.state.t("health.ready") if est == "ready" else self.ctx.state.t("health.not_ready"))
-            self.ctx.home.health_detail.set_text("" if est == "ready" else str(engine.get("message") or ""))
-            self.ctx.home.health_detail.remove_css_class("error-text")
-            self.ctx.home.health_detail.remove_css_class("warning-text")
+            paint_health(self.ctx)
+            self.ctx.home.health_summary.set_text(self.ctx.state.t('health.ready'))
 
         if self.ctx.integration._dep_rows:
             self.ctx.integration._refresh_dependency_rows()
 
-        if text:
-            self.ctx.home.last_text.remove_css_class("muted")
-            self.ctx.home.last_text.set_text(text)
-            self.ctx.home.transcript_meta.set_text(self.ctx.state.t("transcript.last"))
-        else:
-            self.ctx.home.transcript_meta.set_text("")
+        self.transcript.paint(text, reply.get('_transcript_epoch'))
         return GLib.SOURCE_CONTINUE
 
     def _language_label(self, value) -> str:
@@ -299,6 +337,8 @@ class StatusController:
             lines.append(f"Config problem: {status.get('config_error')}")
         if isinstance(status, dict) and status.get("last_error"):
             lines.append(f"Last error: {status.get('last_error')}")
+        if self._action_error:
+            lines.append(f"Last UI error: {self._action_error}")
         if isinstance(status, dict) and status.get("last_warning"):
             lines.append(f"Last warning: {status.get('last_warning')}")
         # The whole block is plain English on purpose: it is pasted into bug reports,
@@ -317,13 +357,19 @@ class StatusController:
         if self._diagnostics_copying:
             return
         self._diagnostics_copying = True
-        language = self.ctx.state.ui_lang
-
-        def work():
-            injector.copy_to_clipboard(self._diagnostics_text(), language)
-
-        self.ctx.tasks.run(work, lambda _: self._diagnostics_finished(None),
+        self.ctx.tasks.run(self._diagnostics_text, self._diagnostics_preview,
                            self._diagnostics_finished)
+
+    def _diagnostics_preview(self, report):
+        from ..dialogs.diagnostics import diagnostics_preview
+        self._diagnostics_copying = False
+        def copy():
+            if self._diagnostics_copying:
+                return
+            self._diagnostics_copying = True
+            self.ctx.tasks.run(lambda: injector.copy_to_clipboard(report, self.ctx.state.ui_lang),
+                               lambda _: self._diagnostics_finished(None), self._diagnostics_finished)
+        diagnostics_preview(self.ctx.window, report, self.ctx.state.t, copy)
 
     def _diagnostics_finished(self, problem):
         self._diagnostics_copying = False
@@ -394,21 +440,5 @@ class StatusController:
         return GLib.SOURCE_REMOVE
 
     def _journal_tail(self) -> str:
-        command = ["journalctl", "--user", "-u", "wayvoice.service",
-                   "-n", str(self.JOURNAL_LINES), "--no-pager", "--output=short-iso"]
-        cp = subprocess.run(
-            command,
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=self.JOURNAL_TIMEOUT,
-        )
-        if cp.returncode != 0:
-            # journalctl exits non-zero when the unit has never run, and says why on
-            # stderr; an empty stdout with no reason is the case worth reporting.
-            # SubprocessError rather than RuntimeError, so the caller has one family
-            # to catch for "the program did not give us the log".
-            detail = (cp.stderr or "").strip() or f"exit {cp.returncode}"
-            raise subprocess.SubprocessError(detail)
-        return cp.stdout or ""
+        from ..diagnostics import read_logs
+        return read_logs(self.JOURNAL_LINES, self.JOURNAL_TIMEOUT, self.ctx.state.ui_lang)

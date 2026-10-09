@@ -243,7 +243,7 @@ class PrepareTests(DaemonCase):
         self.assertFalse(reply["ok"])
         self.assertEqual(reply["phase"], "nothing")
 
-    def test_cancelling_a_warm_up_says_it_will_finish_by_itself(self):
+    def test_cancelling_a_warm_up_requests_cancel_without_claiming_completion(self):
         # The load cannot be interrupted, so the answer must not claim that it
         # was stopped: the window would keep waiting for a stop that never came.
         holding = threading.Event()
@@ -262,8 +262,9 @@ class PrepareTests(DaemonCase):
         self.assertTrue(holding.wait(10.0), "the warm-up never started")
         reply = harness.daemon.dispatch("cancel-download")
         self.assertEqual(reply["phase"], "warming")
-        # The flag is not set for a load: there is nothing that could use it.
-        self.assertFalse(harness.daemon._prepare_cancel.is_set())
+        self.assertTrue(harness.daemon._prepare_cancel.is_set())
+        self.assertTrue(reply["cancelling"])
+        self.assertFalse(reply["stopped"])
 
     def test_an_engine_without_models_is_left_alone(self):
         eng, calls = make_engine(present=True)

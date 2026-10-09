@@ -32,7 +32,7 @@ class ToggleTests(unittest.TestCase):
         with mock.patch("wayvoice.ui.controllers.status.request") as request:
             request.return_value = {"ok": True}
             window.status._toggle()
-            request.assert_called_once_with("toggle", timeout=0.8)
+            request.assert_called_once_with("toggle-clipboard", timeout=0.8)
 
     def test_busy_press_cancels_and_a_failure_is_announced(self):
         window = self._window()
@@ -54,7 +54,7 @@ class JournalTailTests(unittest.TestCase):
         window = controller_context()
         window.status.JOURNAL_LINES = StatusController.JOURNAL_LINES
         window.status.JOURNAL_TIMEOUT = StatusController.JOURNAL_TIMEOUT
-        with mock.patch("wayvoice.ui.controllers.status.subprocess.run",
+        with mock.patch("wayvoice.ui.diagnostics.service.systemd_available", return_value=True), mock.patch("wayvoice.ui.controllers.status.subprocess.run",
                         return_value=FakeProcess(1, stderr="boom")):
             from subprocess import SubprocessError
 

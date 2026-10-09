@@ -16,6 +16,7 @@ except Exception:
     pass
 
 import unittest
+from unittest import mock
 
 from wayvoice import model_store
 from wayvoice.i18n import tr
@@ -46,6 +47,9 @@ class FakeRow:
 
     def set_visible(self, value):
         self.visible = value
+
+    def set_tooltip_text(self, text):
+        self.tooltip = text
 
 
 class FakeButton:
@@ -131,11 +135,11 @@ class DownloadRowTests(unittest.TestCase):
         self._apply(self._downloading(done_bytes=1, total_bytes=100))
         self.assertTrue(self.window.settings.model_download_cancel_btn.sensitive)
 
-    def test_cancelling_is_not_offered_while_the_model_is_loading(self):
+    def test_cancelling_is_offered_while_the_model_is_loading(self):
         # Nothing can be interrupted at that point; a button that reports
         # success and changes nothing is worse than no button.
         self._apply(self._downloading(done_bytes=100, total_bytes=100, warming=True))
-        self.assertFalse(self.window.settings.model_download_cancel_btn.sensitive)
+        self.assertTrue(self.window.settings.model_download_cancel_btn.sensitive)
 
     def test_warming_is_its_own_message(self):
         # Nothing is being fetched any more: the weights are down and the model is going
@@ -148,7 +152,19 @@ class DownloadRowTests(unittest.TestCase):
     def test_a_failed_download_shows_the_reason(self):
         self._apply(self._downloading(state="error", error="404 Client Error"))
         self.assertTrue(self.row.visible)
-        self.assertIn("404", self.row.subtitle)
+        self.assertNotIn("404", self.row.subtitle)
+        self.assertIn("404", self.row.tooltip)
+
+    def test_cancel_refusal_keeps_details_across_same_operation_poll(self):
+        report = self._downloading(operation_id='take')
+        self._apply(report)
+        with mock.patch('wayvoice.ui.controllers.models.request', return_value={'ok': False, 'error': 'Raw backend failure'}):
+            self.window.models._cancel_model_download()
+        self.assertIn('Raw backend failure', self.row.tooltip)
+        self._apply(report)
+        self.assertIn('Raw backend failure', self.row.tooltip)
+        self._apply(self._downloading(operation_id='new'))
+        self.assertEqual(self.row.tooltip, '')
 
     def test_a_failure_without_a_reason_is_not_shown(self):
         self._apply(self._downloading(state="error", error=""))
@@ -172,7 +188,7 @@ class DownloadRowTests(unittest.TestCase):
             self._apply(report)
             self.assertFalse(self.row.visible)
 
-    def test_another_models_download_is_not_reported_as_this_row(self):
+    def test_another_models_download_remains_visible_and_named(self):
         self.window.models._selected_model_id = lambda: "small"
         # The report is about the selected model; a download of something else must not
         # be painted next to it.
@@ -181,9 +197,9 @@ class DownloadRowTests(unittest.TestCase):
                                   "done_bytes": 5, "total_bytes": 10,
                                   "error": "", "warming": False},
                      "warming": False})
-        self.assertFalse(self.row.visible)
+        self.assertTrue(self.row.visible)
 
-    def test_another_models_warm_up_is_not_reported_as_this_row_either(self):
+    def test_another_models_warm_up_remains_visible_and_named(self):
         self.window.models._selected_model_id = lambda: "small"
         # The same lie in the other direction: the user picked another model while the
         # old one was still being read into the worker. The warm-up is a branch of its
@@ -193,8 +209,8 @@ class DownloadRowTests(unittest.TestCase):
                                   "done_bytes": 0, "total_bytes": 0,
                                   "error": "", "warming": True},
                      "warming": True})
-        self.assertFalse(self.row.visible)
-        self.assertEqual(self.row.title, "")
+        self.assertTrue(self.row.visible)
+        self.assertIn("Medium", self.row.title)
 
     def test_this_models_own_warm_up_is_still_shown(self):
         # The guard must not swallow the case it was written for.
@@ -439,12 +455,12 @@ class HeroPreparationTests(unittest.TestCase):
             state="error", model="medium", error="404"))
         self.assertIsNone(caption)
 
-    def test_work_on_another_model_is_not_shown(self):
+    def test_work_on_another_model_is_shown_with_its_name(self):
         # The user has already moved the selector away; painting the old
         # download would describe a model this window does not name.
         caption = self._caption_for(self._report(
             state="downloading", model="small", done_bytes=1, total_bytes=2))
-        self.assertIsNone(caption)
+        self.assertIn("Small", caption[0])
 
     def test_idle_reports_nothing(self):
         self.assertIsNone(self._caption_for(self._report()))

@@ -221,7 +221,7 @@ class ApplyShortcutTests(unittest.TestCase):
             with mock.patch.object(service, "load_config", return_value=cfg):
                 with mock.patch.object(service, "apply_shortcut", return_value=(True, "ok")) as apply_shortcut:
                     self.assertEqual(service.apply_shortcut_now(), (True, "ok"))
-        apply_shortcut.assert_called_once_with("F9")
+        apply_shortcut.assert_called_once_with("F9", None)
 
     def test_reports_a_failure_instead_of_raising(self):
         with mock.patch.object(service, "systemd_available", return_value=False):

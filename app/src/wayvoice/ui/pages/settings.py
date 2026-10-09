@@ -27,10 +27,11 @@ class SettingsPage:
         scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         page = Adw.PreferencesPage()
         page.set_halign(Gtk.Align.CENTER)
-        page.set_size_request(640, -1)
-        scroller.set_child(page)
+        clamp = Adw.Clamp(maximum_size=780, tightening_threshold=600)
+        clamp.set_child(page)
+        scroller.set_child(clamp)
 
-        engine_group = Adw.PreferencesGroup(title=self.ctx.state.t("settings.recognition"))
+        engine_group = Adw.PreferencesGroup(title=self.ctx.state.t("settings.recognition"), description=self.ctx.state.t("settings.draft_hint"))
         page.add(engine_group)
         engine_choice_ids, engine_choice_labels = engine_choices()
         self.engine = Adw.ComboRow(title=self.ctx.state.t("settings.engine"))
@@ -107,6 +108,11 @@ class SettingsPage:
         self.model_download_row.add_suffix(self.model_download_cancel_btn)
         self.model_download_row.set_visible(False)
         engine_group.add(self.model_download_row)
+        self.model_error_expander = Gtk.Expander(label=self.ctx.state.t("health.details"))
+        self.model_error_detail = Gtk.Label(xalign=0, wrap=True, selectable=True)
+        self.model_error_expander.set_child(self.model_error_detail)
+        self.model_error_expander.set_visible(False)
+        engine_group.add(self.model_error_expander)
 
         self.model_disk_row = Adw.ActionRow(
             title=self.ctx.state.t("store.storage"),
