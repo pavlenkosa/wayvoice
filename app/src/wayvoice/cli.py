@@ -149,8 +149,8 @@ def _run_setup_user() -> tuple[bool, str]:
         return False, str(exc)
     if proc.returncode == 0:
         return True, ""
-    detail = (proc.stderr or proc.stdout or "").strip().splitlines()
-    return False, detail[-1] if detail else f"setup-user exited with {proc.returncode}"
+    detail = (proc.stderr or proc.stdout or "").strip()
+    return False, detail[:8192] if detail else f"setup-user exited with {proc.returncode}"
 
 
 def _install_deps(args: list[str]) -> None:

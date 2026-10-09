@@ -175,6 +175,13 @@ class SetupUserTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("global shortcut", detail)
 
+    def test_multiline_setup_failure_keeps_cause_and_bounds_diagnostics(self):
+        cause = "schema unavailable\n" + "x" * 9000 + "\n1 step did not complete"
+        ok, detail, _ = self._run_with(subprocess.CompletedProcess(["setup-user"], 1, "", cause))
+        self.assertFalse(ok)
+        self.assertTrue(detail.startswith("schema unavailable\n"))
+        self.assertEqual(len(detail), 8192)
+
     def test_a_successful_script_reports_success(self):
         ok, detail, _run = self._run_with(
             subprocess.CompletedProcess(["setup-user"], 0, "", "")
