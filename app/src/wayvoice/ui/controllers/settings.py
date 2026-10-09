@@ -2,7 +2,6 @@
 
 from ..health_presentation import show_operation_error
 
-import subprocess
 
 
 import gi
@@ -22,7 +21,6 @@ from ...engine import (
     request_engine_setup,
 )
 from ...models import forced_language
-from ...paths import command_path
 from ...shortcut import apply_shortcut, label_for
 from ..settings_values import DEVICES, PASTE_MODES, RECORD_VALUES, TIMEOUT_VALUES, UI_LANGUAGE_IDS
 
@@ -199,10 +197,9 @@ class SettingsController:
         new_ui_setting = cfg["ui_language"]
         language_changed = new_ui_setting != self.ctx.state.ui_lang_setting
         if language_changed and ok and not self.has_unsaved_changes():
-            # Restart the UI so the new interface language is applied. The settings
-            # binary path is resolved explicitly and passed as $0, so the restart never
-            # depends on a login-shell PATH.
-            self._restart_command = command_path("wayvoice-settings")
+            # Replace this window inside the existing application; keep any
+            # independent status indicator alive and avoid a launcher race.
+            self._restart_command = True
             return
         self.ctx.home.hotkey_label.set_text(label_for(str(cfg["shortcut"])))
         self.ctx.status._update_cards()
@@ -213,12 +210,8 @@ class SettingsController:
             proceed()
 
     def _restart_ui(self):
-        restart_cmd, self._restart_command = self._restart_command, None
-        subprocess.Popen(
-            ["/bin/sh", "-c", 'sleep 0.35; exec "$0"', restart_cmd],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
-        )
-        self.ctx.window._quit()
+        self._restart_command = None
+        self.ctx.window.get_application().replace_settings(self.ctx.window)
 
     def _prepare_selected_engine(self, cfg):
         """Prepare the selected engine when it can be prepared and is not ready.

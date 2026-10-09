@@ -709,6 +709,21 @@ _EN.update({'profiles.title': 'Simple recognition choices',
 _RU.update({"settings.saved_warning": "Настройки сохранены. Для подготовки или клавиши нужны дополнительные действия; причина доступна на главной."})
 _EN.update({"settings.saved_warning": "Settings saved. Setup or shortcut needs attention; details are available on Home."})
 
+_RU.update({'indicator.title': 'WayVoice — индикатор',
+ 'indicator.open': 'Открыть индикатор',
+ 'indicator.limit': 'Обычное окно состояния. Размещение и перекрытие управляются рабочим столом. '
+                    'Закрытие окна не останавливает WayVoice.',
+ 'indicator.ready': 'Используйте настроенную горячую клавишу в нужном приложении.',
+ 'indicator.processing': 'Распознаётся запись. Для отмены откройте главную страницу.',
+ 'indicator.preparing': 'Идёт загрузка или подготовка модели.'})
+_EN.update({'indicator.title': 'WayVoice — indicator',
+ 'indicator.open': 'Open indicator',
+ 'indicator.limit': 'A normal status window. Placement and occlusion are controlled by your '
+                    'desktop. Closing it does not stop WayVoice.',
+ 'indicator.ready': 'Use your configured shortcut in the target application.',
+ 'indicator.processing': 'Recognizing the recording. Open Home to cancel.',
+ 'indicator.preparing': 'Downloading or preparing a model.'})
+
 _TRANSLATIONS = {"ru": _RU, "en": _EN}
 
 

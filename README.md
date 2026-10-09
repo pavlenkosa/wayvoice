@@ -70,6 +70,15 @@ The repository includes a Flatpak manifest at [`io.github.stepan.WayVoice.json`]
 
 Prebuilt release assets are currently published on the [Releases](https://github.com/pavlenkosa/wayvoice/releases) page.
 
+## Compact status indicator
+
+Choose **Open indicator** in the WayVoice menu, or run `wayvoice-settings --indicator`.
+It shows recording, recognition, preparation and attention states without showing your
+transcript. You can close Settings and keep this window open; closing the indicator
+stops its monitoring, not the background daemon. Status updates never raise the window
+or request activation. It is a normal window: placement, focus on explicit opening,
+occlusion and any always-on-top option are controlled by your desktop.
+
 ## How it works
 
 1. Open WayVoice and choose a speech-recognition engine and model.
