@@ -71,6 +71,7 @@ class WorkerVersionTests(unittest.TestCase):
             "version": __version__,
             "request_status": True,
             "warm_recovery": True,
+            "request_completion": True,
             "config": {"model": "small", "device": "auto", "beam_size": 5, "vad": True},
         }
         self.assertTrue(_worker_settings_match(reply, {"model": "small"}))

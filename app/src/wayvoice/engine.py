@@ -52,6 +52,7 @@ WORKER_RETRY_BACKOFF = 60.0
 _job_lock = Lock()
 _job_procs: dict[subprocess.Popen, Event | None] = {}
 _worker_jobs: dict[Event, int] = {}
+_unresolved_worker_jobs: dict[Event | None, set[tuple[int, str]]] = {}
 
 _worker_lock = Lock()
 #: Guards the reader threads' line buffers of a running download.
@@ -534,7 +535,7 @@ def _worker_guard(event):
 def cancel_jobs(*events):
     """Snapshot active worker ownership before cancelled waiters can unwind."""
     with _job_lock:
-        active_worker = any(owner in _worker_jobs for owner in events)
+        active_worker = any(owner in _worker_jobs or owner in _unresolved_worker_jobs for owner in events)
         for event in events:
             event.set()
         return active_worker
@@ -545,10 +546,18 @@ def stop_jobs(*events, deadline=None, active_worker=False):
     with _job_lock:
         procs = [proc for proc, event in _job_procs.items()
                  if any(event is owner for owner in events)]
-        active_worker = active_worker or any(owner in _worker_jobs for owner in events)
+        current_worker = any(owner in _worker_jobs for owner in events)
+        unresolved = {identity for owner, identities in _unresolved_worker_jobs.items()
+                      if any(owner is event for event in events) for identity in identities}
+        active_worker = current_worker or (active_worker and not unresolved)
     for proc in procs:
         grace = 1.5 if deadline is None else min(1.5, max(0.0, (deadline - time.monotonic()) / 2))
         _terminate_process(proc, timeout=grace)
+    for identity in unresolved:
+        grace = 0.5 if deadline is None else max(0.0, (deadline - time.monotonic()) / 2)
+        stop_worker(timeout=grace, expected_identity=identity)
+        if _worker_identity(identity[0]) != identity or not _pid_alive(identity[0]):
+            _forget_unresolved_worker(identity)
     if active_worker:
         grace = 2.0 if deadline is None else max(0.0, (deadline - time.monotonic()) / 2)
         stop_worker(timeout=grace)
@@ -751,7 +760,7 @@ def _worker_settings_match(reply: dict[str, Any], cfg: dict[str, Any]) -> bool:
     """
     remote_version = str(reply.get("version") or "")
     if remote_version and (remote_version != __version__ or reply.get("request_status") is not True
-                           or reply.get("warm_recovery") is not True):
+                           or reply.get("warm_recovery") is not True or reply.get("request_completion") is not True):
         return False
     remote = reply.get("config")
     if not isinstance(remote, dict):
@@ -971,6 +980,7 @@ def ensure_worker(cfg: dict[str, Any], cancel_event: Event | None = None) -> boo
     with _worker_guard(cancel_event):
         if cancel_event is not None and cancel_event.is_set():
             raise TranscriptionCancelled("Transcription cancelled")
+        _retry_unresolved_workers()
         _reap_workers()
         reply = _worker_ping(path)
         if reply is not None:
@@ -1015,17 +1025,35 @@ def _worker_send_cancel(request_id: str) -> None:
         pass
 
 
-def _recover_worker_request(request_id, identity):
+def _forget_unresolved_worker(identity):
+    with _job_lock:
+        for owner in list(_unresolved_worker_jobs):
+            _unresolved_worker_jobs[owner].discard(identity)
+            if not _unresolved_worker_jobs[owner]:
+                del _unresolved_worker_jobs[owner]
+
+
+def _retry_unresolved_workers():
+    with _job_lock:
+        identities = {identity for owned in _unresolved_worker_jobs.values() for identity in owned}
+    for identity in identities:
+        stop_worker(timeout=0.5, expected_identity=identity)
+        if _worker_identity(identity[0]) == identity and _pid_alive(identity[0]):
+            raise RuntimeError("Previous worker request is still running; automatic retry was blocked.")
+        _forget_unresolved_worker(identity)
+
+
+def _recover_worker_request(request_id, identity, cancel_event=None):
     """Retire only the instance still executing this abandoned request."""
     if identity is None or _worker_identity(identity[0]) != identity:
-        return
+        return True
     try:
         status = _worker_call({"cmd": "request-status", "request_id": request_id}, WORKER_PING_TIMEOUT)
     except (OSError, ValueError, TimeoutError):
         status = None
     if isinstance(status, dict) and status.get("pid") == identity[0] and status.get("request_id") == request_id:
-        if status.get("state") in {"queued", "finished"}:
-            return
+        if status.get("state") == "finished" or (status.get("state") == "queued" and status.get("cancelled") is True):
+            return True
     # Startup may own this lock for seconds. Process identity makes retirement
     # safe without waiting indefinitely; only the lock owner mutates endpoints.
     acquired = _worker_lock.acquire(timeout=WORKER_POLL_INTERVAL)
@@ -1034,6 +1062,33 @@ def _recover_worker_request(request_id, identity):
     finally:
         if acquired:
             _worker_lock.release()
+    if _worker_identity(identity[0]) != identity or not _pid_alive(identity[0]):
+        _forget_unresolved_worker(identity)
+        return True
+    with _job_lock:
+        _unresolved_worker_jobs.setdefault(cancel_event, set()).add(identity)
+    return False
+
+
+def _recover_lost_worker_request(request_id, identity, deadline=None, cancel_event=None):
+    """Keep ownership after socket loss until completion or bounded retirement."""
+    if deadline is None:
+        _worker_send_cancel(request_id)
+        deadline = time.monotonic() + WORKER_CANCEL_GRACE
+    while time.monotonic() < deadline:
+        if identity is None or _worker_identity(identity[0]) != identity:
+            return True
+        remaining = max(0.001, deadline - time.monotonic())
+        try:
+            status = _worker_call({"cmd": "request-status", "request_id": request_id},
+                                  min(WORKER_PING_TIMEOUT, remaining))
+        except (OSError, ValueError, TimeoutError):
+            status = None
+        if isinstance(status, dict) and status.get("pid") == identity[0] and status.get("request_id") == request_id:
+            if status.get("state") == "finished":
+                return True
+        time.sleep(min(WORKER_POLL_INTERVAL, max(0.0, deadline - time.monotonic())))
+    return _recover_worker_request(request_id, identity, cancel_event)
 
 
 def _worker_request(payload: dict[str, Any], request_id: str, timeout: float, cancel_event: Event | None) -> dict[str, Any]:
@@ -1052,18 +1107,29 @@ def _worker_request(payload: dict[str, Any], request_id: str, timeout: float, ca
             sock.connect(str(worker_socket_path()))
             peer_pid = struct.unpack("3i", sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))[0]
             identity = _worker_identity(peer_pid)
+            if identity is None:
+                raise WorkerUnavailable("worker identity cannot be verified")
             try:
                 health = _worker_call({"cmd": "request-status", "request_id": request_id}, WORKER_PING_TIMEOUT)
             except (OSError, ValueError, TimeoutError) as exc:
                 raise WorkerUnavailable("worker recovery protocol is unavailable") from exc
             if not (health.get("ok") and health.get("pid") == peer_pid
                     and health.get("request_id") == request_id
-                    and health.get("state") in {"queued", "running", "finished"}
+                    and health.get("state") in {"queued", "running", "finished", "unknown"}
+                    and health.get("request_completion") is True
                     and (payload.get("cmd") != "warm" or health.get("warm_recovery") is True)):
                 raise WorkerUnavailable("worker does not support request recovery")
             if cancel_event is not None and cancel_event.is_set():
                 raise TranscriptionCancelled("Transcription cancelled")
-            sock.sendall((json.dumps(payload) + "\n").encode("utf-8"))
+            try:
+                sock.sendall((json.dumps(payload) + "\n").encode("utf-8"))
+            except OSError as exc:
+                resolved = _recover_lost_worker_request(request_id, identity, cancel_event=cancel_event)
+                if cancel_event is not None and cancel_event.is_set():
+                    raise TranscriptionCancelled("Transcription cancelled") from exc
+                if not resolved:
+                    raise RuntimeError("Worker request is still running; fallback was blocked.") from exc
+                raise WorkerUnavailable(f"worker send failed: {exc}") from exc
             started = time.monotonic()
             cancel_deadline: float | None = None
             failure = None
@@ -1078,23 +1144,29 @@ def _worker_request(payload: dict[str, Any], request_id: str, timeout: float, ca
                     cancel_deadline = time.monotonic() + WORKER_CANCEL_GRACE
                     failure = TranscriptionTimeout(f"Transcription exceeded {int(timeout)} seconds")
                 if cancel_deadline is not None and time.monotonic() >= cancel_deadline:
-                    _recover_worker_request(request_id, identity)
+                    _recover_worker_request(request_id, identity, cancel_event)
                     raise failure
                 try:
                     chunk = sock.recv(65536)
                 except TimeoutError:
                     continue
                 except OSError as exc:
+                    resolved = _recover_lost_worker_request(request_id, identity, cancel_deadline, cancel_event)
                     if failure is not None:
                         raise failure
                     if cancel_event is not None and cancel_event.is_set():
                         raise TranscriptionCancelled("Transcription cancelled") from exc
+                    if not resolved:
+                        raise RuntimeError("Worker request is still running; fallback was blocked.") from exc
                     raise WorkerUnavailable(f"worker connection failed: {exc}") from exc
                 if not chunk:
+                    resolved = _recover_lost_worker_request(request_id, identity, cancel_deadline, cancel_event)
                     if failure is not None:
                         raise failure
                     if cancel_event is not None and cancel_event.is_set():
                         raise TranscriptionCancelled("Transcription cancelled")
+                    if not resolved:
+                        raise RuntimeError("Worker request is still running; fallback was blocked.")
                     raise WorkerUnavailable("worker closed the connection")
                 data.extend(chunk)
                 if data.endswith(b"\n"):
@@ -1181,6 +1253,13 @@ def _transcribe_faster(audio: Path, cfg: dict[str, Any], cancel_event: Event | N
     runtime_python = faster_runtime() / "bin/python"
     if not runtime_python.exists():
         raise RuntimeError("Faster-Whisper is not ready")
+    with _job_lock:
+        unresolved = bool(_unresolved_worker_jobs)
+    if unresolved:
+        with _worker_guard(cancel_event):
+            if cancel_event is not None and cancel_event.is_set():
+                raise TranscriptionCancelled("Transcription cancelled")
+            _retry_unresolved_workers()
     if bool(cfg.get("engine_worker", True)):
         # The warm worker only takes the model load off the critical path. When it
         # is unusable we fall back to the one-shot runner; an error it reported is

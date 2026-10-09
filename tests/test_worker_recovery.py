@@ -1,5 +1,6 @@
 """Bounded recovery against a real local fake worker; no model or microphone."""
 import json
+import itertools
 import os
 import socket
 import subprocess
@@ -18,7 +19,7 @@ SERVER = '''
 import json,os,signal,socket,sys,threading,time
 path,mode=sys.argv[1:3]
 signal.signal(signal.SIGTERM, signal.SIG_IGN)
-active=set(); events={}
+active=set(); events={}; completed=set()
 s=socket.socket(socket.AF_UNIX);s.bind(path);s.listen()
 def serve(c):
     try:
@@ -27,13 +28,20 @@ def serve(c):
             if r in events: events[r].set()
             reply={'ok':True}
         elif cmd=='request-status':
-            reply={'ok':True,'pid':os.getpid(),'request_id':r,'state':'running' if r in active else 'finished','warm_recovery':True}
+            reply={'ok':True,'pid':os.getpid(),'request_id':r,'state':'running' if r in active else ('finished' if r in completed else 'unknown'),'warm_recovery':True,'request_completion':True,'cancelled':r in events and events[r].is_set()}
         elif cmd=='ping': reply={'ok':True}
         else:
+            if mode=='drop-delayed': c.close(); time.sleep(0.04)
             active.add(r);events[r]=threading.Event()
-            if mode=='hang': threading.Event().wait()
+            if mode in ('hang','drop-delayed'): threading.Event().wait()
+            elif mode=='drop-on-cancel':
+                events[r].wait(); c.close(); threading.Event().wait()
+            elif mode=='drop-running':
+                c.close(); threading.Event().wait()
+            elif mode=='drop-finished':
+                active.discard(r); completed.add(r); c.close(); return
             elif mode=='cooperate': events[r].wait(2)
-            active.discard(r)
+            active.discard(r); completed.add(r)
             reply={'ok':True,'request_id':'foreign' if mode=='wrong-id' else r,'text':'late text','warm':cmd=='warm'}
         c.sendall((json.dumps(reply)+'\\n').encode())
     finally: c.close()
@@ -52,6 +60,8 @@ class WorkerRecoveryTests(unittest.TestCase):
         for name, value in [('worker_socket_path', self.path), ('worker_pid_path', self.pidfile)]:
             p = mock.patch.object(engine, name, return_value=value)
             p.start(); self.addCleanup(p.stop)
+        p = mock.patch.object(engine, '_unresolved_worker_jobs', {})
+        p.start(); self.addCleanup(p.stop)
         p = mock.patch.object(engine, 'WORKER_CANCEL_GRACE', 0.08)
         p.start(); self.addCleanup(p.stop)
         p = mock.patch.object(engine, 'WORKER_POLL_INTERVAL', 0.02)
@@ -142,8 +152,8 @@ class WorkerRecoveryTests(unittest.TestCase):
         sock.recv.side_effect = OSError('connection reset')
         with mock.patch.object(engine.socket, 'socket', return_value=sock), \
              mock.patch.object(engine, '_worker_send_cancel'), \
-             mock.patch.object(engine, '_worker_call', return_value={'ok':True,'pid':os.getpid(),'request_id':'take','state':'finished'}), \
-             mock.patch.object(engine.time, 'monotonic', side_effect=[0.0, 1.0, 1.0, 1.0]):
+             mock.patch.object(engine, '_worker_call', return_value={'ok':True,'pid':os.getpid(),'request_id':'take','state':'finished','request_completion':True}), \
+             mock.patch.object(engine.time, 'monotonic', side_effect=itertools.chain([0.0, 1.0, 1.0, 1.0], itertools.repeat(1.0))):
             with self.assertRaises(engine.TranscriptionTimeout): self.request(timeout=0.05)
         sock.close.assert_called_once()
 
@@ -151,6 +161,7 @@ class WorkerRecoveryTests(unittest.TestCase):
         proc=self.worker('instant')
         identity=engine._worker_identity(proc.pid)
         with mock.patch.object(engine, 'stop_worker') as stop:
+            engine._worker_transcribe({'cmd':'transcribe','request_id':'finished'}, 'finished', 2, None)
             engine._recover_worker_request('finished', identity)
         stop.assert_not_called()
         self.assertIsNone(proc.poll())
@@ -187,7 +198,7 @@ class QueueCancellationTests(unittest.TestCase):
         t=threading.Thread(target=lambda: result.append(fw_worker._dispatch({'cmd':'transcribe','request_id':'queued'}, None, None, state)))
         t.start()
         deadline=time.monotonic()+1
-        while state.request_status('queued')=='finished' and time.monotonic()<deadline:time.sleep(0.005)
+        while state.request_status('queued')=='unknown' and time.monotonic()<deadline:time.sleep(0.005)
         self.assertEqual(state.request_status('queued'),'queued')
         state.cancel('queued')
         t.join(timeout=1)

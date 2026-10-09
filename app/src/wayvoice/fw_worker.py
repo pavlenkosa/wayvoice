@@ -241,6 +241,7 @@ def ping_reply(cache: ModelCache, config: WorkerConfig) -> dict[str, Any]:
         "version": __version__,
         "request_status": True,
         "warm_recovery": True,
+        "request_completion": True,
         "model": config.model,
         "device": device,
         "compute_type": compute_type_for(device),
@@ -384,6 +385,7 @@ class _WorkerState:
         self._lock = threading.Lock()
         self._active: dict[str, threading.Event] = {}
         self._running: set[str] = set()
+        self._finished: dict[str, float] = {}
         self._early: dict[str, float] = {}
         #: Work that is not a cancellable request - a model load.
         self._holding = 0
@@ -430,7 +432,14 @@ class _WorkerState:
         with self._lock:
             if request_id in self._running:
                 return "running"
-            return "queued" if request_id in self._active else "finished"
+            if request_id in self._active:
+                return "queued"
+            return "finished" if request_id in self._finished else "unknown"
+
+    def request_cancelled(self, request_id: str) -> bool:
+        with self._lock:
+            event = self._active.get(request_id)
+            return event is not None and event.is_set()
 
     def mark_running(self, request_id: str) -> None:
         with self._lock:
@@ -440,6 +449,10 @@ class _WorkerState:
         with self._lock:
             self._active.pop(request_id, None)
             self._running.discard(request_id)
+            self._finished[request_id] = self._clock()
+            # A bounded completion history distinguishes unseen from completed IDs.
+            if len(self._finished) > 256:
+                self._finished.pop(next(iter(self._finished)))
             self._expire()
 
     def cancel(self, request_id: str) -> bool:
@@ -530,6 +543,7 @@ def _dispatch(payload: Any, cache: ModelCache, config: WorkerConfig, state: _Wor
     if command == "request-status":
         request_id = str(payload.get("request_id") or "")
         return {"ok": True, "pid": os.getpid(), "request_id": request_id, "warm_recovery": True,
+                "request_completion": True, "cancelled": state.request_cancelled(request_id),
                 "state": state.request_status(request_id)}
     if command == "ping":
         # Never blocked and never waits for the lock: this is how the daemon checks

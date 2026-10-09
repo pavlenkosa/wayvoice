@@ -98,7 +98,7 @@ class AddressedWarmDispatchTests(unittest.TestCase):
                 {'cmd': 'warm', 'request_id': 'queued-warm'}, None, None, state)))
             thread.start()
             deadline = time.monotonic() + 1
-            while state.request_status('queued-warm') == 'finished' and time.monotonic() < deadline:
+            while state.request_status('queued-warm') == 'unknown' and time.monotonic() < deadline:
                 time.sleep(0.005)
             self.assertEqual(state.request_status('queued-warm'), 'queued')
             state.cancel('queued-warm')
