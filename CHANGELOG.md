@@ -1,9 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.7.1 — 2026-10-11
 
 - Add a local personal dictionary with whole-phrase text replacements, a draft preview and an enable switch.
-
 - Add saved microphone selection, a short microphone level check without audio storage, and optional recording sounds.
 
 ## 0.7.0 — 2026-10-11
