@@ -996,6 +996,36 @@ _EN.update({'daemon.text_copied': 'Text copied to clipboard',
  'update.failed': 'The update could not be completed. See technical details or try again.',
  'update.retry': 'Try again'})
 
+
+_RU.update({'audio.title': 'Звук',
+ 'audio.hint': 'Смена микрофона применяется после сохранения. Обновите список, чтобы найти '
+               'подключённые устройства.',
+ 'audio.device': 'Микрофон',
+ 'audio.default': 'По умолчанию в системе',
+ 'audio.missing': 'Недоступен: {name}',
+ 'audio.refresh': 'Обновить список микрофонов',
+ 'audio.check': 'Проверить микрофон',
+ 'audio.check_hint': 'Короткая запись выполняется только по запросу. Звук не сохраняется.',
+ 'audio.listening': 'Слушаю… Скажите что-нибудь.',
+ 'audio.silent': 'Звук не обнаружен. Проверьте устройство и отключение микрофона.',
+ 'audio.detected': 'Звук обнаружен. Полоса показывает пиковый уровень записи.',
+ 'audio.cues': 'Звуковые сигналы записи',
+ 'audio.cues_hint': 'Короткие сигналы при начале, завершении и отмене записи.'})
+_EN.update({'audio.title': 'Audio',
+ 'audio.hint': 'Microphone changes apply after saving. Refresh the list to find connected '
+               'devices.',
+ 'audio.device': 'Microphone',
+ 'audio.default': 'System default',
+ 'audio.missing': 'Unavailable: {name}',
+ 'audio.refresh': 'Refresh microphones',
+ 'audio.check': 'Check microphone',
+ 'audio.check_hint': 'Records a short sample only when requested. Audio is not saved.',
+ 'audio.listening': 'Listening… Speak now.',
+ 'audio.silent': 'No sound detected. Check the device and mute switch.',
+ 'audio.detected': 'Sound detected. The bar shows the sample peak.',
+ 'audio.cues': 'Recording sounds',
+ 'audio.cues_hint': 'Short sounds when recording starts, stops or is cancelled.'})
+
 for _code in UI_LANGUAGE_NAMES:
     if _code not in _TRANSLATIONS:
         _TRANSLATIONS[_code] = json.loads(

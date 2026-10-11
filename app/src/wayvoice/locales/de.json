@@ -430,5 +430,18 @@
   "update.auto": "Automatisch nach Updates suchen",
   "update.auto_hint": "GitHub beim Öffnen und alle 6 Stunden prüfen, solange die Oberfläche geöffnet ist. Keine automatischen Downloads oder Installationen.",
   "update.notice": "WayVoice {version} ist verfügbar",
-  "update.open": "Aktualisieren…"
+  "update.open": "Aktualisieren…",
+  "audio.title": "Audio",
+  "audio.hint": "Mikrofonänderungen gelten nach dem Speichern. Aktualisieren Sie die Liste, um angeschlossene Geräte zu finden.",
+  "audio.device": "Mikrofon",
+  "audio.default": "Systemstandard",
+  "audio.missing": "Nicht verfügbar: {name}",
+  "audio.refresh": "Mikrofonliste aktualisieren",
+  "audio.check": "Mikrofon prüfen",
+  "audio.check_hint": "Eine kurze Aufnahme erfolgt nur auf Anfrage. Audio wird nicht gespeichert.",
+  "audio.listening": "Hört zu… Sprechen Sie jetzt.",
+  "audio.silent": "Kein Ton erkannt. Prüfen Sie das Gerät und die Stummschaltung.",
+  "audio.detected": "Ton erkannt. Der Balken zeigt den Spitzenpegel der Aufnahme.",
+  "audio.cues": "Aufnahmetöne",
+  "audio.cues_hint": "Kurze Töne beim Starten, Beenden oder Abbrechen einer Aufnahme."
 }

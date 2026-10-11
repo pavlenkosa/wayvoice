@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add saved microphone selection, a short microphone level check without audio storage, and optional recording sounds.
+
 ## 0.7.0 — 2026-10-11
 
 - Add an opt-in background release check and a Home notice with an update button. Checks do not download or install packages.

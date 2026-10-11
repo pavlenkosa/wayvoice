@@ -40,3 +40,4 @@ class UiContext:
     profiles: Any = None
     shortcut: Any = None
     updates: Any = None
+    audio: Any = None

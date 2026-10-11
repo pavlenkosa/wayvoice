@@ -13,6 +13,8 @@ DEFAULTS: dict[str, Any] = {
     # loudly, it transcribes foreign speech with the wrong grammar and spelling.
     "language": "auto",
     "device": "auto",
+    "microphone": "",
+    "audio_feedback": False,
     "beam_size": 5,
     "vad_filter": True,
     "auto_punctuation": True,

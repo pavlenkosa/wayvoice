@@ -430,5 +430,18 @@
   "update.auto": "Buscar actualizaciones automáticamente",
   "update.auto_hint": "Consultar GitHub al abrir y cada 6 horas mientras la interfaz esté abierta. Sin descargas ni instalación automáticas.",
   "update.notice": "WayVoice {version} está disponible",
-  "update.open": "Actualizar…"
+  "update.open": "Actualizar…",
+  "audio.title": "Audio",
+  "audio.hint": "El cambio de micrófono se aplica al guardar. Actualiza la lista para encontrar los dispositivos conectados.",
+  "audio.device": "Micrófono",
+  "audio.default": "Predeterminado del sistema",
+  "audio.missing": "No disponible: {name}",
+  "audio.refresh": "Actualizar micrófonos",
+  "audio.check": "Probar micrófono",
+  "audio.check_hint": "Solo se graba una muestra breve cuando lo solicitas. El audio no se guarda.",
+  "audio.listening": "Escuchando… Habla ahora.",
+  "audio.silent": "No se detectó sonido. Comprueba el dispositivo y si está silenciado.",
+  "audio.detected": "Sonido detectado. La barra muestra el nivel máximo de la muestra.",
+  "audio.cues": "Sonidos de grabación",
+  "audio.cues_hint": "Sonidos breves al iniciar, detener o cancelar la grabación."
 }

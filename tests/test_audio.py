@@ -143,6 +143,14 @@ class RecorderTests(unittest.TestCase):
                 self.assertTrue(path.exists(), "ASR owns a handed-off recording")
                 path.unlink()
 
+    def test_selected_input_is_passed_without_reconnection_or_fallback(self):
+        proc = FakeProc(alive=True, hang_first=True)
+        with self._patch_which(), mock.patch('wayvoice.audio_devices.validate_target', return_value='input'), mock.patch.object(audio.subprocess, 'Popen', return_value=proc) as spawn:
+            self.recorder.start(target='input')
+        command = spawn.call_args.args[0]
+        self.assertIn('--target=input', command)
+        self.assertIn('--properties=node.dont-reconnect=true node.dont-fallback=true', command)
+
     def test_failed_spawn_removes_private_file_and_handles(self):
         paths = []
 

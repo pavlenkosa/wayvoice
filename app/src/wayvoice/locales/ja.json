@@ -430,5 +430,18 @@
   "update.auto": "更新を自動で確認",
   "update.auto_hint": "画面を開いたときと、開いている間は6時間ごとにGitHubを確認します。自動ダウンロードやインストールは行いません。",
   "update.notice": "WayVoice {version} が利用可能です",
-  "update.open": "更新…"
+  "update.open": "更新…",
+  "audio.title": "音声",
+  "audio.hint": "マイクの変更は保存後に適用されます。接続された機器を探すには一覧を更新してください。",
+  "audio.device": "マイク",
+  "audio.default": "システムの既定",
+  "audio.missing": "利用不可：{name}",
+  "audio.refresh": "マイク一覧を更新",
+  "audio.check": "マイクをテスト",
+  "audio.check_hint": "操作したときだけ短い音声を録音します。音声は保存されません。",
+  "audio.listening": "録音中… 話してください。",
+  "audio.silent": "音声が検出されませんでした。機器とミュート設定を確認してください。",
+  "audio.detected": "音声を検出しました。バーは録音した音声の最大レベルを示します。",
+  "audio.cues": "録音の通知音",
+  "audio.cues_hint": "録音の開始、停止、キャンセル時に短い通知音を鳴らします。"
 }

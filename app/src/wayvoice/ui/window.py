@@ -17,6 +17,7 @@ from .controllers.settings import SettingsController
 from .controllers.shortcut import ShortcutController
 from .controllers.status import StatusController
 from .controllers.updates import UpdatesController
+from .controllers.audio import AudioController
 from .dialogs.update import show_update
 from .dialogs.about import show_about
 from .dialogs.help import show_help
@@ -45,6 +46,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         ctx.shortcut = ShortcutController(ctx)
         ctx.profiles = ProfilesController(ctx)
         ctx.updates = UpdatesController(ctx)
+        ctx.audio = AudioController(ctx)
         self.home = HomePage(ctx)
         self.settings = SettingsPage(ctx)
         self._install_css()
@@ -93,6 +95,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         self.tasks.every(60_000, ctx.updates.tick)
         self.tasks.every(650, ctx.status._poll_status)
         self.tasks.every(900, ctx.preferences._poll_engine_settings)
+        self.tasks.idle(ctx.audio.refresh)
 
     def t(self, key, **kwargs):
         return self.state.t(key, **kwargs)

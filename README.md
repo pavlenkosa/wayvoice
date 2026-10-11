@@ -143,6 +143,20 @@ For Flatpak, use the command shown by the app rather than the native command abo
 
 Automatic paste requires `ydotool` and access to `/dev/uinput`. Native packages include a fallback helper and prefer a system-installed copy when available. If the helper cannot be used, recognized text still reaches the clipboard. Choose **Ctrl+Shift+V** for terminals such as Konsole; ordinary editors generally use **Ctrl+V**.
 
+### Microphone and recording sounds
+
+In Settings → Audio, refresh the microphone list and choose an input, then save.
+System default follows the input selected in your desktop's sound settings. A
+missing explicitly selected microphone produces an error rather than switching
+to another input.
+
+**Check microphone** measures a short sample from the selected input, including
+an unsaved selection. The bar shows its peak level; the sample is discarded and
+never sent for recognition. Finish any dictation before running the check.
+Optional recording sounds mark the start, stop and cancellation of a recording.
+They are off by default.
+
+
 ### Recognition engines
 
 **Faster-Whisper** is the default. Choose a built-in model, a compatible Hugging Face repository, or a local CTranslate2 model directory. Keeping the model warm speeds up repeated dictation at the cost of idle memory use.

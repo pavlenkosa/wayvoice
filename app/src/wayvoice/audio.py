@@ -67,7 +67,7 @@ class AudioRecorder:
             message += f" Could not remove recording: {exc}"
         return message
 
-    def start(self) -> None:
+    def start(self, target="") -> None:
         if self.recording:
             return
         failure = self.take_failure()
@@ -79,6 +79,10 @@ class AudioRecorder:
             self.cancel()
         if not shutil.which("pw-record"):
             raise RuntimeError(describe_missing("pipewire"))
+
+        if target:
+            from .audio_devices import validate_target
+            target = validate_target(target)
 
         fd, name = tempfile.mkstemp(prefix="wayvoice-", suffix=".wav")
         os.close(fd)
@@ -93,6 +97,8 @@ class AudioRecorder:
             "--channel-map=mono",
             str(path),
         ]
+        if target:
+            cmd[1:1] = ["--target=" + target, "--properties=node.dont-reconnect=true node.dont-fallback=true"]
         self._path = path
         try:
             self._proc = subprocess.Popen(

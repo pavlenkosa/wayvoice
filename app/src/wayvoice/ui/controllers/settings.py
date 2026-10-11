@@ -100,6 +100,8 @@ class SettingsController:
             "model": model_id,
             "custom_model": self.ctx.settings.custom_model.get_text().strip(),
             "language": language,
+            "microphone": self.ctx.audio.selected(),
+            "audio_feedback": self.ctx.settings.audio_feedback.get_active(),
             "device": DEVICES[self.ctx.settings.device.get_selected()],
             "vad_filter": self.ctx.settings.vad.get_active(),
             "engine_worker": self.ctx.settings.worker.get_active(),
