@@ -157,6 +157,25 @@ Optional recording sounds mark the start, stop and cancellation of a recording.
 They are off by default.
 
 
+### Personal dictionary
+
+Enable text replacements in Settings and add one pair per line:
+
+```text
+way voice => WayVoice
+step an => Stepan
+```
+
+Save to apply them to dictation. Preview lets you try the current draft without
+recording or saving. Matching ignores case and uses whole phrases; longer matches
+win. Replacements run once after punctuation processing and preserve the spelling
+you enter. Links, email addresses, paths and technical tokens are left unchanged.
+
+The dictionary stays on your computer and works with every recognition engine.
+It corrects the resulting text; it does not train or prompt the speech model.
+There is a limit of 100 rules and 16,384 characters. Disable replacements to keep
+the rules without applying them.
+
 ### Recognition engines
 
 **Faster-Whisper** is the default. Choose a built-in model, a compatible Hugging Face repository, or a local CTranslate2 model directory. Keeping the model warm speeds up repeated dictation at the cost of idle memory use.

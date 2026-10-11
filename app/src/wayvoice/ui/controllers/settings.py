@@ -108,6 +108,8 @@ class SettingsController:
             "auto_punctuation": self.ctx.settings.auto_punct.get_active(),
             "spoken_punctuation": self.ctx.settings.spoken.get_active(),
             "append_space": self.ctx.settings.append_space.get_active(),
+            "vocabulary_enabled": self.ctx.settings.vocabulary.enabled.get_active(),
+            "vocabulary_rules": self.ctx.settings.vocabulary.rules_text(),
             "paste_mode": PASTE_MODES[self.ctx.settings.paste.get_selected()],
             "notify": self.ctx.settings.notifications.get_active(),
             "notify_transcript": self.ctx.settings.notification_text.get_active(),
@@ -153,6 +155,9 @@ class SettingsController:
         if self._selected_engine_uses_models() and str(preset["id"]) == "__custom__" and not self.ctx.settings.custom_model.get_text().strip():
             self.ctx.window.toast.add_toast(Adw.Toast(title=self.ctx.state.t("toast.custom_model")))
             return
+        if not self.ctx.settings.vocabulary.validate():
+            self.ctx.window.toast.add_toast(Adw.Toast(title=self.ctx.state.t("vocab.invalid")))
+            return False
         updates = self._draft_values()
         self._saved_draft = dict(updates)
         self._saving = True

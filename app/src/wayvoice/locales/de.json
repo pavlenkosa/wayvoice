@@ -443,5 +443,16 @@
   "audio.silent": "Kein Ton erkannt. Prüfen Sie das Gerät und die Stummschaltung.",
   "audio.detected": "Ton erkannt. Der Balken zeigt den Spitzenpegel der Aufnahme.",
   "audio.cues": "Aufnahmetöne",
-  "audio.cues_hint": "Kurze Töne beim Starten, Beenden oder Abbrechen einer Aufnahme."
+  "audio.cues_hint": "Kurze Töne beim Starten, Beenden oder Abbrechen einer Aufnahme.",
+  "vocab.title": "Persönliches Wörterbuch",
+  "vocab.enabled": "Textersetzungen anwenden",
+  "vocab.hint": "Eine Ersetzung pro Zeile: erkannte Phrase => gewünschter Text. Ganze Phrasen, unabhängig von Groß- und Kleinschreibung; längere Phrasen haben Vorrang. Ersetzungen erfolgen nach der Zeichensetzung, ohne Verkettung.",
+  "vocab.example": "z. B. way voice => WayVoice",
+  "vocab.preview": "Vorschau",
+  "vocab.sample": "Beispieltext",
+  "vocab.result": "Vorschauergebnis",
+  "vocab.empty": "Noch keine Vorschau.",
+  "vocab.invalid": "Prüfen Sie die Wörterbuchregeln vor dem Speichern.",
+  "vocab.limit": "Maximal 100 Ersetzungen und 16.384 Zeichen.",
+  "vocab.off": "Ersetzungen sind ausgeschaltet. Die Vorschau verwendet die aktuellen Entwurfseinstellungen."
 }

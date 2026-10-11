@@ -1026,6 +1026,33 @@ _EN.update({'audio.title': 'Audio',
  'audio.cues': 'Recording sounds',
  'audio.cues_hint': 'Short sounds when recording starts, stops or is cancelled.'})
 
+_RU.update({'vocab.title': 'Личный словарь',
+ 'vocab.enabled': 'Применять замены текста',
+ 'vocab.hint': 'Одна замена на строку: распознанная фраза => нужный текст. Фразы заменяются '
+               'целиком, без учёта регистра; приоритет у более длинных фраз. Замены '
+               'применяются после пунктуации, без повторной обработки результата.',
+ 'vocab.example': 'Например: вей войс => WayVoice',
+ 'vocab.preview': 'Предпросмотр',
+ 'vocab.sample': 'Пример текста',
+ 'vocab.result': 'Результат предпросмотра',
+ 'vocab.empty': 'Предпросмотр ещё не выполнен.',
+ 'vocab.invalid': 'Проверьте правила словаря перед сохранением.',
+ 'vocab.limit': 'Не более 100 замен и 16 384 символов.',
+ 'vocab.off': 'Замены отключены. Предпросмотр использует текущие настройки черновика.'})
+_EN.update({'vocab.title': 'Personal dictionary',
+ 'vocab.enabled': 'Apply text replacements',
+ 'vocab.hint': 'One replacement per line: recognized phrase => preferred text. Whole phrases, '
+               'ignoring case; longer phrases win. Replacements apply after punctuation, '
+               'without chaining.',
+ 'vocab.example': 'e.g. way voice => WayVoice',
+ 'vocab.preview': 'Preview',
+ 'vocab.sample': 'Sample text',
+ 'vocab.result': 'Preview result',
+ 'vocab.empty': 'No preview yet.',
+ 'vocab.invalid': 'Check dictionary rules before saving.',
+ 'vocab.limit': 'Maximum 100 replacements and 16,384 characters.',
+ 'vocab.off': 'Replacements are off. Preview uses the current draft settings.'})
+
 for _code in UI_LANGUAGE_NAMES:
     if _code not in _TRANSLATIONS:
         _TRANSLATIONS[_code] = json.loads(

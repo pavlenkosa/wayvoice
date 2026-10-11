@@ -14,6 +14,7 @@ from ...models import MODEL_PRESETS, PRESET_LABELS, preset_index
 from ...shortcut import label_for, manual_shortcut_required, manual_shortcut_hint, portal_shortcut_desktop
 from ..settings_values import DEVICES, DEVICE_NAMES, PASTE_MODES, RECORD_VALUES, TIMEOUT_VALUES, UI_LANGUAGE_IDS
 from ..widgets.labels import nearest_index, index_or_zero
+from ..widgets.vocabulary import VocabularyEditor
 from ..widgets.language_picker import LanguagePicker, engine_choices, language_choices
 
 
@@ -236,6 +237,9 @@ class SettingsPage:
         self.append_space = Adw.SwitchRow(title=self.ctx.state.t("settings.append_space"))
         self.append_space.set_active(bool(self.ctx.state.cfg.get("append_space", True)))
         text_group.add(self.append_space)
+
+        self.vocabulary = VocabularyEditor(self.ctx)
+        page.add(self.vocabulary.root)
 
         control_group = Adw.PreferencesGroup(title=self.ctx.state.t("settings.control"))
         page.add(control_group)

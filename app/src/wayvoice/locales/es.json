@@ -443,5 +443,16 @@
   "audio.silent": "No se detectó sonido. Comprueba el dispositivo y si está silenciado.",
   "audio.detected": "Sonido detectado. La barra muestra el nivel máximo de la muestra.",
   "audio.cues": "Sonidos de grabación",
-  "audio.cues_hint": "Sonidos breves al iniciar, detener o cancelar la grabación."
+  "audio.cues_hint": "Sonidos breves al iniciar, detener o cancelar la grabación.",
+  "vocab.title": "Diccionario personal",
+  "vocab.enabled": "Aplicar sustituciones de texto",
+  "vocab.hint": "Una sustitución por línea: frase reconocida => texto deseado. Frases completas, sin distinguir mayúsculas; las más largas tienen prioridad. Las sustituciones se aplican después de la puntuación, sin encadenarse.",
+  "vocab.example": "Ej.: way voice => WayVoice",
+  "vocab.preview": "Vista previa",
+  "vocab.sample": "Texto de ejemplo",
+  "vocab.result": "Resultado de la vista previa",
+  "vocab.empty": "Aún no hay vista previa.",
+  "vocab.invalid": "Revisa las reglas del diccionario antes de guardar.",
+  "vocab.limit": "Máximo de 100 sustituciones y 16.384 caracteres.",
+  "vocab.off": "Las sustituciones están desactivadas. La vista previa usa los ajustes del borrador actual."
 }

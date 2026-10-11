@@ -443,5 +443,16 @@
   "audio.silent": "未检测到声音。请检查设备及静音开关。",
   "audio.detected": "已检测到声音。进度条显示样本的峰值音量。",
   "audio.cues": "录音提示音",
-  "audio.cues_hint": "在录音开始、停止或取消时播放简短提示音。"
+  "audio.cues_hint": "在录音开始、停止或取消时播放简短提示音。",
+  "vocab.title": "个人词典",
+  "vocab.enabled": "应用文本替换",
+  "vocab.hint": "每行一条替换规则：识别出的短语 => 所需文本。匹配完整短语，不区分大小写；较长短语优先。在标点处理后进行替换，不连续替换生成的结果。",
+  "vocab.example": "例如：way voice => WayVoice",
+  "vocab.preview": "预览",
+  "vocab.sample": "示例文本",
+  "vocab.result": "预览结果",
+  "vocab.empty": "尚无预览。",
+  "vocab.invalid": "保存前请检查词典规则。",
+  "vocab.limit": "最多 100 条替换规则，共 16,384 个字符。",
+  "vocab.off": "文本替换已关闭。预览使用当前草稿设置。"
 }
