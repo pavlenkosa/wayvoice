@@ -13,6 +13,8 @@ DEFAULTS: dict[str, Any] = {
     # loudly, it transcribes foreign speech with the wrong grammar and spelling.
     "language": "auto",
     "device": "auto",
+    "microphone": "",
+    "audio_feedback": False,
     "beam_size": 5,
     "vad_filter": True,
     "auto_punctuation": True,
@@ -20,6 +22,8 @@ DEFAULTS: dict[str, Any] = {
     "ensure_terminal_punctuation": True,
     "paste_mode": "standard",
     "append_space": True,
+    "vocabulary_enabled": False,
+    "vocabulary_rules": "",
     "notify": True,
     "notify_transcript": False,
     "auto_check_updates": False,
@@ -86,6 +90,12 @@ def load_config() -> dict[str, Any]:
                                 valid = not isinstance(value, bool) and math.isfinite(float(value))
                                 int(value)
                             except (TypeError, ValueError, OverflowError):
+                                valid = False
+                        if key == "vocabulary_rules" and valid:
+                            from .vocabulary import parse_rules
+                            try:
+                                parse_rules(value)
+                            except ValueError:
                                 valid = False
                         if key == "shortcut_mode" and (not isinstance(value, str) or value not in {"toggle", "hold"}):
                             valid = False

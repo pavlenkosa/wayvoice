@@ -1271,6 +1271,8 @@ def _postprocess(text: str, cfg: dict[str, Any]) -> str:
             # in, which is the model's own language when it forces one.
             language=_language(cfg),
         )
+    from .vocabulary import apply_replacements
+    text = apply_replacements(text, cfg)
     if text and cfg.get("append_space", True):
         text += " "
     return text

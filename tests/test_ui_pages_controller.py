@@ -62,7 +62,7 @@ class CompositionTests(unittest.TestCase):
         self.assertIs(self.window.context.home, self.window.home)
         self.assertFalse(hasattr(self.window, '_save'))
         self.assertFalse(hasattr(self.window, 'model'))
-        self.assertEqual([s[0] for s in self.tasks.sources], ['idle','idle','idle',60_000,650,900])
+        self.assertEqual([s[0] for s in self.tasks.sources], ['idle','idle','idle',60_000,650,900,'idle'])
         # The new startup source and timer are inert without saved consent.
         _, configure, args = self.tasks.sources[2]
         configure(*args)
@@ -107,6 +107,19 @@ class CompositionTests(unittest.TestCase):
                 self.window.settings.engine.set_selected(index)
                 self.window.settings.language.select_code('ru')
                 self.assertEqual(ctx.preferences._draft_values()['language'], 'ru')
+
+    def test_dictionary_draft_and_invalid_save_do_not_start_work(self):
+        ctx = self.window.context
+        ctx.settings.vocabulary.enabled.set_active(True)
+        ctx.settings.vocabulary.buffer.set_text('way voice => WayVoice')
+        self.assertTrue(ctx.preferences.has_unsaved_changes())
+        draft = ctx.preferences._draft_values()
+        self.assertTrue(draft['vocabulary_enabled'])
+        self.assertEqual(draft['vocabulary_rules'], 'way voice => WayVoice')
+        ctx.settings.vocabulary.buffer.set_text('invalid')
+        self.assertFalse(ctx.preferences._save())
+        self.assertFalse(ctx.preferences._saving)
+        self.assertEqual(ctx.preferences._mutations, [])
 
     def test_disposal_removes_startup_and_poll_sources(self):
         self.window._dispose_ui()

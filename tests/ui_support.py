@@ -44,6 +44,16 @@ def controller_context():
     ctx.settings.shortcut_mode.get_selected.return_value = 0
     ctx.settings.auto_check_updates = mock.Mock()
     ctx.settings.auto_check_updates.get_active.return_value = False
+    from wayvoice.ui.controllers.audio import AudioController
+    ctx.audio = AudioController(ctx)
+    ctx.settings.microphone = mock.Mock()
+    ctx.settings.microphone.get_selected.return_value = 0
+    ctx.settings.audio_feedback = mock.Mock()
+    ctx.settings.audio_feedback.get_active.return_value = False
+    ctx.settings.vocabulary = mock.Mock()
+    ctx.settings.vocabulary.enabled.get_active.return_value = False
+    ctx.settings.vocabulary.rules_text.return_value = ''
+    ctx.settings.vocabulary.validate.return_value = True
     ctx.models = ModelsController(ctx)
     ctx.preferences = SettingsController(ctx)
     ctx.integration = IntegrationController(ctx)

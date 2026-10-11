@@ -14,6 +14,7 @@ from ...models import MODEL_PRESETS, PRESET_LABELS, preset_index
 from ...shortcut import label_for, manual_shortcut_required, manual_shortcut_hint, portal_shortcut_desktop
 from ..settings_values import DEVICES, DEVICE_NAMES, PASTE_MODES, RECORD_VALUES, TIMEOUT_VALUES, UI_LANGUAGE_IDS
 from ..widgets.labels import nearest_index, index_or_zero
+from ..widgets.vocabulary import VocabularyEditor
 from ..widgets.language_picker import LanguagePicker, engine_choices, language_choices
 
 
@@ -39,6 +40,34 @@ class SettingsPage:
         clamp = Adw.Clamp(maximum_size=780, tightening_threshold=600)
         clamp.set_child(page)
         scroller.set_child(clamp)
+
+        audio = Adw.PreferencesGroup(title=self.ctx.state.t("audio.title"),
+                                     description=self.ctx.state.t("audio.hint"))
+        self.microphone = Adw.ComboRow(title=self.ctx.state.t("audio.device"))
+        selected_mic = str(self.ctx.state.cfg.get("microphone", ""))
+        self.microphone.set_model(Gtk.StringList.new([self.ctx.state.t("audio.default")] + ([selected_mic] if selected_mic else [])))
+        self.microphone.set_selected(1 if selected_mic else 0)
+        self.audio_refresh = Gtk.Button(icon_name="view-refresh-symbolic", valign=Gtk.Align.CENTER,
+                                       tooltip_text=self.ctx.state.t("audio.refresh"))
+        self.audio_refresh.connect("clicked", self.ctx.audio.refresh)
+        self.microphone.add_suffix(self.audio_refresh)
+        audio.add(self.microphone)
+        self.audio_level = Adw.ActionRow(title=self.ctx.state.t("audio.check"),
+                                        subtitle=self.ctx.state.t("audio.check_hint"))
+        self.audio_check = Gtk.Button(label=self.ctx.state.t("audio.check"), valign=Gtk.Align.CENTER)
+        self.audio_check.connect("clicked", self.ctx.audio.check)
+        self.audio_level.add_suffix(self.audio_check)
+        audio.add(self.audio_level)
+        self.audio_meter = Gtk.LevelBar(min_value=0, max_value=1, margin_start=12, margin_end=12)
+        self.audio_meter.set_size_request(80, -1)
+        self.audio_meter.set_valign(Gtk.Align.CENTER)
+        self.audio_level.add_suffix(self.audio_meter)
+        self.microphone.connect("notify::selected", self.ctx.audio.selection_changed)
+        self.audio_feedback = Adw.SwitchRow(title=self.ctx.state.t("audio.cues"),
+                                          subtitle=self.ctx.state.t("audio.cues_hint"))
+        self.audio_feedback.set_active(bool(self.ctx.state.cfg.get("audio_feedback", False)))
+        audio.add(self.audio_feedback)
+        page.add(audio)
 
         profiles = Adw.PreferencesGroup(title=self.ctx.state.t("profiles.title"),
                                         description=self.ctx.state.t("profiles.description"))
@@ -208,6 +237,9 @@ class SettingsPage:
         self.append_space = Adw.SwitchRow(title=self.ctx.state.t("settings.append_space"))
         self.append_space.set_active(bool(self.ctx.state.cfg.get("append_space", True)))
         text_group.add(self.append_space)
+
+        self.vocabulary = VocabularyEditor(self.ctx)
+        page.add(self.vocabulary.root)
 
         control_group = Adw.PreferencesGroup(title=self.ctx.state.t("settings.control"))
         page.add(control_group)

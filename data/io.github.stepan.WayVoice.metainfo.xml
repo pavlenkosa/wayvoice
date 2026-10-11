@@ -35,6 +35,9 @@
   <supports><control>pointing</control><control>keyboard</control></supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.7.1" date="2026-10-11">
+      <description><p>Microphone selection, a short level check without audio storage, and optional recording sounds. A local personal dictionary adds whole-phrase text replacements with a draft preview and an enable switch.</p></description>
+    </release>
     <release version="0.7.0" date="2026-10-11">
       <description><p>Optional hold-to-talk with desktop portal press and release events, direct access to the indicator, and opt-in update checks with an update notice on the main page. Linux-wide application descriptions and expanded interface screenshots.</p></description>
     </release>

@@ -12,7 +12,7 @@ WayVoice uses GTK 4 and libadwaita, records through PipeWire, and supports Faste
 
 **Status:** alpha. GNOME Wayland is the primary tested desktop. KDE Plasma integration is implemented, but complete installed dictation and paste checks are still pending. wlroots desktops and installed Flatpak builds also need testing.
 
-The current version is **0.7.0**. Download published packages from [GitHub Releases](https://github.com/pavlenkosa/wayvoice/releases).
+The current version is **0.7.1**. Download published packages from [GitHub Releases](https://github.com/pavlenkosa/wayvoice/releases).
 
 ## Push-to-talk
 
@@ -142,6 +142,39 @@ In the development version, **Ctrl+Shift+C** copies the last dictation and **Ctr
 For Flatpak, use the command shown by the app rather than the native command above. Remove an old manual binding before assigning the same key through the KDE portal.
 
 Automatic paste requires `ydotool` and access to `/dev/uinput`. Native packages include a fallback helper and prefer a system-installed copy when available. If the helper cannot be used, recognized text still reaches the clipboard. Choose **Ctrl+Shift+V** for terminals such as Konsole; ordinary editors generally use **Ctrl+V**.
+
+### Microphone and recording sounds
+
+In Settings → Audio, refresh the microphone list and choose an input, then save.
+System default follows the input selected in your desktop's sound settings. A
+missing explicitly selected microphone produces an error rather than switching
+to another input.
+
+**Check microphone** measures a short sample from the selected input, including
+an unsaved selection. The bar shows its peak level; the sample is discarded and
+never sent for recognition. Finish any dictation before running the check.
+Optional recording sounds mark the start, stop and cancellation of a recording.
+They are off by default.
+
+
+### Personal dictionary
+
+Enable text replacements in Settings and add one pair per line:
+
+```text
+way voice => WayVoice
+step an => Stepan
+```
+
+Save to apply them to dictation. Preview lets you try the current draft without
+recording or saving. Matching ignores case and uses whole phrases; longer matches
+win. Replacements run once after punctuation processing and preserve the spelling
+you enter. Links, email addresses, paths and technical tokens are left unchanged.
+
+The dictionary stays on your computer and works with every recognition engine.
+It corrects the resulting text; it does not train or prompt the speech model.
+There is a limit of 100 rules and 16,384 characters. Disable replacements to keep
+the rules without applying them.
 
 ### Recognition engines
 

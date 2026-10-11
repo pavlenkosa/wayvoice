@@ -1,4 +1,5 @@
 from __future__ import annotations
+from .audio_feedback import play_cue
 
 import contextlib
 import fcntl
@@ -585,7 +586,13 @@ class WayVoiceDaemon:
                 self.last_error = ""
                 self.last_warning = ""
                 self._transcribe_cancel.clear()
-                self.recorder.start()
+                play_cue("start", cfg.get("audio_feedback", False), wait=True)
+                if self._shutdown.is_set():
+                    raise RuntimeError("Daemon is shutting down.")
+                if cfg.get("microphone"):
+                    self.recorder.start(target=cfg["microphone"])
+                else:
+                    self.recorder.start()
                 self._record_delivery_mode = delivery_mode
                 self._record_started = time.monotonic()
                 self._cancel_record_timer()
@@ -630,6 +637,7 @@ class WayVoiceDaemon:
                     return {"ok": False, "error": str(exc)}
                 self._record_started = 0.0
                 self._record_delivery_mode = None
+                play_cue("cancel", cfg.get("audio_feedback", False))
                 notify(tr("daemon.recording_cancelled", cfg.get("ui_language")), enabled=cfg.get("notify", True))
                 reset_notification_id()
                 return {"ok": True, "state": "idle"}
@@ -667,6 +675,7 @@ class WayVoiceDaemon:
                     self._record_delivery_mode = None
                 return {"ok": False, "error": str(exc)}
             self._record_started = 0.0
+            play_cue("stop", load_config().get("audio_feedback", False))
             take_delivery_mode = delivery_mode or getattr(self, "_record_delivery_mode", None)
             self._record_delivery_mode = None
             self.busy = True
@@ -820,6 +829,22 @@ class WayVoiceDaemon:
             return {"ok": False, "state": "shutting_down", "error": "Daemon is shutting down."}
         raw = command.strip()
         name, _, target_json = raw.partition(" ")
+        if name.lower() == "check-microphone":
+            from .audio_devices import probe_level
+            try:
+                payload = json.loads(target_json)
+                target = payload["target"]
+                expires = float(payload["expires"])
+                if not isinstance(target, str):
+                    raise ValueError("Invalid microphone selection.")
+                with self._lock:
+                    if not time.monotonic() < expires <= time.monotonic() + 3:
+                        return {"ok": False, "error": "Microphone check expired. Try again."}
+                    if updating() or self.recorder.recording or self.busy or self._prepare_running or self._model_maintenance:
+                        return {"ok": False, "error": "Finish the current operation before checking the microphone."}
+                    return {"ok": True, "level": probe_level(target, cancel_event=self._shutdown)}
+            except Exception as exc:
+                return {"ok": False, "error": str(exc)}
         addressed = name.lower() in {"prepare-model", "cancel-download", "delete-model"} and bool(target_json)
         command = name.lower() if addressed else raw.lower()
         if command == "configure-shortcut":
