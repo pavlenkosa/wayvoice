@@ -135,7 +135,7 @@ class SettingsController:
     def has_unsaved_changes(self):
         return self._baseline_draft is not None and self._draft_values() != self._baseline_draft
 
-    def confirm_leaving(self, proceed):
+    def confirm_leaving(self, proceed, *, parent=None):
         if self._leave_dialog_open or self._leave_after_save:
             return
         from ..dialogs.confirmations import unsaved_confirmation
@@ -150,7 +150,7 @@ class SettingsController:
                 if not self._save():
                     self._leave_after_save = None
 
-        unsaved_confirmation(self.ctx.window, self.ctx.state.t, response)
+        unsaved_confirmation(parent if parent is not None else self.ctx.window, self.ctx.state.t, response)
 
     def _save(self, *_args):
         if self._saving or self._config_conflict:

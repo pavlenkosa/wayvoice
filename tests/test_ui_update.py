@@ -91,6 +91,27 @@ class UpdateUITests(unittest.TestCase):
         deferred()
         self.assertTrue(self.update.busy)
 
+    def test_unsaved_confirmation_is_parented_to_active_update_dialog(self):
+        prefs = self.window.context.preferences
+        with mock.patch.object(prefs, 'has_unsaved_changes', return_value=True), \
+             mock.patch('wayvoice.ui.dialogs.confirmations.unsaved_confirmation') as confirm:
+            self.update._install()
+        self.assertIs(confirm.call_args.args[0], self.update.dialog)
+        self.assertFalse(self.update.busy)
+        confirm.call_args.args[2]('stay')
+        self.assertFalse(prefs._leave_dialog_open)
+        self.assertFalse(self.update.busy)
+
+    def test_normal_navigation_confirmation_keeps_main_window_parent(self):
+        prefs = self.window.context.preferences
+        proceed = mock.Mock()
+        with mock.patch('wayvoice.ui.dialogs.confirmations.unsaved_confirmation') as confirm:
+            prefs.confirm_leaving(proceed)
+        self.assertIs(confirm.call_args.args[0], self.window)
+        confirm.call_args.args[2]('leave')
+        proceed.assert_called_once_with()
+        self.assertFalse(prefs._leave_dialog_open)
+
     def test_home_notice_tracks_manual_check_and_reuses_update_action(self):
         self.update._checked({'available': True, 'version': '0.7.0'})
         banner = self.window.context.home.update_banner

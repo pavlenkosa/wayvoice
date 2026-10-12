@@ -99,7 +99,7 @@ class UpdateDialog:
             self.window._toast(self.t('update.busy'))
             return
         if preferences.has_unsaved_changes():
-            preferences.confirm_leaving(lambda: self.window.tasks.idle(self._start))
+            preferences.confirm_leaving(lambda: self.window.tasks.idle(self._start), parent=self.dialog)
         else:
             self._start()
 
