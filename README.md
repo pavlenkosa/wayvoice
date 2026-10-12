@@ -228,7 +228,7 @@ wayvoice update --install
 
 The updater downloads a matching DEB or RPM from the latest stable GitHub release, checks its SHA-256 and package metadata, and opens the system package manager with administrator authorization. If that release has no package for your architecture, it reports an error. Finish dictation and model preparation first. New recordings are blocked during installation; the services restart and the daemon's version is checked afterwards. Starting with 0.6.11, updates run inside the app and restart the interface automatically. Updating from 0.6.10 still opens a terminal and requires reopening Settings once.
 
-The updater requires a compatible running daemon. Older installations need a manual package upgrade first. It does not update source checkouts or Flatpak installations, and it does not automatically roll back failed package transactions. Release checksums verify integrity against the published release; they are not independent package signatures.
+The updater requires a compatible running daemon. Older installations need a manual package upgrade first. It does not update source checkouts or Flatpak installations, and it does not automatically roll back failed package transactions. Release checksums verify integrity against the published release; they are not independent package signatures. The update trust boundary includes the project’s GitHub account, repository access, release workflow and published assets, as well as HTTPS delivery. An attacker who can replace both the package and its release checksum can pass this integrity check. Package name, version and architecture checks prevent mismatched installations; they do not authenticate the publisher independently.
 
 ## Privacy
 
