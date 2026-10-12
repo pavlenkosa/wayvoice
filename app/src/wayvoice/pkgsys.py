@@ -26,7 +26,6 @@ from __future__ import annotations
 import fcntl
 import os
 import shutil
-import signal
 import subprocess
 import sys
 import time
@@ -70,9 +69,8 @@ def _install_lock(wait: float = _INSTALL_LOCK_WAIT):
     released when the process dies, so a crashed or killed install cannot wedge the
     next one.
 
-    A runtime directory that cannot be written to yields ``True`` - going ahead
-    without the serialisation is better than refusing to install, and the reason goes
-    to the journal.
+    An unavailable lock refuses installation: we cannot safely own a transaction
+    without cross-process serialization.
     """
     try:
         path = _install_lock_path()
@@ -81,7 +79,7 @@ def _install_lock(wait: float = _INSTALL_LOCK_WAIT):
     except OSError as exc:
         print(f"WayVoice: no install lock at {_install_lock_path()}: {exc}",
               file=sys.stderr)
-        yield True
+        yield False
         return
     try:
         deadline = time.monotonic() + wait
@@ -312,7 +310,9 @@ def install_packages(
     Runs the manager directly when the process is already root, otherwise
     through ``pkexec``, which shows the polkit password prompt.  Returns
     ``(ok, message)`` where ``message`` is a short tail of the manager output
-    suitable for a toast or a subtitle.
+    suitable for a toast or a subtitle. A detached owner retains the install lock
+    through completion, including after GUI/CLI exit. ``timeout`` only controls
+    how often the caller resumes waiting; it never cancels a package transaction.
 
     ``language`` is the interface language the messages are written in.  It is
     passed in rather than resolved here because every message below is shown in
@@ -349,13 +349,15 @@ def install_packages(
         pkexec = pkexec_path()
         if not pkexec:
             return False, tr("pkgsys.need_root", language)
-        elevated = [pkexec]
+        environment = shutil.which("env")
+        if not environment:
+            return False, tr("pkgsys.failed", language, reason="env is unavailable")
+        # pkexec sanitizes its environment. Set these constants *after* elevation.
+        # Use the generic auth_admin policy; never trust an arbitrary env invocation.
+        elevated = [pkexec, environment, "DEBIAN_FRONTEND=noninteractive", "LC_ALL=C", "LANG=C"]
 
     command = [*elevated, *dry_run_command(wanted)]
-    with _install_lock() as ours:
-        if not ours:
-            return False, tr("pkgsys.install_busy", language)
-        ok, message = _run_manager(command, wanted, timeout, language)
+    ok, message = _run_manager(command, wanted, timeout, language)
     if ok and skipped:
         # The install worked; say plainly that something in the request did not, or
         # the row in the window stays missing and the user has no idea why.
@@ -370,61 +372,35 @@ def _run_manager(
     timeout: float,
     language: str | None,
 ) -> tuple[bool, str]:
-    """Run one package manager and report what it said."""
+    """Wait for a detached owner; UI lifetime never owns the package transaction.
+
+    ``timeout`` is an observation interval, not permission to kill a manager or
+    release its lock. The owner holds the lock even if this caller exits.
+    """
+    owner = Path(__file__).with_name("pkgsys_owner.py")
     try:
         proc = subprocess.Popen(
-            command,
-            # Nothing may read from the user's terminal: a maintainer script that asks
-            # a debconf question would otherwise wait for an answer nobody can type,
-            # which is a wait for the full timeout and then a killed dpkg.
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            env=_manager_env(),
-            # Its own session, so the timeout below can take down the whole tree.
-            # Killing only pkexec leaves apt-get holding /var/lib/dpkg/lock, and the
-            # next attempt fails with "Could not get lock", which says nothing about
-            # the timeout that caused it.
-            #
-            # The session also means a Ctrl-C in `wayvoice deps --install` never
-            # reaches the manager: there is no handler for KeyboardInterrupt, so
-            # Python unwinds while apt-get carries on holding the dpkg lock. The
-            # handler below kills the tree on the way out.
-            start_new_session=True,
+            [sys.executable, str(owner), language or "", *command],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, env=_manager_env(), start_new_session=True,
         )
     except OSError as exc:
         return False, tr("pkgsys.failed", language, reason=str(exc))
     try:
-        stdout, stderr = proc.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        _kill_tree(proc)
-        try:
-            stdout, stderr = proc.communicate(timeout=5.0)
-        except subprocess.TimeoutExpired:
-            return False, tr("pkgsys.timeout", language, seconds=_seconds(timeout))
-        detail = _tail(stderr) or _tail(stdout)
-        if not detail:
-            return False, tr("pkgsys.timeout", language, seconds=_seconds(timeout))
-        return False, tr(
-            "pkgsys.timeout_detail",
-            language,
-            seconds=_seconds(timeout),
-            detail=detail,
-        )
-    except BaseException:
-        # Includes KeyboardInterrupt and SystemExit. The manager is in a session of
-        # its own and would keep running, holding the dpkg lock against every later
-        # attempt, while this process leaves with a traceback.
-        _kill_tree(proc)
-        raise
+        while True:
+            try:
+                stdout, stderr = proc.communicate(timeout=max(0.1, timeout))
+                break
+            except subprocess.TimeoutExpired:
+                # Only the owner can declare the transaction finished.
+                continue
+    finally:
+        # Closing pipes never cancels the owner. It captures manager output itself
+        # and tolerates a disappeared caller after the transaction has finished.
+        for stream in (getattr(proc, "stdout", None), getattr(proc, "stderr", None)):
+            if stream is not None:
+                stream.close()
     return _result(proc.returncode, packages, stdout, stderr, language)
-
-
-
-def _seconds(timeout: float) -> int:
-    """Whole seconds for a message; never "0 s" for something that timed out."""
-    return max(1, int(round(float(timeout))))
 
 
 def _manager_env() -> dict[str, str]:
@@ -432,9 +408,8 @@ def _manager_env() -> dict[str, str]:
 
     Two things are forced rather than inherited:
 
-    * ``DEBIAN_FRONTEND=noninteractive``, because without it a maintainer script
-      that asks a debconf question waits for an answer nobody can type - in a
-      service that is a wait for the full timeout followed by a killed dpkg.
+    * ``DEBIAN_FRONTEND=noninteractive``, so debconf never asks for terminal input.
+      For pkexec, the same constants are supplied after elevation as argv.
     * ``LC_ALL=C``, because apt translates its output. The availability check
       already does this; the output shown to the user did not, so a Russian apt
       answered in Russian inside an English sentence.
@@ -444,45 +419,6 @@ def _manager_env() -> dict[str, str]:
     env["LC_ALL"] = "C"
     env["LANG"] = "C"
     return env
-
-
-def _group_alive(pgid: int) -> bool:
-    """Whether any process is left in the group."""
-    try:
-        os.killpg(pgid, 0)
-    except ProcessLookupError:
-        return False
-    except OSError:
-        # EPERM means it exists and belongs to somebody else; that is not "gone".
-        return True
-    return True
-
-
-def _kill_tree(proc) -> None:
-    """Terminate a package manager and everything it started.
-
-    Escalation follows the *group*, not the process it was given. Waiting for the
-    direct child to exit and then returning meant a grandchild that ignored SIGTERM
-    - dpkg, which does - never saw the SIGKILL, and it survived holding the dpkg
-    lock: exactly the "Could not get lock" this function exists to prevent.
-    """
-    for sig in (signal.SIGTERM, signal.SIGKILL):
-        try:
-            os.killpg(proc.pid, sig)
-        except OSError:
-            try:
-                proc.kill() if sig is signal.SIGKILL else proc.terminate()
-            except OSError:
-                return
-        deadline = time.monotonic() + 3.0
-        while _group_alive(proc.pid) and time.monotonic() < deadline:
-            time.sleep(0.1)
-        if not _group_alive(proc.pid):
-            break
-    try:
-        proc.wait(timeout=3.0)
-    except subprocess.TimeoutExpired:
-        pass
 
 
 def _result(

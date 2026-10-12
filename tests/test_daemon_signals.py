@@ -9,6 +9,7 @@ These tests run the real daemon as a subprocess and signal it. Nothing is mocked
 purpose: the question is what survives a signal, and a mocked daemon cannot answer it.
 The recorder is a stand-in that keeps writing until it is killed.
 """
+from wayvoice.runtime import locations
 
 import json
 import os
@@ -122,7 +123,7 @@ class SignalShutdownTests(unittest.TestCase):
         interpreter = runtime / "bin" / "python"
         interpreter.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         interpreter.chmod(0o755)
-        (runtime / engine.RUNTIME_STAMP).touch()
+        (runtime / locations.RUNTIME_STAMP).touch()
         return runtime
 
     def _env(self) -> dict:

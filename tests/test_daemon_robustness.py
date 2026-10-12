@@ -130,6 +130,40 @@ class ServeRobustnessTests(unittest.TestCase):
             time.sleep(0.1)
         self.assertTrue(self._still_answers())
 
+    def test_trickling_request_has_a_whole_request_deadline(self):
+        partial = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.addCleanup(partial.close)
+        partial.connect(str(self.path))
+        partial.sendall(b"t")
+        stop = threading.Event()
+        def trickle():
+            while not stop.wait(.03):
+                try:
+                    partial.sendall(b"x")
+                except OSError:
+                    return
+        sender = threading.Thread(target=trickle, daemon=True)
+        sender.start()
+        try:
+            # A per-recv timeout would never expire during this stream.
+            self.assertTrue(_ping(self.path, timeout=1.5))
+        finally:
+            stop.set()
+            sender.join(timeout=2)
+
+    def test_clear_text_does_not_wait_for_lifecycle_io(self):
+        daemon = self.server.daemon
+        daemon.last_text = "old transcript"
+        with daemon._lock:
+            client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self.addCleanup(client.close)
+            client.settimeout(1)
+            client.connect(str(self.path))
+            client.sendall(b"clear-text\n")
+            self.assertIn(b'"ok": true', client.recv(4096))
+            self.assertEqual(daemon.last_text, "")
+            self.assertTrue(_ping(self.path, timeout=1))
+
     def test_client_cannot_make_the_daemon_buffer_without_bound(self):
         flooder = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         flooder.settimeout(5.0)
@@ -152,6 +186,39 @@ class ServeRobustnessTests(unittest.TestCase):
             rude.connect(str(self.path))
             rude.close()
         self.assertTrue(self._still_answers())
+
+
+class RecordingTimerOwnershipTests(unittest.TestCase):
+    def setUp(self):
+        isolate_engine(self)
+        isolate_environment(self)
+        self.daemon = WayVoiceDaemon()
+        self.daemon.recorder = mock.Mock(recording=True)
+        self.daemon._record_generation = 1
+        self.daemon._reconcile_recorder = mock.Mock(return_value=None)
+
+    def test_old_timer_cannot_stop_new_take_after_notification(self):
+        def begin_new_take(*args, **kwargs):
+            self.daemon._record_generation = 2
+        with mock.patch.object(daemon_mod, "notify", side_effect=begin_new_take):
+            self.daemon._auto_stop_recording(1)
+        self.daemon.recorder.stop_to_wav.assert_not_called()
+        self.assertFalse(self.daemon.busy)
+
+    def test_cancelled_timer_waiting_on_lock_ignores_new_take(self):
+        entered = threading.Event()
+        def callback():
+            entered.set()
+            self.daemon._auto_stop_recording(1)
+        with self.daemon._lock, mock.patch.object(daemon_mod, "notify") as notify:
+            timer = threading.Thread(target=callback)
+            timer.start()
+            self.assertTrue(entered.wait(1))
+            self.daemon._record_generation = 2
+        timer.join(timeout=2)
+        self.assertFalse(timer.is_alive())
+        self.daemon.recorder.stop_to_wav.assert_not_called()
+        notify.assert_not_called()
 
 
 class OwnershipTests(unittest.TestCase):

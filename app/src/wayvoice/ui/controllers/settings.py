@@ -11,7 +11,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib
 
 from ... import languages
-from ...config import load_config, save_config
+from ...config import load_config, update_config, ConfigConflictError
 from ...engine import (
     DEFAULT_ENGINE,
     engine_from_config,
@@ -34,6 +34,8 @@ class SettingsController:
         self._mutations = []
         self._restart_command = None
         self._baseline_draft = None
+        self._expected_config = None
+        self._config_conflict = False
         self._saved_draft = None
         self._leave_after_save = None
         self._leave_dialog_open = False
@@ -127,6 +129,8 @@ class SettingsController:
 
     def remember_draft(self):
         self._baseline_draft = self._draft_values()
+        self._expected_config = dict(self.ctx.state.cfg)
+        self._config_conflict = False
 
     def has_unsaved_changes(self):
         return self._baseline_draft is not None and self._draft_values() != self._baseline_draft
@@ -149,8 +153,8 @@ class SettingsController:
         unsaved_confirmation(self.ctx.window, self.ctx.state.t, response)
 
     def _save(self, *_args):
-        if self._saving:
-            return
+        if self._saving or self._config_conflict:
+            return False
         preset = self.ctx.models._selected_model_preset()
         if self._selected_engine_uses_models() and str(preset["id"]) == "__custom__" and not self.ctx.settings.custom_model.get_text().strip():
             self.ctx.window.toast.add_toast(Adw.Toast(title=self.ctx.state.t("toast.custom_model")))
@@ -160,18 +164,20 @@ class SettingsController:
             return False
         updates = self._draft_values()
         self._saved_draft = dict(updates)
+        baseline = self._baseline_draft or {}
+        changes = {key: value for key, value in updates.items() if key not in baseline or baseline[key] != value}
+        saved = self._expected_config if self._expected_config is not None else self.ctx.state.cfg
+        expected = {key: saved.get(key) for key in changes}
         self._saving = True
         if hasattr(self.ctx.window, "save_button"):
             self.ctx.window.save_button.set_sensitive(False)
 
         def work():
-            cfg = load_config()
-            cfg.update(updates)
-            save_config(cfg)
+            cfg = update_config(changes, expected)
             problems = []
             try:
                 if not manual_shortcut_required():
-                    ok, msg = apply_shortcut(str(updates["shortcut"]), self.ctx.state.ui_lang)
+                    ok, msg = apply_shortcut(str(cfg["shortcut"]), self.ctx.state.ui_lang)
                     if not ok:
                         problems.append(msg)
             except Exception as exc:
@@ -188,10 +194,12 @@ class SettingsController:
         return True
 
     def _save_failed(self, exc):
+        if isinstance(exc, ConfigConflictError):
+            self._config_conflict = True
         self._leave_after_save = None
         self._saving = False
         if hasattr(self.ctx.window, "save_button"):
-            self.ctx.window.save_button.set_sensitive(True)
+            self.ctx.window.save_button.set_sensitive(not self._config_conflict)
         show_operation_error(self.ctx, exc)
 
     def _save_finished(self, result):
@@ -200,6 +208,12 @@ class SettingsController:
         self._saving = False
         if hasattr(self.ctx.window, "save_button"):
             self.ctx.window.save_button.set_sensitive(True)
+        expected = dict(self._expected_config if self._expected_config is not None else self.ctx.state.cfg)
+        if self._saved_draft is not None:
+            baseline = self._baseline_draft or {}
+            expected.update({key: cfg[key] for key, value in self._saved_draft.items()
+                             if key not in baseline or baseline[key] != value})
+        self._expected_config = expected
         self.ctx.state.cfg = cfg
         if self.ctx.updates is not None:
             self.ctx.updates.configure(cfg)
@@ -293,7 +307,7 @@ class SettingsController:
         if hasattr(self.ctx.window, "save_button") and self._baseline_draft is not None:
             dirty = self.has_unsaved_changes()
             self.ctx.window.save_button.set_label(self.ctx.state.t("settings.save_dirty" if dirty else "settings.save"))
-            self.ctx.window.save_button.set_sensitive(dirty and not self._saving)
+            self.ctx.window.save_button.set_sensitive(dirty and not self._saving and not self._config_conflict)
 
     def _poll_engine_settings(self):
         self._refresh_save_state()

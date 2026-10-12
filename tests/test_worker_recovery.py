@@ -1,4 +1,5 @@
 """Bounded recovery against a real local fake worker; no model or microphone."""
+from wayvoice.runtime import locations, worker_client
 import itertools
 import os
 import subprocess
@@ -56,13 +57,13 @@ class WorkerRecoveryTests(unittest.TestCase):
         self.script = Path(self.tmp.name) / 'fake.py'
         self.script.write_text(SERVER)
         for name, value in [('worker_socket_path', self.path), ('worker_pid_path', self.pidfile)]:
-            p = mock.patch.object(engine, name, return_value=value)
+            p = mock.patch.object(locations, name, return_value=value)
             p.start(); self.addCleanup(p.stop)
-        p = mock.patch.object(engine, '_unresolved_worker_jobs', {})
+        p = mock.patch.object(worker_client, '_unresolved_worker_jobs', {})
         p.start(); self.addCleanup(p.stop)
-        p = mock.patch.object(engine, 'WORKER_CANCEL_GRACE', 0.08)
+        p = mock.patch.object(worker_client, 'WORKER_CANCEL_GRACE', 0.08)
         p.start(); self.addCleanup(p.stop)
-        p = mock.patch.object(engine, 'WORKER_POLL_INTERVAL', 0.02)
+        p = mock.patch.object(worker_client, 'WORKER_POLL_INTERVAL', 0.02)
         p.start(); self.addCleanup(p.stop)
 
     def worker(self, mode):
@@ -79,7 +80,7 @@ class WorkerRecoveryTests(unittest.TestCase):
         return proc
 
     def request(self, cancel=None, timeout=2, request_id='take'):
-        return engine._worker_request({'cmd':'transcribe','request_id':request_id}, request_id, timeout, cancel)
+        return worker_client._worker_request({'cmd':'transcribe','request_id':request_id}, request_id, timeout, cancel)
 
     def test_hung_cancel_retires_worker_and_next_request_succeeds(self):
         proc = self.worker('hang')
@@ -89,7 +90,7 @@ class WorkerRecoveryTests(unittest.TestCase):
         with self.assertRaises(engine.TranscriptionCancelled): self.request(event)
         proc.wait(timeout=2)
         self.assertLess(time.monotonic()-started, 2)
-        self.assertNotIn(event, engine._worker_jobs)
+        self.assertNotIn(event, worker_client._worker_jobs)
         self.worker('instant')
         self.assertEqual(self.request(request_id='next')['text'], 'late text')
 
@@ -124,7 +125,7 @@ class WorkerRecoveryTests(unittest.TestCase):
         thread=threading.Thread(target=run)
         thread.start()
         deadline=time.monotonic()+1
-        while event not in engine._worker_jobs and time.monotonic()<deadline:time.sleep(0.005)
+        while event not in worker_client._worker_jobs and time.monotonic()<deadline:time.sleep(0.005)
         active=engine.cancel_jobs(event)
         self.assertTrue(active)
         engine.stop_jobs(event, deadline=time.monotonic()+2, active_worker=active)
@@ -132,35 +133,35 @@ class WorkerRecoveryTests(unittest.TestCase):
         proc.wait(timeout=2)
         self.assertFalse(thread.is_alive())
         self.assertIsInstance(result[0], engine.TranscriptionCancelled)
-        self.assertNotIn(event, engine._worker_jobs)
+        self.assertNotIn(event, worker_client._worker_jobs)
 
     def test_recovery_is_bounded_while_startup_lock_is_owned_elsewhere(self):
         proc = self.worker('hang')
-        engine._worker_lock.acquire()
-        self.addCleanup(lambda: engine._worker_lock.release() if engine._worker_lock.locked() else None)
+        worker_client._worker_lock.acquire()
+        self.addCleanup(lambda: worker_client._worker_lock.release() if worker_client._worker_lock.locked() else None)
         started=time.monotonic()
         with self.assertRaises(engine.TranscriptionTimeout): self.request(timeout=0.05)
         self.assertLess(time.monotonic()-started, 2)
         proc.wait(timeout=2)
-        engine._worker_lock.release()
+        worker_client._worker_lock.release()
 
     def test_socket_error_after_timeout_never_changes_terminal_failure(self):
         sock = mock.Mock()
         sock.getsockopt.return_value = struct.pack('3i', os.getpid(), os.getuid(), os.getgid())
         sock.recv.side_effect = OSError('connection reset')
-        with mock.patch.object(engine.socket, 'socket', return_value=sock), \
-             mock.patch.object(engine, '_worker_send_cancel'), \
-             mock.patch.object(engine, '_worker_call', return_value={'ok':True,'pid':os.getpid(),'request_id':'take','state':'finished','request_completion':True}), \
-             mock.patch.object(engine.time, 'monotonic', side_effect=itertools.chain([0.0, 1.0, 1.0, 1.0], itertools.repeat(1.0))):
+        with mock.patch.object(worker_client.socket, 'socket', return_value=sock), \
+             mock.patch.object(worker_client, '_worker_send_cancel'), \
+             mock.patch.object(worker_client, '_worker_call', return_value={'ok':True,'pid':os.getpid(),'request_id':'take','state':'finished','request_completion':True}), \
+             mock.patch.object(worker_client.time, 'monotonic', side_effect=itertools.chain([0.0, 1.0, 1.0, 1.0], itertools.repeat(1.0))):
             with self.assertRaises(engine.TranscriptionTimeout): self.request(timeout=0.05)
         sock.close.assert_called_once()
 
     def test_finished_health_check_does_not_retire_worker(self):
         proc=self.worker('instant')
-        identity=engine._worker_identity(proc.pid)
-        with mock.patch.object(engine, 'stop_worker') as stop:
-            engine._worker_request({'cmd':'transcribe','request_id':'finished'}, 'finished', 2, None)
-            engine._recover_worker_request('finished', identity)
+        identity=worker_client._worker_identity(proc.pid)
+        with mock.patch.object(worker_client, 'stop_worker') as stop:
+            worker_client._worker_request({'cmd':'transcribe','request_id':'finished'}, 'finished', 2, None)
+            worker_client._recover_worker_request('finished', identity)
         stop.assert_not_called()
         self.assertIsNone(proc.poll())
 
@@ -170,19 +171,19 @@ class WorkerRecoveryTests(unittest.TestCase):
         for reply in (OSError('lost worker'), ValueError('bad reply'), TimeoutError('late'), {'ok':False}):
             with self.subTest(reply=reply):
                 kwargs={'side_effect':reply} if isinstance(reply,Exception) else {'return_value':reply}
-                with mock.patch.object(engine.socket,'socket',return_value=sock), \
-                     mock.patch.object(engine,'_worker_call',**kwargs):
+                with mock.patch.object(worker_client.socket,'socket',return_value=sock), \
+                     mock.patch.object(worker_client,'_worker_call',**kwargs):
                     with self.assertRaises(engine.WorkerUnavailable): self.request()
                 sock.sendall.assert_not_called()
 
     def test_recycled_identity_never_signals_process(self):
-        with mock.patch.object(engine, '_worker_identity', return_value=(123, 'new')), mock.patch.object(engine.os, 'kill') as kill:
-            engine._recover_worker_request('take', (123,'old'))
+        with mock.patch.object(worker_client, '_worker_identity', return_value=(123, 'new')), mock.patch.object(engine.os, 'kill') as kill:
+            worker_client._recover_worker_request('take', (123,'old'))
         kill.assert_not_called()
 
     def test_targeted_stop_preserves_replacement_pid_file(self):
         old = self.worker('hang')
-        identity = engine._worker_identity(old.pid)
+        identity = worker_client._worker_identity(old.pid)
         self.pidfile.write_text(str(os.getpid()))
         engine.stop_worker(timeout=0.03, expected_identity=identity)
         old.wait(timeout=2)

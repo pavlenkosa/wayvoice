@@ -28,6 +28,7 @@ temporary one and passes it as ``root``.
 import os
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from wayvoice import model_store as ms
@@ -147,6 +148,58 @@ class DeletingKeepsOtherModelsIntactTests(unittest.TestCase):
         self.assertFalse((cache.root / cache.repo).exists())
         self.assertEqual(result["freed_bytes"], 504_096)
         self.assertEqual(result["kept_bytes"], 0)
+
+
+class PartialDeletionTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.cache = FakeCache(Path(temporary.name))
+
+    def _deny_unlink(self, denied):
+        original = Path.unlink
+        def unlink(path, *args, **kwargs):
+            if path == denied:
+                raise PermissionError(f"denied: {path}")
+            return original(path, *args, **kwargs)
+        return mock.patch.object(Path, "unlink", unlink)
+
+    def test_failed_shared_store_unlink_does_not_claim_freed_bytes(self):
+        root, foreign = self.cache.build(shared_inside_repo=False, foreign_link_in_subdir=False, via_symlink=False)
+        blob = root / "blobs/ab/tokenizer.json"
+        with self._deny_unlink(blob):
+            result = ms.delete("small", root)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error_key"], "store.delete_failed")
+        self.assertEqual(result["freed_bytes"], 0)
+        self.assertEqual(result["removed_blobs"], 0)
+        self.assertTrue(blob.exists())
+        self.assertTrue(foreign.exists())
+
+    def test_sidecar_failure_reports_only_bytes_actually_removed(self):
+        root, foreign = self.cache.build(shared_inside_repo=False, foreign_link_in_subdir=False, via_symlink=False)
+        sidecar = root / "blobs/ab/tokenizer.json.refs"
+        sidecar.write_bytes(b"1234567")
+        with self._deny_unlink(sidecar):
+            result = ms.delete("small", root)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["freed_bytes"], 4096)
+        self.assertTrue(sidecar.exists())
+        self.assertTrue(foreign.exists())
+
+    def test_failed_prune_is_reported_and_shared_model_survives(self):
+        root, foreign = self.cache.build(shared_inside_repo=True, foreign_link_in_subdir=False, via_symlink=False)
+        snapshots = root / self.cache.repo / "snapshots"
+        original = ms.shutil.rmtree
+        def rmtree(path, *args, **kwargs):
+            if path == snapshots:
+                raise PermissionError("snapshot cleanup denied")
+            return original(path, *args, **kwargs)
+        with mock.patch.object(ms.shutil, "rmtree", side_effect=rmtree):
+            result = ms.delete("small", root)
+        self.assertFalse(result["ok"])
+        self.assertIn("snapshot cleanup denied", result["detail"])
+        self.assertTrue(foreign.exists())
 
 
 class SnapshotWalkingTests(unittest.TestCase):

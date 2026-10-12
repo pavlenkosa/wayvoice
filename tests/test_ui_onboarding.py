@@ -82,7 +82,10 @@ class OnboardingUITests(unittest.TestCase):
         with mock.patch('wayvoice.ui.onboarding.onboarding.save_selection', return_value={'model': 'small'}) as save, \
                 mock.patch('wayvoice.ui.onboarding.onboarding.prepare_selection', return_value={'ready': True}) as prepare:
             result = work()
-            save.assert_called_once_with('auto', 'small', completed=False)
+            save.assert_called_once_with('auto', 'small', completed=False, expected={})
+            self.assertEqual(self.win._expected_config, {})
+            publish, accepted = self.tasks.idle.call_args.args
+            publish(accepted)
             self.assertIs(prepare.call_args.args[1], self.win.cancel_event)
         done(result)
         self.assertEqual(self.win.step, 3)
@@ -92,9 +95,28 @@ class OnboardingUITests(unittest.TestCase):
         work, done, failed = self.tasks.run.call_args.args
         with mock.patch('wayvoice.ui.onboarding.onboarding.save_selection') as save:
             work()
-            save.assert_called_once_with('auto', 'small', completed=True, deferred=False)
+            save.assert_called_once_with('auto', 'small', completed=True, deferred=False,
+                                         expected=self.win._expected_config)
         done({})
         self.finished.assert_called_once_with(self.win)
+
+    def test_persisted_baseline_published_on_main_loop_before_prepare_failure(self):
+        self.win._expected_config = {"model": "small", "notify": True}
+        self.win.model = "tiny"
+        self.win._go(2)
+        self.win._start()
+        work, done, failed = self.tasks.run.call_args.args
+        with (mock.patch('wayvoice.ui.onboarding.onboarding.save_selection', return_value={"model": "tiny", "notify": False}),
+              mock.patch('wayvoice.ui.onboarding.onboarding.prepare_selection', side_effect=RuntimeError("failed"))):
+            with self.assertRaises(RuntimeError):
+                work()
+        self.assertEqual(self.win._expected_config["model"], "small")
+        publish, accepted = self.tasks.idle.call_args.args
+        publish(accepted)
+        failed(RuntimeError("failed"))
+        self.assertEqual(self.win._expected_config["model"], "tiny")
+        self.assertTrue(self.win._expected_config["notify"])
+        self.assertFalse(self.win.busy)
 
     def test_defer_is_saved_only_on_finish_and_save_error_allows_retry(self):
         self.win._go(3)
@@ -103,7 +125,7 @@ class OnboardingUITests(unittest.TestCase):
         work, done, failed = self.tasks.run.call_args.args
         with mock.patch('wayvoice.ui.onboarding.onboarding.save_selection') as save:
             work()
-            save.assert_called_once_with('auto', 'small', completed=True, deferred=True)
+            save.assert_called_once_with('auto', 'small', completed=True, deferred=True, expected={})
         failed(OSError('disk full'))
         self.assertFalse(self.win.busy)
         self.assertTrue(self.win.primary.get_sensitive())

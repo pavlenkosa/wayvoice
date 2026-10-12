@@ -13,11 +13,11 @@ import tempfile
 import threading
 import time
 import traceback
-import uuid
 from pathlib import Path
 from typing import Any
 
 from . import __version__
+from .daemon_preparation import ModelPreparationController
 from .audio import AudioRecorder
 from .config import DEFAULTS as _CONFIG_DEFAULTS, config_error, config_path, load_config, number
 from .engine import (
@@ -30,7 +30,6 @@ from .engine import (
     cancel_jobs,
     engine_status,
     model_state,
-    prepare_model,
     request_engine_setup,
     transcribe,
 )
@@ -143,18 +142,10 @@ class WayVoiceDaemon:
         self._record_delivery_mode = None
         self._record_timer: threading.Timer | None = None
         self._record_started = 0.0
+        self._record_generation = 0
         self._busy_started = 0.0
-        #: Progress of the background model preparation, and how to stop it.
-        self._download: dict = {
-            "state": "idle", "model": "", "done_bytes": 0, "total_bytes": 0,
-            "error": "", "warming": False,
-        }
-        self._prepare_thread: threading.Thread | None = None
-        #: Set before the thread starts and cleared when it ends. A thread that has
-        #: been created but not started is not alive yet, and asking about the thread
-        #: alone let two callers through, which started two downloads of one file.
-        self._prepare_running = False
-        self._prepare_cancel = threading.Event()
+        self.preparation = ModelPreparationController(
+            self._lock, self._shutdown, lambda: bool(self._model_maintenance))
         self._shortcut_portal = None
         self._commands = None
         self._ptt_lock = threading.Lock()
@@ -192,7 +183,7 @@ class WayVoiceDaemon:
         # Warm the worker with the model that is already on disk, so the first
         # dictation of the session costs the same as every one after it. Nothing is
         # fetched here: a download starts when the user asks for one in the settings.
-        self._start_model_prepare(cfg, download=False)
+        self.preparation.start(cfg, download=False)
 
     @staticmethod
     def _prepare_engine(engine, status: dict) -> None:
@@ -207,159 +198,13 @@ class WayVoiceDaemon:
     # ------------------------------------------------------------------
     # Getting the model ready before it is needed
     # ------------------------------------------------------------------
-    def _start_model_prepare(self, cfg: dict | None = None, download: bool = True) -> str:
-        """Get the selected model ready: fetch it if asked to, then warm it.
-
-        Returns the phase that was *started* - ``"downloading"`` or ``"warming"`` - read
-        before the thread has had a chance to finish. Reporting the state the background work
-        had reached by then would be a race, and a race that answers "ready" for a load that
-        has just begun.
-
-        Only one run at a time: two downloads of the same 3 GB file would fight over the same
-        cache, and the second one's progress would be the first one's failure.
-
-        A model that is already on disk is never fetched - the daemon asks this on every start
-        and the answer must not involve the network - so ``download=False`` is what startup
-        uses. Asking to prepare a model that *is* on disk warms it rather than reporting
-        "already done", which used to leave someone who had just picked a different model
-        facing a slow first dictation with nothing having told them it was coming.
-        """
-        if self._shutdown.is_set() or self._model_maintenance:
-            return ""
-        settings = dict(cfg or load_config())
-        engine = engine_from_config(settings)
-        state = model_state(engine, settings)
-        if not state["supported"]:
-            return ""
-        if state["present"]:
-            # Nothing to fetch. Warming it is still the point of being asked, and it
-            # needs a worker to warm into - the user may have turned that off.
-            if not settings.get("engine_worker", True):
-                return ""
-            download = False
-        elif not download:
-            # Asked to warm up a model that is not there.
-            return ""
-        with self._lock:
-            if self._shutdown.is_set() or self._prepare_running or self._model_maintenance:
-                return ""
-            self._prepare_running = True
-            self._prepare_cancel.clear()
-            phase = "downloading" if download else "warming"
-            self._download = {
-                "state": phase,
-                "operation_id": uuid.uuid4().hex,
-                "engine": engine.id,
-                "model": state["model"],
-                "done_bytes": 0,
-                "total_bytes": 0,
-                "error": "",
-                "warming": not download,
-            }
-            thread = threading.Thread(
-                target=self._prepare_model_worker,
-                args=(settings, dict(self._download), download),
-                daemon=True,
-            )
-            self._prepare_thread = thread
-        try:
-            with self._lock:
-                if self._shutdown.is_set():
-                    self._prepare_running = False
-                    self._prepare_thread = None
-                    return ""
-            thread.start()
-        except Exception as exc:
-            with self._lock:
-                self._prepare_running = False
-                self._prepare_thread = None
-                self._download = {"state": "error", "model": state["model"],
-                                  "done_bytes": 0, "total_bytes": 0,
-                                  "error": str(exc), "warming": False}
-            return ""
-        return phase
-
-    def _prepare_model_worker(self, cfg: dict, reported: dict, download: bool) -> None:
-        """Fetch the model when asked to, then let the warm worker hold it.
-
-        Runs on its own thread and keeps its hands off the daemon's locks: a dictation may be
-        waiting on the hot key while three gigabytes come down.
-        """
-        engine = engine_from_config(cfg)
-
-        def on_progress(done: int, total: int) -> None:
-            with self._lock:
-                # Never resurrect a download the user cancelled, and never overwrite
-                # the error of one that has already finished.
-                if self._download.get("state") != "downloading":
-                    return
-                self._download["done_bytes"] = int(done)
-                self._download["total_bytes"] = int(total)
-
-        def on_warming() -> None:
-            with self._lock:
-                if self._download.get("state") == "downloading":
-                    # From the user's side this is the same wait: the weights are down and
-                    # the model is going into memory. Reporting it only in the final
-                    # answer would leave the window at 100% for the whole load.
-                    self._download["warming"] = True
-
-        try:
-            result = prepare_model(
-                engine, cfg, on_progress, self._prepare_cancel, on_warming, download
-            )
-        except TranscriptionCancelled:
-            # A cancelled preparation is not a failure: "cancelled" is a state the
-            # engine's own contract lists, and the window shows it as such.
-            result = {"state": "cancelled"}
-        except Exception as exc:
-            # prepare_model is documented to answer with a dict, but a value it does
-            # not expect - a hand-edited config, a helper that died in a way it does
-            # not recognise - raises instead. Without this the thread ended there,
-            # and because _prepare_running was only cleared on the success path it
-            # stayed set: the settings button and `wayvoice model --download` were
-            # then refused for the rest of the session, and the window's spinner
-            # turned over a download that was not happening.
-            traceback.print_exc()
-            result = {"state": "error", "error": str(exc)}
-        finally:
-            with self._lock:
-                if not isinstance(result, dict):
-                    result = {"state": "error", "error": str(result)}
-                self._download = {
-                    "state": str(result.get("state") or "ready"),
-                    "model": reported.get("model", ""),
-                    "operation_id": reported.get("operation_id", ""),
-                    "engine": reported.get("engine", ""),
-                    "done_bytes": int(result.get("done") or 0),
-                    "total_bytes": int(result.get("total") or 0),
-                    "error": str(result.get("error") or ""),
-                    # Whether the warm-up succeeded, not whether one is running: the
-                    # reply ends the work, and a window still saying "preparing"
-                    # would never stop.
-                    "warming": False,
-                }
-                # In the finally, so that no path out of this thread can leave the
-                # daemon permanently unable to start another preparation.
-                self._prepare_running = False
-                self._prepare_thread = None
-
-    def _cancel_model_prepare(self, operation_id=None) -> str:
-        with self._lock:
-            if operation_id is not None and operation_id != self._download.get("operation_id"):
-                return "stale"
-            if not self._prepare_running:
-                return "nothing"
-            self._prepare_cancel.set()
-            return "warming" if self._download.get("warming") or self._download.get("state") == "warming" else "download"
-
     def _model_report(self, cfg: dict) -> dict:
         """Model state for :meth:`status`, merged with any run in flight."""
         engine = engine_from_config(cfg)
         state = model_state(engine, cfg)
         # A read snapshot is sufficient for progress; status must not wait for
         # lifecycle I/O (for example pw-record finalizing its WAV under the lock).
-        download = dict(self._download)
+        download = self.preparation.snapshot()
         return {
             "supported": state["supported"],
             "present": state["present"],
@@ -489,8 +334,12 @@ class WayVoiceDaemon:
             except Exception:
                 pass
 
-    def _auto_stop_recording(self) -> None:
+    def _auto_stop_recording(self, generation=None) -> None:
         with self._lock:
+            if generation is None:
+                generation = self._record_generation
+            if generation != self._record_generation:
+                return
             if self._reconcile_recorder():
                 return
             if not self.recorder.recording:
@@ -506,7 +355,7 @@ class WayVoiceDaemon:
                 seconds = max(5, int(_CONFIG_DEFAULTS["max_recording_sec"]))
             self.last_warning = tr("daemon.recording_limit", cfg.get("ui_language"), seconds=seconds)
         notify(self.last_warning, enabled=cfg.get("notify", True))
-        self.stop_recording()
+        self.stop_recording(expected_generation=generation)
 
     def _remove_finished_wav(self, wav: Path) -> None:
         """Called only after the ASR reader has released this recording."""
@@ -595,8 +444,10 @@ class WayVoiceDaemon:
                     self.recorder.start()
                 self._record_delivery_mode = delivery_mode
                 self._record_started = time.monotonic()
+                self._record_generation += 1
                 self._cancel_record_timer()
-                self._record_timer = threading.Timer(max_seconds, self._auto_stop_recording)
+                self._record_timer = threading.Timer(
+                    max_seconds, self._auto_stop_recording, args=(self._record_generation,))
                 self._record_timer.daemon = True
                 self._record_timer.start()
                 # A dictation gets its own notification, and the states inside it
@@ -653,8 +504,12 @@ class WayVoiceDaemon:
                 return {"ok": False, "error": str(exc)}
             return {"ok": True, "state": "idle"}
 
-    def stop_recording(self, delivery_mode=None) -> dict:
+    def stop_recording(self, delivery_mode=None, *, expected_generation=None) -> dict:
         with self._lock:
+            # A cancelled timer can already be executing or waiting on this lock.
+            # Check identity at the same ownership boundary as the stop transition.
+            if expected_generation is not None and expected_generation != self._record_generation:
+                return {"ok": True, "state": "stale-timer"}
             failure = self._reconcile_recorder()
             if failure:
                 return {"ok": False, "error": failure}
@@ -820,7 +675,7 @@ class WayVoiceDaemon:
             with self._lock:
                 if not updating():
                     return {"ok": False, "error": "Update lock is not held."}
-                if self.recorder.recording or self.busy or self._prepare_running or self._model_maintenance:
+                if self.recorder.recording or self.busy or self.preparation.running or self._model_maintenance:
                     return {"ok": False, "error": "Finish dictation and model preparation before updating."}
                 return {"ok": True}
         if command.strip().lower().partition(' ')[0] in {'prepare-model', 'delete-model', 'engine-setup'} and updating():
@@ -840,7 +695,7 @@ class WayVoiceDaemon:
                 with self._lock:
                     if not time.monotonic() < expires <= time.monotonic() + 3:
                         return {"ok": False, "error": "Microphone check expired. Try again."}
-                    if updating() or self.recorder.recording or self.busy or self._prepare_running or self._model_maintenance:
+                    if updating() or self.recorder.recording or self.busy or self.preparation.running or self._model_maintenance:
                         return {"ok": False, "error": "Finish the current operation before checking the microphone."}
                     return {"ok": True, "level": probe_level(target, cancel_event=self._shutdown)}
             except Exception as exc:
@@ -876,8 +731,9 @@ class WayVoiceDaemon:
         if command == "status":
             return {"ok": True, **self.status()}
         if command == "clear-text":
-            with self._lock:
-                self.last_text = ""
+            # Like clear-status and transcript publication, this is one reference
+            # assignment. Never wait for microphone I/O in the accept loop.
+            self.last_text = ""
             return {"ok": True}
         if command == "clear-status":
             self.last_error = ""
@@ -905,7 +761,7 @@ class WayVoiceDaemon:
                 # A Settings draft prepares files, never replaces the live dictation
                 # worker. Save/startup (or the bare CLI) owns warming saved settings.
                 cfg["engine_worker"] = False
-            phase = self._start_model_prepare(cfg)
+            phase = self.preparation.start(cfg)
             if phase:
                 # What was started, not what was hoped for: a model that was on
                 # disk is warmed rather than fetched, and a caller that says
@@ -913,11 +769,11 @@ class WayVoiceDaemon:
                 # that never moves.
                 return {"ok": True, "state": phase, "model": cfg.get("model"),
                         "engine": cfg.get("engine", DEFAULT_ENGINE),
-                        "operation_id": self._download.get("operation_id", "")}
+                        "operation_id": self.preparation.report.get("operation_id", "")}
             with self._lock:
-                if self._prepare_running:
+                if self.preparation.running:
                     return {"ok": False, "state": "busy", "model": cfg.get("model"),
-                            "active_model": self._download.get("model"),
+                            "active_model": self.preparation.report.get("model"),
                             "error": tr("daemon.model_prepare_busy", cfg.get("ui_language"))}
             state = self._model_report(cfg)
             if not state["supported"]:
@@ -932,7 +788,7 @@ class WayVoiceDaemon:
             if state["present"]:
                 return {"ok": True, "state": "ready", "model": cfg.get("model"),
                         "engine": cfg.get("engine", DEFAULT_ENGINE),
-                        "operation_id": self._download.get("operation_id", "")}
+                        "operation_id": self.preparation.report.get("operation_id", "")}
             # Not started: a download is already running, or one just failed.
             download = state["download"]
             return {
@@ -958,7 +814,7 @@ class WayVoiceDaemon:
                     operation_id = target["operation_id"]
                 except (ValueError, TypeError) as exc:
                     return {"ok": False, "error": str(exc)}
-            phase = self._cancel_model_prepare(operation_id)
+            phase = self.preparation.cancel(operation_id)
             accepted = phase in {"warming", "download"}
             return {"ok": accepted, "phase": phase, "stopped": False, "cancelling": accepted,
                     "error": tr("store.cancel_stale", self._language()) if phase == "stale" else ""}
@@ -1123,16 +979,21 @@ class WayVoiceDaemon:
                     # deadline. Without it a client that connects and stays quiet
                     # blocks this loop - and with it the hot key - until the
                     # daemon is restarted.
-                    conn.settimeout(CLIENT_TIMEOUT)
+                    deadline = time.monotonic() + CLIENT_TIMEOUT
                     data = b""
                     while not data.endswith(b"\n"):
-                        if len(data) > MAX_REQUEST_BYTES:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0 or self._shutdown.is_set():
                             data = b""
                             break
-                        chunk = conn.recv(4096)
+                        conn.settimeout(remaining)
+                        chunk = conn.recv(min(4096, MAX_REQUEST_BYTES + 1 - len(data)))
                         if not chunk:
                             break
                         data += chunk
+                        if len(data) > MAX_REQUEST_BYTES:
+                            data = b""
+                            break
                 except OSError:
                     # A client that hung up mid-request, and one whose request
                     # took longer than CLIENT_TIMEOUT.
@@ -1214,7 +1075,7 @@ class WayVoiceDaemon:
         self._shutdown_deadline = deadline
         self._cancel_record_timer()
         with self._lock:
-            active_worker = cancel_jobs(self._transcribe_cancel, self._prepare_cancel)
+            active_worker = cancel_jobs(self._transcribe_cancel, self.preparation.cancel_event)
         # A download that outlived the daemon would keep fetching a file nobody is
         # waiting for, in a session that is going away.
         # Leaving a recording behind is not a cleanup detail: pw-record keeps the
@@ -1226,9 +1087,9 @@ class WayVoiceDaemon:
             print(f"WayVoice: could not stop the recorder: {exc}", file=sys.stderr)
         # Force registered children first. Their own owner threads reap, close
         # pipes and remove WAVs; never delete a recording while ASR still reads it.
-        stop_jobs(self._transcribe_cancel, self._prepare_cancel, deadline=deadline, active_worker=active_worker)
+        stop_jobs(self._transcribe_cancel, self.preparation.cancel_event, deadline=deadline, active_worker=active_worker)
         with self._lock:
-            threads = (self._transcribe_thread, self._prepare_thread)
+            threads = (self._transcribe_thread, self.preparation.thread)
             if self._transcribe_thread is not None and self._transcribe_thread.ident is None:
                 # A published thread can be stuck in start(). It checks cancellation
                 # before reading audio if it eventually begins, so nobody owns a read.

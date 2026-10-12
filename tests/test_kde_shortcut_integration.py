@@ -68,12 +68,10 @@ class PortalControllerTests(unittest.TestCase):
         work, done, failed = ctx.preferences._queue_mutation.call_args.args
         with mock.patch('wayvoice.ui.controllers.shortcut.service.start_daemon', return_value=True), \
                 mock.patch('wayvoice.ui.controllers.shortcut.request', return_value={'ok': True}) as request, \
-                mock.patch('wayvoice.ui.controllers.shortcut.load_config', return_value={'model': 'medium'}), \
-                mock.patch('wayvoice.ui.controllers.shortcut.config_error', return_value=''), \
-                mock.patch('wayvoice.ui.controllers.shortcut.save_config') as save:
+                mock.patch('wayvoice.ui.controllers.shortcut.update_config', return_value={'model': 'medium', 'shortcut_backend': 'portal'}) as save:
             work()
             request.assert_called_once_with('configure-shortcut', timeout=2.0)
-            save.assert_called_once_with({'model': 'medium', 'shortcut_backend': 'portal'})
+            save.assert_called_once_with({'shortcut_backend': 'portal'}, {'shortcut_backend': None})
         done(None)
         self.assertEqual(ctx.state.shortcut_binding, before)
         ctx.settings.shortcut_button.set_sensitive.assert_called_with(True)

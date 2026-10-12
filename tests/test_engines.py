@@ -9,6 +9,7 @@ nobody claims fails loudly instead of falling back to another engine.
 No downloaded model and no network. The settings-window tests need a display and step
 aside without one.
 """
+from wayvoice.runtime import processes
 
 import io
 import os
@@ -265,7 +266,7 @@ class WhisperCppThreadTests(unittest.TestCase):
             return subprocess.CompletedProcess(args, 0, "текст", "")
 
         with mock.patch.object(engine, "_find_whisper_cpp", return_value="/bin/echo"), \
-             mock.patch.object(engine, "_run_cancelable", side_effect=record):
+             mock.patch.object(processes, "_run_cancelable", side_effect=record):
             text = _transcribe_whisper_cpp(Path("/nonexistent.wav"), cfg, None)
         self.assertEqual(text, "текст")
         return seen[0]

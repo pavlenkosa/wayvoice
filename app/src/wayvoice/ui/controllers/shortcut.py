@@ -10,7 +10,7 @@ from gi.repository import Gdk, Gtk, Adw
 from ...shortcut import label_for, portal_shortcut_desktop
 from ... import service
 from ...cli import request
-from ...config import load_config, save_config, config_error
+from ...config import update_config
 from ..health_presentation import show_operation_error
 
 
@@ -33,22 +33,22 @@ class ShortcutController:
         self._configuring = True
         self.ctx.settings.shortcut_button.set_sensitive(False)
 
+        expected = self.ctx.state.cfg.get("shortcut_backend")
+
         def work():
+            cfg = update_config({"shortcut_backend": "portal"}, {"shortcut_backend": expected})
             if not service.start_daemon():
                 raise RuntimeError(self.ctx.state.t("health.daemon_unavailable"))
             reply = request("configure-shortcut", timeout=2.0)
             if not reply.get("ok"):
                 raise RuntimeError(reply.get("error") or self.ctx.state.t("shortcut.portal.unavailable"))
-            # Persist only opt-in, preserving the saved settings and the UI draft.
-            cfg = load_config()
-            if config_error():
-                raise RuntimeError(config_error())
-            cfg["shortcut_backend"] = "portal"
-            save_config(cfg)
+            return cfg
 
         self.ctx.preferences._queue_mutation(work, self._portal_configured, self._portal_failed)
 
-    def _portal_configured(self, _result):
+    def _portal_configured(self, result):
+        if isinstance(result, dict):
+            self.ctx.state.cfg["shortcut_backend"] = result["shortcut_backend"]
         self._configuring = False
         self.ctx.settings.shortcut_button.set_sensitive(True)
         self.ctx.window.toast.add_toast(Adw.Toast(title=self.ctx.state.t("shortcut.portal.choose")))

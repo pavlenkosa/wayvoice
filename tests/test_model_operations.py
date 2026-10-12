@@ -21,26 +21,28 @@ class ModelOperationsTests(unittest.TestCase):
         return self.d.dispatch('delete-model ' + json.dumps({'model': 'small'}))
 
     def test_captured_cancel_never_cancels_a_newer_operation(self):
-        self.d._prepare_running = True
-        self.d._download = {'state': 'warming', 'model': 'small', 'operation_id': 'new'}
+        self.d.preparation.running = True
+        self.d.preparation.report = {'state': 'warming', 'model': 'small', 'operation_id': 'new'}
         stale = self.d.dispatch('cancel-download {"operation_id":"old"}')
         self.assertFalse(stale['ok'])
-        self.assertFalse(self.d._prepare_cancel.is_set())
+        self.assertFalse(self.d.preparation.cancel_event.is_set())
         reply = self.d.dispatch('cancel-download {"operation_id":"new"}')
         self.assertTrue(reply['cancelling'])
         self.assertFalse(reply['stopped'])
-        self.assertTrue(self.d._prepare_cancel.is_set())
+        self.assertTrue(self.d.preparation.cancel_event.is_set())
 
     def test_busy_and_recording_and_preparing_refuse_deletion(self):
-        for state in ('busy', '_prepare_running', 'recording'):
+        for state in ('busy', 'preparing', 'recording'):
             with self.subTest(state=state), mock.patch.object(daemon_models.model_store, 'delete') as delete:
                 if state == 'recording':
                     with mock.patch.object(self.d.recorder.__class__, 'recording', new_callable=mock.PropertyMock, return_value=True):
                         self.assertFalse(self.delete()['ok'])
                 else:
-                    setattr(self.d, state, True)
+                    owner = self.d.preparation if state == 'preparing' else self.d
+                    field = 'running' if state == 'preparing' else state
+                    setattr(owner, field, True)
                     self.assertFalse(self.delete()['ok'])
-                    setattr(self.d, state, False)
+                    setattr(owner, field, False)
                 delete.assert_not_called()
 
     def test_maintenance_blocks_new_recording_and_prepare_then_unwinds(self):
@@ -50,13 +52,13 @@ class ModelOperationsTests(unittest.TestCase):
             entered.set()
             release.wait(2)
             raise OSError('filesystem refused')
-        with mock.patch.object(daemon_models.engine, '_retry_unresolved_workers'), mock.patch.object(daemon_models.engine, '_worker_ping', return_value=None), mock.patch.object(daemon_models.engine, 'worker_pid_path', return_value=Path('/nonexistent-wayvoice-test.pid')), mock.patch.object(daemon_models.model_store, 'delete', side_effect=delete):
+        with mock.patch.object(daemon_models.worker_client, '_retry_unresolved_workers'), mock.patch.object(daemon_models.worker_client, '_worker_ping', return_value=None), mock.patch.object(daemon_models.locations, 'worker_pid_path', return_value=Path('/nonexistent-wayvoice-test.pid')), mock.patch.object(daemon_models.model_store, 'delete', side_effect=delete):
             thread = threading.Thread(target=lambda: result.append(self.delete()))
             thread.start()
             self.assertTrue(entered.wait(2))
             try:
                 self.assertFalse(self.d.start_recording()['ok'])
-                self.assertEqual(self.d._start_model_prepare({}), '')
+                self.assertEqual(self.d.preparation.start({}), '')
             finally:
                 release.set()
                 thread.join(2)
@@ -66,7 +68,7 @@ class ModelOperationsTests(unittest.TestCase):
 
     def test_surviving_pinned_worker_prevents_delete(self):
         reply = {'pid': 123, 'config': {'model': 'small'}}
-        with mock.patch.object(daemon_models.engine, '_retry_unresolved_workers'), mock.patch.object(daemon_models.engine, '_worker_ping', return_value=reply), mock.patch.object(daemon_models.engine, '_worker_identity', return_value=(123, 'start')), mock.patch.object(daemon_models.engine, '_pid_alive', return_value=True), mock.patch.object(daemon_models.engine, 'stop_worker') as stop, mock.patch.object(daemon_models.model_store, 'delete') as delete:
+        with mock.patch.object(daemon_models.worker_client, '_retry_unresolved_workers'), mock.patch.object(daemon_models.worker_client, '_worker_ping', return_value=reply), mock.patch.object(daemon_models.worker_client, '_worker_identity', return_value=(123, 'start')), mock.patch.object(daemon_models.worker_client, '_pid_alive', return_value=True), mock.patch.object(daemon_models.worker_client, 'stop_worker') as stop, mock.patch.object(daemon_models.model_store, 'delete') as delete:
             self.assertFalse(self.delete()['ok'])
         stop.assert_called_once_with(timeout=0.5, expected_identity=(123, 'start'))
         delete.assert_not_called()
@@ -93,13 +95,13 @@ class ModelOperationsTests(unittest.TestCase):
 
     def test_dead_pinned_worker_is_stopped_before_deletion(self):
         reply = {'pid': 123, 'config': {'model': 'small'}}
-        with mock.patch.object(daemon_models.engine, '_retry_unresolved_workers'), mock.patch.object(daemon_models.engine, '_worker_ping', return_value=reply), mock.patch.object(daemon_models.engine, '_worker_identity', side_effect=[(123, 'start'), None]), mock.patch.object(daemon_models.engine, 'stop_worker') as stop, mock.patch.object(daemon_models.model_store, 'delete', return_value={'ok': True}) as delete:
+        with mock.patch.object(daemon_models.worker_client, '_retry_unresolved_workers'), mock.patch.object(daemon_models.worker_client, '_worker_ping', return_value=reply), mock.patch.object(daemon_models.worker_client, '_worker_identity', side_effect=[(123, 'start'), None]), mock.patch.object(daemon_models.worker_client, 'stop_worker') as stop, mock.patch.object(daemon_models.model_store, 'delete', return_value={'ok': True}) as delete:
             self.assertTrue(self.delete()['ok'])
         stop.assert_called_once_with(timeout=0.5, expected_identity=(123, 'start'))
         delete.assert_called_once_with('small')
 
     def test_unresponsive_live_worker_refuses_deletion(self):
-        with mock.patch.object(daemon_models.engine, '_retry_unresolved_workers'), mock.patch.object(daemon_models.engine, '_worker_ping', return_value=None), mock.patch.object(daemon_models.engine, 'worker_pid_path') as path, mock.patch.object(daemon_models.engine, '_pid_alive', return_value=True), mock.patch.object(daemon_models.model_store, 'delete') as delete:
+        with mock.patch.object(daemon_models.worker_client, '_retry_unresolved_workers'), mock.patch.object(daemon_models.worker_client, '_worker_ping', return_value=None), mock.patch.object(daemon_models.locations, 'worker_pid_path') as path, mock.patch.object(daemon_models.worker_client, '_pid_alive', return_value=True), mock.patch.object(daemon_models.model_store, 'delete') as delete:
             path.return_value.read_text.return_value = '123'
             self.assertFalse(self.delete()['ok'])
         delete.assert_not_called()

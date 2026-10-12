@@ -1,4 +1,5 @@
 """Lost sockets cannot release ownership of a still-running native request."""
+from wayvoice.runtime import locations, processes, worker_client
 import threading
 import socket
 import time
@@ -15,9 +16,9 @@ class TransportLossTests(unittest.TestCase):
 
     def request(self, command, event=None, timeout=2):
         if command == 'warm':
-            with mock.patch.object(engine, 'ensure_worker', return_value=True):
+            with mock.patch.object(worker_client, 'ensure_worker', return_value=True):
                 return engine.warm_worker({}, timeout=timeout, cancel_event=event)
-        return engine._worker_request({'cmd': command, 'request_id': 'take'}, 'take', timeout, event)
+        return worker_client._worker_request({'cmd': command, 'request_id': 'take'}, 'take', timeout, event)
 
     def root_runtime(self):
         root = self.path.parent / 'runtime'
@@ -38,10 +39,10 @@ class TransportLossTests(unittest.TestCase):
                         event.set()
                     raise ConnectionRefusedError("worker disappeared")
                 sock.connect.side_effect = lost_connection
-                with mock.patch.object(engine, "faster_runtime", return_value=root), \
-                     mock.patch.object(engine, "ensure_worker", return_value=True), \
-                     mock.patch.object(engine.socket, "socket", return_value=sock), \
-                     mock.patch.object(engine, "_run_cancelable", return_value=subprocess.CompletedProcess([], 0, "text", "")) as oneshot:
+                with mock.patch.object(locations, "faster_runtime", return_value=root), \
+                     mock.patch.object(worker_client, "ensure_worker", return_value=True), \
+                     mock.patch.object(worker_client.socket, "socket", return_value=sock), \
+                     mock.patch.object(processes, "_run_cancelable", return_value=subprocess.CompletedProcess([], 0, "text", "")) as oneshot:
                     if cancelled:
                         with self.assertRaises(engine.TranscriptionCancelled):
                             engine._transcribe_faster(Path("audio.wav"), {}, event)
@@ -61,9 +62,9 @@ class TransportLossTests(unittest.TestCase):
                 self.addCleanup(timer.cancel)
                 with self.assertRaises(engine.TranscriptionCancelled):
                     self.request(command, event)
-                self.assertFalse(engine._pid_alive(proc.pid), 'native job outlived its owner')
+                self.assertFalse(worker_client._pid_alive(proc.pid), 'native job outlived its owner')
                 proc.wait(timeout=2)
-                self.assertNotIn(event, engine._worker_jobs)
+                self.assertNotIn(event, worker_client._worker_jobs)
                 self.worker('instant')
                 self.assertTrue(self.request(command))
 
@@ -78,7 +79,7 @@ class TransportLossTests(unittest.TestCase):
                     with self.assertRaises(engine.TranscriptionTimeout):
                         self.request(command, timeout=0.05)
                 self.assertLess(time.monotonic() - began, 2)
-                self.assertFalse(engine._pid_alive(proc.pid))
+                self.assertFalse(worker_client._pid_alive(proc.pid))
                 proc.wait(timeout=2)
 
     def test_uncancelled_socket_loss_retires_before_fallback(self):
@@ -90,7 +91,7 @@ class TransportLossTests(unittest.TestCase):
                 else:
                     with self.assertRaises(engine.WorkerUnavailable):
                         self.request(command)
-                self.assertFalse(engine._pid_alive(proc.pid))
+                self.assertFalse(worker_client._pid_alive(proc.pid))
                 proc.wait(timeout=2)
 
     def test_finished_worker_survives_lost_response(self):
@@ -110,7 +111,7 @@ class TransportLossTests(unittest.TestCase):
         proc = self.worker('drop-delayed')
         with self.assertRaises(engine.WorkerUnavailable):
             self.request('transcribe')
-        self.assertFalse(engine._pid_alive(proc.pid))
+        self.assertFalse(worker_client._pid_alive(proc.pid))
         proc.wait(timeout=2)
 
     def test_sendall_error_after_acceptance_retires_the_accepted_request(self):
@@ -127,13 +128,13 @@ class TransportLossTests(unittest.TestCase):
         for command in ('transcribe', 'warm'):
             with self.subTest(command=command):
                 proc = self.worker('hang')
-                with mock.patch.object(engine.socket, 'socket', side_effect=factory):
+                with mock.patch.object(worker_client.socket, 'socket', side_effect=factory):
                     if command == 'warm':
                         self.assertFalse(self.request(command))
                     else:
                         with self.assertRaises(engine.WorkerUnavailable):
                             self.request(command)
-                self.assertFalse(engine._pid_alive(proc.pid))
+                self.assertFalse(worker_client._pid_alive(proc.pid))
                 proc.wait(timeout=2)
 
     def test_completion_history_distinguishes_unseen_and_finished_requests(self):
@@ -146,32 +147,32 @@ class TransportLossTests(unittest.TestCase):
         self.assertEqual(state.request_status('new'), 'finished')
         for number in range(300):
             state.finish(str(number))
-        self.assertLessEqual(len(state._finished), 256)
+        self.assertLessEqual(len(state._finished), fw_worker._MAX_HISTORY)
 
     def test_failed_retirement_blocks_fallback_and_retains_owner_for_shutdown(self):
         proc = self.worker('drop-running')
         event = threading.Event()
-        with mock.patch.object(engine, 'stop_worker', return_value=False):
+        with mock.patch.object(worker_client, 'stop_worker', return_value=False):
             with self.assertRaisesRegex(RuntimeError, 'fallback was blocked') as raised:
                 self.request('transcribe', event)
             self.assertNotIsInstance(raised.exception, engine.WorkerUnavailable)
-            self.assertTrue(engine._pid_alive(proc.pid))
-            self.assertNotIn(event, engine._worker_jobs)
-            self.assertIn(event, engine._unresolved_worker_jobs)
+            self.assertTrue(worker_client._pid_alive(proc.pid))
+            self.assertNotIn(event, worker_client._worker_jobs)
+            self.assertIn(event, worker_client._unresolved_worker_jobs)
             active = engine.cancel_jobs(event)
             self.assertTrue(active)
             event.clear()
             with self.assertRaisesRegex(RuntimeError, 'automatic retry was blocked'):
                 engine.ensure_worker({}, event)
             runtime = self.root_runtime()
-            with mock.patch.object(engine, 'faster_runtime', return_value=runtime), \
-                 mock.patch.object(engine, '_run_cancelable') as oneshot:
+            with mock.patch.object(locations, 'faster_runtime', return_value=runtime), \
+                 mock.patch.object(processes, '_run_cancelable') as oneshot:
                 with self.assertRaisesRegex(RuntimeError, 'automatic retry was blocked'):
                     engine._transcribe_faster(runtime / 'take.wav', {'engine_worker': False}, event)
             oneshot.assert_not_called()
         engine.stop_jobs(event, deadline=time.monotonic() + 2, active_worker=active)
         proc.wait(timeout=2)
-        self.assertNotIn(event, engine._unresolved_worker_jobs)
+        self.assertNotIn(event, worker_client._unresolved_worker_jobs)
 
     def test_failed_retirement_preserves_cancel_and_pending_warm_owner(self):
         proc = self.worker('drop-on-cancel')
@@ -179,11 +180,11 @@ class TransportLossTests(unittest.TestCase):
         timer = threading.Timer(0.06, event.set)
         timer.start()
         self.addCleanup(timer.cancel)
-        with mock.patch.object(engine, 'stop_worker', return_value=False):
+        with mock.patch.object(worker_client, 'stop_worker', return_value=False):
             with self.assertRaises(engine.TranscriptionCancelled):
                 self.request('warm', event)
-        self.assertTrue(engine._pid_alive(proc.pid))
-        self.assertIn(event, engine._unresolved_worker_jobs)
+        self.assertTrue(worker_client._pid_alive(proc.pid))
+        self.assertIn(event, worker_client._unresolved_worker_jobs)
         engine.stop_jobs(event, deadline=time.monotonic() + 2)
         proc.wait(timeout=2)
-        self.assertNotIn(event, engine._unresolved_worker_jobs)
+        self.assertNotIn(event, worker_client._unresolved_worker_jobs)

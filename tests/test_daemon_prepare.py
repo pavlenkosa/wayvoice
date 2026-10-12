@@ -18,6 +18,7 @@ import unittest
 from unittest import mock
 
 from wayvoice import daemon as daemon_mod
+from wayvoice import daemon_preparation as preparation_mod
 from wayvoice.daemon import WayVoiceDaemon
 from wayvoice.config import config_path
 from wayvoice.engine import Engine
@@ -115,8 +116,9 @@ class PrepareDaemon:
         self.config = dict(self.CONFIG)
         self.config.update(config or {})
         test.patch("wayvoice.daemon.engine_from_config", return_value=engine)
+        test.patch("wayvoice.daemon_preparation.engine_from_config", return_value=engine)
         # Warming is the worker's business; here it is only ever a return value.
-        test.patch("wayvoice.engine.warm_worker", return_value=True)
+        test.patch("wayvoice.runtime.worker_client.warm_worker", return_value=True)
         test.patch("wayvoice.daemon.load_config", return_value=dict(self.config))
         self.daemon = WayVoiceDaemon()
         # A Mock would answer "recording" to everything, and the daemon would take the
@@ -133,7 +135,7 @@ class PrepareDaemon:
     def settle(self, timeout: float = 10.0) -> None:
         """Wait until no download is in flight."""
         deadline = time.monotonic() + timeout
-        while self.daemon._prepare_thread is not None and time.monotonic() < deadline:
+        while self.daemon.preparation.thread is not None and time.monotonic() < deadline:
             time.sleep(0.02)
 
     @property
@@ -158,7 +160,7 @@ class PrepareTests(DaemonCase):
     def test_a_missing_model_starts_a_download(self):
         eng, calls = make_engine(present=False, progress=True)
         harness = PrepareDaemon(self, eng, calls)
-        self.assertTrue(harness.daemon._start_model_prepare({}))
+        self.assertTrue(harness.daemon.preparation.start(harness.config))
         harness.wait_for("ready")
         self.assertEqual(calls["n"], 1)
         self.assertGreater(calls["progress"], 0, "no progress reached the daemon")
@@ -166,7 +168,7 @@ class PrepareTests(DaemonCase):
     def test_progress_appears_in_the_status_the_window_reads(self):
         eng, calls = make_engine(present=False, progress=True, delay=0.05)
         harness = PrepareDaemon(self, eng, calls)
-        harness.daemon._start_model_prepare({})
+        harness.daemon.preparation.start(harness.config)
         seen = harness.wait_for("ready")
         self.assertEqual(seen["done_bytes"], 30)
         self.assertEqual(seen["total_bytes"], 30)
@@ -175,7 +177,7 @@ class PrepareTests(DaemonCase):
     def test_the_model_is_reported_as_missing_while_it_is_missing(self):
         eng, calls = make_engine(present=False, progress=True, delay=0.05)
         harness = PrepareDaemon(self, eng, calls)
-        harness.daemon._start_model_prepare({})
+        harness.daemon.preparation.start(harness.config)
         report = harness.daemon.status()["model"]
         self.assertTrue(report["supported"])
         self.assertFalse(report["present"])
@@ -189,7 +191,7 @@ class PrepareTests(DaemonCase):
         # moves.
         eng, calls = make_engine(present=True)
         harness = PrepareDaemon(self, eng, calls)
-        self.assertTrue(harness.daemon._start_model_prepare({}))
+        self.assertTrue(harness.daemon.preparation.start(harness.config))
         harness.wait_for("ready")
         self.assertEqual(calls["n"], 0, "a model that was there was fetched")
         report = harness.daemon.status()["model"]
@@ -202,7 +204,7 @@ class PrepareTests(DaemonCase):
         # does not exist.
         eng, calls = make_engine(present=True)
         harness = PrepareDaemon(self, eng, calls, config={"engine_worker": False})
-        self.assertFalse(harness.daemon._start_model_prepare({}))
+        self.assertFalse(harness.daemon.preparation.start(harness.config))
         reply = harness.daemon.dispatch("prepare-model")
         self.assertTrue(reply["ok"])
         self.assertEqual(reply["state"], "ready")
@@ -210,9 +212,9 @@ class PrepareTests(DaemonCase):
     def test_two_downloads_are_not_started_at_once(self):
         eng, calls = make_engine(present=False, progress=True, delay=0.05)
         harness = PrepareDaemon(self, eng, calls)
-        self.assertTrue(harness.daemon._start_model_prepare({}))
+        self.assertTrue(harness.daemon.preparation.start(harness.config))
         self.assertFalse(
-            harness.daemon._start_model_prepare({}),
+            harness.daemon.preparation.start(harness.config),
             "a second download was started for the same model",
         )
         harness.wait_for("ready")
@@ -221,25 +223,25 @@ class PrepareTests(DaemonCase):
     def test_a_failed_download_is_reported_with_its_reason(self):
         eng, calls = make_engine(present=False, states=["error"])
         harness = PrepareDaemon(self, eng, calls)
-        harness.daemon._start_model_prepare({})
+        harness.daemon.preparation.start(harness.config)
         seen = harness.wait_for("error")
         self.assertEqual(seen["error"], "download failed")
 
     def test_a_cancel_stops_the_download_and_says_so(self):
         eng, calls = make_engine(present=False, progress=True, delay=0.05)
         harness = PrepareDaemon(self, eng, calls)
-        harness.daemon._start_model_prepare({})
+        harness.daemon.preparation.start(harness.config)
         deadline = time.monotonic() + 5.0
         while harness.download.get("state") != "downloading" and time.monotonic() < deadline:
             time.sleep(0.01)
-        self.assertTrue(harness.daemon._cancel_model_prepare())
+        self.assertTrue(harness.daemon.preparation.cancel())
         seen = harness.wait_for("cancelled")
         self.assertEqual(seen["state"], "cancelled")
 
     def test_cancelling_when_nothing_runs_says_nothing_was_running(self):
         eng, calls = make_engine(present=True)
         harness = PrepareDaemon(self, eng, calls)
-        self.assertEqual(harness.daemon._cancel_model_prepare(), "nothing")
+        self.assertEqual(harness.daemon.preparation.cancel(), "nothing")
         reply = harness.daemon.dispatch("cancel-download")
         self.assertFalse(reply["ok"])
         self.assertEqual(reply["phase"], "nothing")
@@ -257,13 +259,13 @@ class PrepareTests(DaemonCase):
 
         eng, calls = make_engine(present=False, progress=True)
         harness = PrepareDaemon(self, eng, calls)
-        self.patch("wayvoice.engine.warm_worker", side_effect=warm)
+        self.patch("wayvoice.runtime.worker_client.warm_worker", side_effect=warm)
         self.addCleanup(release.set)
-        harness.daemon._start_model_prepare({})
+        harness.daemon.preparation.start(harness.config)
         self.assertTrue(holding.wait(10.0), "the warm-up never started")
         reply = harness.daemon.dispatch("cancel-download")
         self.assertEqual(reply["phase"], "warming")
-        self.assertTrue(harness.daemon._prepare_cancel.is_set())
+        self.assertTrue(harness.daemon.preparation.cancel_event.is_set())
         self.assertTrue(reply["cancelling"])
         self.assertFalse(reply["stopped"])
 
@@ -292,8 +294,8 @@ class PrepareTests(DaemonCase):
 
         eng, calls = make_engine(present=False, progress=True)
         harness = PrepareDaemon(self, eng, calls)
-        self.patch("wayvoice.engine.warm_worker", side_effect=warm)
-        harness.daemon._start_model_prepare({})
+        self.patch("wayvoice.runtime.worker_client.warm_worker", side_effect=warm)
+        harness.daemon.preparation.start(harness.config)
         self.addCleanup(finish.set)
         self.assertTrue(started.wait(10.0), "the warm-up never started")
         deadline = time.monotonic() + 5.0
@@ -327,7 +329,7 @@ class HotKeyTests(DaemonCase):
         self.assertFalse(reply["ok"])
         self.assertIn("small", reply["error"])
         self.assertEqual(calls["n"], 0, "the hot key fetched a model")
-        self.assertFalse(harness.daemon._prepare_running)
+        self.assertFalse(harness.daemon.preparation.running)
         harness.daemon.recorder.start.assert_not_called()
 
 
@@ -475,7 +477,7 @@ class CommandTests(DaemonCase):
             Event=threading.Event,
             Timer=threading.Timer,
         )
-        with mock.patch.object(daemon_mod, "threading", shim):
+        with mock.patch.object(preparation_mod, "threading", shim):
             first = threading.Thread(
                 target=lambda: first_answer.append(
                     harness.daemon.dispatch("prepare-model")
@@ -499,7 +501,7 @@ class CommandTests(DaemonCase):
     def test_cancel_download_is_answered_honestly(self):
         eng, calls = make_engine(present=False, progress=True, delay=0.05)
         harness = PrepareDaemon(self, eng, calls)
-        harness.daemon._start_model_prepare({})
+        harness.daemon.preparation.start(harness.config)
         self.assertTrue(harness.daemon.dispatch("cancel-download")["ok"])
         harness.wait_for("cancelled")
 
@@ -543,6 +545,7 @@ class StartupTests(unittest.TestCase):
         # - on the hot key, on a command - is still answered through them.
         for target, value in (
             ("wayvoice.daemon.engine_from_config", engine),
+            ("wayvoice.daemon_preparation.engine_from_config", engine),
             ("wayvoice.daemon.load_config", cfg),
         ):
             patcher = mock.patch(target, return_value=value)
@@ -551,29 +554,29 @@ class StartupTests(unittest.TestCase):
         config_path().parent.mkdir(parents=True, exist_ok=True)
         config_path().write_text("{}")
         daemon = WayVoiceDaemon()
-        self.addCleanup(daemon._prepare_cancel.set)
+        self.addCleanup(daemon.preparation.cancel_event.set)
         daemon.prepare_on_start()
         return daemon
 
     def _settle(self, daemon, timeout=10.0):
         deadline = time.monotonic() + timeout
-        while daemon._prepare_running and time.monotonic() < deadline:
+        while daemon.preparation.running and time.monotonic() < deadline:
             time.sleep(0.02)
 
     def test_starting_the_daemon_fetches_nothing(self):
         # Several gigabytes over the network the moment WayVoice starts is a decision
         # nobody asked for, and on a tethered laptop it is somebody else's bandwidth.
         eng, calls = make_engine(present=False, progress=True)
-        with mock.patch("wayvoice.engine.warm_worker", return_value=True) as warm:
+        with mock.patch("wayvoice.runtime.worker_client.warm_worker", return_value=True) as warm:
             daemon = self._start(eng)
             self._settle(daemon)
         self.assertEqual(calls["n"], 0, "the daemon started a download on its own")
         self.assertFalse(warm.called)
-        self.assertIsNone(daemon._prepare_thread)
+        self.assertIsNone(daemon.preparation.thread)
 
     def test_starting_the_daemon_warms_the_model_that_is_on_disk(self):
         eng, calls = make_engine(present=True)
-        with mock.patch("wayvoice.engine.warm_worker", return_value=True) as warm:
+        with mock.patch("wayvoice.runtime.worker_client.warm_worker", return_value=True) as warm:
             daemon = self._start(eng)
             self._settle(daemon)
         self.assertEqual(calls["n"], 0)
@@ -582,15 +585,15 @@ class StartupTests(unittest.TestCase):
 
     def test_a_disabled_worker_is_not_warmed_at_startup(self):
         eng, calls = make_engine(present=True)
-        with mock.patch("wayvoice.engine.warm_worker") as warm:
+        with mock.patch("wayvoice.runtime.worker_client.warm_worker") as warm:
             daemon = self._start(eng, engine_worker=False)
             self._settle(daemon)
         self.assertFalse(warm.called)
-        self.assertIsNone(daemon._prepare_thread)
+        self.assertIsNone(daemon.preparation.thread)
 
     def test_a_missing_model_is_fetched_when_the_user_asks_for_it(self):
         eng, calls = make_engine(present=False, progress=True)
-        with mock.patch("wayvoice.engine.warm_worker", return_value=True):
+        with mock.patch("wayvoice.runtime.worker_client.warm_worker", return_value=True):
             daemon = self._start(eng)
             self._settle(daemon)
             self.assertTrue(daemon.dispatch("prepare-model")["ok"])
@@ -610,9 +613,10 @@ class StartupTests(unittest.TestCase):
             return True
 
         first, _calls = make_engine(present=True)
-        with mock.patch.object(daemon_mod, "engine_from_config", return_value=first), \
+        with mock.patch.object(preparation_mod, "engine_from_config", return_value=first), \
+             mock.patch.object(daemon_mod, "engine_from_config", return_value=first), \
              mock.patch.object(daemon_mod, "load_config", return_value={"model": "small"}), \
-             mock.patch("wayvoice.engine.warm_worker", side_effect=warm_first):
+             mock.patch("wayvoice.runtime.worker_client.warm_worker", side_effect=warm_first):
             holder = WayVoiceDaemon()
             holder.recorder = mock.Mock(recording=False)
             thread = threading.Thread(target=holder.serve, daemon=True)
@@ -633,17 +637,17 @@ class StartupTests(unittest.TestCase):
 
             second_engine, _second_calls = make_engine(present=True)
             with mock.patch.object(daemon_mod, "engine_from_config", return_value=second_engine), \
-                 mock.patch("wayvoice.engine.warm_worker", return_value=True) as warm:
+                 mock.patch("wayvoice.runtime.worker_client.warm_worker", return_value=True) as warm:
                 duplicate = WayVoiceDaemon()
                 duplicate.recorder = mock.Mock(recording=False)
                 duplicate.serve()  # refused by the lock, returns at once
                 self.assertFalse(warm.called, "a refused daemon warmed a worker")
-                self.assertFalse(duplicate._prepare_running)
+                self.assertFalse(duplicate.preparation.running)
             holder.request_shutdown()
 
     def test_the_warm_up_at_startup_is_reported_as_such(self):
         eng, calls = make_engine(present=True)
-        with mock.patch("wayvoice.engine.warm_worker", return_value=True):
+        with mock.patch("wayvoice.runtime.worker_client.warm_worker", return_value=True):
             daemon = self._start(eng)
             self._settle(daemon)
         report = daemon.status()["model"]
@@ -662,7 +666,7 @@ class AddressedPrepareTests(DaemonCase):
         eng = replace(eng, model_download=download)
         harness = PrepareDaemon(self, eng, calls)
         before = dict(harness.config)
-        with mock.patch("wayvoice.engine.warm_worker") as warm:
+        with mock.patch("wayvoice.runtime.worker_client.warm_worker") as warm:
             reply = harness.daemon.dispatch('prepare-model ' + json.dumps({"engine": "faster-whisper", "model": "MyOrg/MyModel"}))
             harness.settle()
         self.assertTrue(reply["ok"])
@@ -680,7 +684,7 @@ class AddressedPrepareTests(DaemonCase):
                    '{"engine":"faster-whisper","model":3}',
                    '{"engine":"faster-whisper","model":""}',
                    '{"engine":"faster-whisper","model":"small","notify":true}')
-        with mock.patch.object(harness.daemon, "_start_model_prepare") as start:
+        with mock.patch.object(harness.daemon.preparation, "start") as start:
             for payload in invalid:
                 with self.subTest(payload=payload):
                     reply = harness.daemon.dispatch("prepare-model " + payload)
@@ -691,26 +695,26 @@ class AddressedPrepareTests(DaemonCase):
     def test_busy_request_for_present_other_model_is_not_reported_ready(self):
         eng, calls = make_engine(present=True)
         harness = PrepareDaemon(self, eng, calls)
-        harness.daemon._prepare_running = True
-        harness.daemon._download = {"state": "downloading", "model": "medium"}
+        harness.daemon.preparation.running = True
+        harness.daemon.preparation.report = {"state": "downloading", "model": "medium"}
         reply = harness.daemon.dispatch('prepare-model {"engine":"faster-whisper","model":"small"}')
         self.assertFalse(reply["ok"])
         self.assertEqual(reply["state"], "busy")
         self.assertEqual(reply["active_model"], "medium")
-        harness.daemon._prepare_running = False
+        harness.daemon.preparation.running = False
 
     def test_preparation_thread_owns_config_snapshot(self):
         eng, calls = make_engine(present=False)
         harness = PrepareDaemon(self, eng, calls)
         cfg = dict(harness.config)
         with mock.patch.object(daemon_mod.threading, "Thread") as thread:
-            harness.daemon._start_model_prepare(cfg)
+            harness.daemon.preparation.start(cfg)
             captured = thread.call_args.kwargs["args"][0]
             cfg["model"] = "medium"
             self.assertEqual(captured["model"], "small")
             self.assertIsNot(captured, cfg)
-        harness.daemon._prepare_running = False
-        harness.daemon._prepare_thread = None
+        harness.daemon.preparation.running = False
+        harness.daemon.preparation.thread = None
 
 
 class DeferredSetupTests(DaemonCase):
@@ -730,13 +734,13 @@ class DeferredSetupTests(DaemonCase):
                 daemon = WayVoiceDaemon()
                 daemon.recorder = mock.Mock(recording=False)
                 daemon._prepare_engine = mock.Mock()
-                daemon._start_model_prepare = mock.Mock()
+                daemon.preparation.start = mock.Mock()
                 daemon.prepare_on_start()
                 reply = daemon.start_recording()
                 self.assertFalse(reply["ok"])
                 daemon.recorder.start.assert_not_called()
                 self.assertEqual(daemon._prepare_engine.call_count, 0 if deferred else 2)
-                self.assertEqual(daemon._start_model_prepare.call_count, 0 if deferred else 1)
+                self.assertEqual(daemon.preparation.start.call_count, 0 if deferred else 1)
 
     def test_first_install_and_unfinished_wizard_do_not_install(self):
         eng, _calls = make_engine(present=False)
@@ -754,11 +758,11 @@ class DeferredSetupTests(DaemonCase):
                 daemon = WayVoiceDaemon()
                 daemon.recorder = mock.Mock(recording=False)
                 daemon._prepare_engine = mock.Mock()
-                daemon._start_model_prepare = mock.Mock()
+                daemon.preparation.start = mock.Mock()
                 daemon.prepare_on_start()
                 self.assertFalse(daemon.start_recording()["ok"])
                 daemon._prepare_engine.assert_not_called()
-                daemon._start_model_prepare.assert_not_called()
+                daemon.preparation.start.assert_not_called()
                 daemon.recorder.start.assert_not_called()
 
 

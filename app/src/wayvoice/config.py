@@ -3,6 +3,10 @@ import json
 import math
 import sys
 import os
+import tempfile
+import fcntl
+import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -68,12 +72,35 @@ def config_error() -> str:
     return _LAST_ERROR
 
 
-def load_config() -> dict[str, Any]:
+def _valid_setting(key: str, value: Any) -> bool:
+    if key not in DEFAULTS:
+        return True
+    default = DEFAULTS[key]
+    valid = isinstance(value, type(default))
+    if isinstance(default, int) and not isinstance(default, bool):
+        try:
+            valid = not isinstance(value, bool) and math.isfinite(float(value))
+            int(value)
+        except (TypeError, ValueError, OverflowError):
+            valid = False
+    if key == "vocabulary_rules" and valid:
+        from .vocabulary import parse_rules
+        try:
+            parse_rules(value)
+        except ValueError:
+            valid = False
+    if key == "shortcut_mode" and (not isinstance(value, str) or value not in {"toggle", "hold"}):
+        valid = False
+    return valid
+
+
+def load_config(*, strict: bool = False) -> dict[str, Any]:
+    """Load safe fallbacks; mutation callers use strict mode to preserve damage."""
     global _LAST_ERROR
 
     data = dict(DEFAULTS)
     path = config_path()
-    _LAST_ERROR = ""
+    error = ""
     if path.exists():
         try:
             loaded = json.loads(path.read_text(encoding="utf-8"))
@@ -83,40 +110,84 @@ def load_config() -> dict[str, Any]:
                     if key in _RETIRED_KEYS:
                         continue
                     if key in DEFAULTS:
-                        default = DEFAULTS[key]
-                        valid = isinstance(value, type(default))
-                        if isinstance(default, int) and not isinstance(default, bool):
-                            try:
-                                valid = not isinstance(value, bool) and math.isfinite(float(value))
-                                int(value)
-                            except (TypeError, ValueError, OverflowError):
-                                valid = False
-                        if key == "vocabulary_rules" and valid:
-                            from .vocabulary import parse_rules
-                            try:
-                                parse_rules(value)
-                            except ValueError:
-                                valid = False
-                        if key == "shortcut_mode" and (not isinstance(value, str) or value not in {"toggle", "hold"}):
-                            valid = False
+                        valid = _valid_setting(key, value)
                         if not valid:
                             invalid.append(key)
                             continue
                     data[key] = value
                 if invalid:
-                    _LAST_ERROR = (
+                    error = (
                         f"{path}: invalid setting values: {', '.join(invalid)}; "
                         "using defaults for these keys"
                     )
             else:
-                _LAST_ERROR = f"{path} does not contain an object"
+                error = f"{path} does not contain an object"
         except Exception as exc:
-            _LAST_ERROR = f"{path}: {exc}"
+            error = f"{path}: {exc}"
+    _LAST_ERROR = error
+    if strict and error:
+        raise ValueError(error)
     return data
 
 
+class ConfigConflictError(ValueError):
+    def __init__(self, keys):
+        self.keys = tuple(sorted(keys))
+        super().__init__("Settings changed in another window: " + ", ".join(self.keys)
+                         + ". Reopen Settings before saving again.")
+
+
+@contextmanager
+def _config_lock():
+    path = config_path().with_suffix(".lock")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    with os.fdopen(fd, "a") as handle:
+        deadline = time.monotonic() + 2.0
+        while True:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("Settings are being saved by another process")
+                time.sleep(0.025)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def update_config(changes: dict[str, Any], expected: dict[str, Any]) -> dict[str, Any]:
+    """Merge a patch against current disk state, rejecting same-field conflicts.
+
+    Missing optional keys compare as None. The caller supplies expected values for
+    every changed key; unchanged fields always come from the latest disk snapshot.
+    """
+    if changes.keys() - expected.keys():
+        raise ValueError("Expected values are required for every changed setting")
+    with _config_lock():
+        current = load_config(strict=True)
+        conflicts = [key for key, value in changes.items()
+                     if current.get(key) != expected[key] and current.get(key) != value]
+        if conflicts:
+            raise ConfigConflictError(conflicts)
+        invalid = [key for key, value in changes.items() if not _valid_setting(key, value)]
+        if invalid:
+            raise ValueError("Invalid setting values: " + ", ".join(invalid))
+        merged = dict(current, **changes)
+        _write_config(merged)
+        return merged
+
+
 def save_config(data: dict[str, Any]) -> None:
-    config_dir().mkdir(parents=True, exist_ok=True)
+    """Compatibility full replacement; production edits use update_config."""
+    with _config_lock():
+        load_config(strict=True)
+        _write_config(data)
+
+
+def _write_config(data: dict[str, Any]) -> None:
     merged = dict(DEFAULTS)
     merged.update({key: value for key, value in data.items() if key not in _RETIRED_KEYS})
     path = config_path()
@@ -124,12 +195,15 @@ def save_config(data: dict[str, Any]) -> None:
     # several times a minute, and a reader that catches a half-written config falls
     # back to DEFAULTS - a different engine, model, language or recording limit,
     # with nothing said. engine_setup does the same for its status file.
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(
-        json.dumps(merged, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    tmp.replace(path)
+    # Unique private temporary files avoid collisions between independent writers.
+    fd, temporary = tempfile.mkstemp(prefix=".config-", suffix=".json.tmp", dir=path.parent)
+    tmp = Path(temporary)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(merged, handle, ensure_ascii=False, indent=2)
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def number(cfg: dict, key: str, default):

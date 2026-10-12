@@ -1,3 +1,4 @@
+from wayvoice.runtime import processes, model_preparation
 import json
 import os
 import tempfile
@@ -47,6 +48,20 @@ class OnboardingConfigTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 onboarding.finish_config(language, model)
 
+    def test_dialog_baseline_detects_changes_during_preparation(self):
+        baseline = config.load_config(strict=True)
+        accepted = onboarding.selection_changes("en", "tiny", False, False, baseline)
+        onboarding.save_selection("en", "tiny", completed=False, expected=baseline)
+        baseline.update(accepted)
+        config.update_config({"model": "medium"}, {"model": "tiny"})
+        # Completion does not overwrite an untouched model, but a later changed
+        # choice must still conflict against the model actually seen by the dialog.
+        onboarding.save_selection("en", "tiny", completed=True, expected=baseline)
+        self.assertEqual(config.load_config()["model"], "medium")
+        with self.assertRaises(config.ConfigConflictError):
+            onboarding.save_selection("en", "small", completed=True, expected=baseline)
+        self.assertEqual(config.load_config()["model"], "medium")
+
     def test_all_interface_languages_persist_without_changing_speech_language(self):
         from wayvoice.i18n import SUPPORTED_UI_LANGUAGES
         self.write({'language': 'ja'})
@@ -66,8 +81,8 @@ class OnboardingConfigTests(unittest.TestCase):
 class OnboardingPreparationTests(unittest.TestCase):
     cfg = {"engine": "faster-whisper", "model": "small", "engine_worker": True}
 
-    @patch.object(engine, "prepare_model", return_value={"state": "ready"})
-    @patch.object(engine, "_run_cancelable")
+    @patch.object(model_preparation, "prepare_model", return_value={"state": "ready"})
+    @patch.object(processes, "_run_cancelable")
     @patch.object(engine, "engine_status", return_value={"state": "ready"})
     def test_ready_runtime_only_downloads_no_worker(self, status, run, prepare):
         phases = []
@@ -77,8 +92,8 @@ class OnboardingPreparationTests(unittest.TestCase):
         self.assertTrue(self.cfg["engine_worker"])
         self.assertEqual(phases, ["download"])
 
-    @patch.object(engine, "prepare_model", return_value={"state": "ready"})
-    @patch.object(engine, "_run_cancelable", return_value=CompletedProcess([], 0, "", ""))
+    @patch.object(model_preparation, "prepare_model", return_value={"state": "ready"})
+    @patch.object(processes, "_run_cancelable", return_value=CompletedProcess([], 0, "", ""))
     @patch.object(engine, "engine_status", side_effect=[{"state": "missing"}, {"state": "ready"}])
     def test_setup_is_owned_and_bounded(self, status, run, prepare):
         event = Event()
@@ -88,16 +103,16 @@ class OnboardingPreparationTests(unittest.TestCase):
         self.assertIn("PYTHONPATH", run.call_args.kwargs["env"])
 
     @patch.object(onboarding, "_setup_running", return_value=True)
-    @patch.object(engine, "prepare_model", return_value={"state": "error", "error": "disk full"})
-    @patch.object(engine, "_run_cancelable")
+    @patch.object(model_preparation, "prepare_model", return_value={"state": "error", "error": "disk full"})
+    @patch.object(processes, "_run_cancelable")
     @patch.object(engine, "engine_status", side_effect=[{"state": "installing"}, {"state": "ready"}])
     def test_existing_setup_is_not_owned_and_download_failure_propagates(self, status, run, prepare, running):
         with self.assertRaisesRegex(RuntimeError, "disk full"):
             onboarding.prepare_selection(self.cfg, Event())
         run.assert_not_called()
 
-    @patch.object(engine, "_run_cancelable")
-    @patch.object(engine, "prepare_model")
+    @patch.object(processes, "_run_cancelable")
+    @patch.object(model_preparation, "prepare_model")
     def test_cancellation_has_no_side_effects(self, prepare, run):
         event = Event()
         event.set()
@@ -107,8 +122,8 @@ class OnboardingPreparationTests(unittest.TestCase):
         prepare.assert_not_called()
 
     @patch.object(onboarding, "_setup_running", return_value=False)
-    @patch.object(engine, "prepare_model", return_value={"state": "ready"})
-    @patch.object(engine, "_run_cancelable", return_value=CompletedProcess([], 0, "", ""))
+    @patch.object(model_preparation, "prepare_model", return_value={"state": "ready"})
+    @patch.object(processes, "_run_cancelable", return_value=CompletedProcess([], 0, "", ""))
     @patch.object(engine, "engine_status", side_effect=[{"state": "installing"}, {"state": "ready"}])
     def test_stale_cancelled_setup_can_be_retried(self, status, run, prepare, running):
         onboarding.prepare_selection(self.cfg, Event())

@@ -10,6 +10,7 @@ machine it ran on.
 These tests therefore test the harness.  They are the only ones here that are
 about the tests rather than about the program.
 """
+from wayvoice.runtime import worker_client, model_preparation
 
 import os
 import unittest
@@ -81,28 +82,28 @@ class EngineIsolationTests(_Case):
     """The hooks must be replaced for the test and only for the test."""
 
     def test_the_worker_start_is_replaced_and_comes_back(self):
-        real = engine._start_worker
+        real = worker_client._start_worker
         support.isolate_engine(self)
-        self.assertIsNot(engine._start_worker, real)
-        self.assertFalse(engine._start_worker({}), "a test asked for a real worker")
+        self.assertIsNot(worker_client._start_worker, real)
+        self.assertFalse(worker_client._start_worker({}), "a test asked for a real worker")
         self._after_cleanup()
-        self.assertIs(engine._start_worker, real)
+        self.assertIs(worker_client._start_worker, real)
 
     def test_a_model_is_reported_as_present_without_looking_at_the_cache(self):
         support.isolate_engine(self)
-        self.assertTrue(engine.model_is_present({"model": "no-such-model"}))
+        self.assertTrue(model_preparation.model_is_present({"model": "no-such-model"}))
 
     def test_the_worker_backoff_does_not_outlive_the_test(self):
         # The failure this prevents is silent: a worker that could not be started leaves
         # a deadline in the future, and every test after it skips starting one without
         # trying.
-        moved = engine.time.monotonic() + 3600.0
-        engine._worker_retry_after = moved
-        self.addCleanup(setattr, engine, "_worker_retry_after", moved)
+        moved = worker_client.time.monotonic() + 3600.0
+        worker_client._worker_retry_after = moved
+        self.addCleanup(setattr, worker_client, "_worker_retry_after", moved)
         support.isolate_engine(self)
-        self.assertEqual(engine._worker_retry_after, 0.0)
+        self.assertEqual(worker_client._worker_retry_after, 0.0)
         self._after_cleanup()
-        self.assertEqual(engine._worker_retry_after, moved, "the deadline was left moved")
+        self.assertEqual(worker_client._worker_retry_after, moved, "the deadline was left moved")
 
     def test_the_engine_is_reported_ready(self):
         # The answer to "is the engine prepared" is a question about this

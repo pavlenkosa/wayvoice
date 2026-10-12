@@ -19,6 +19,7 @@ from pathlib import Path
 from unittest import mock
 
 from wayvoice import engine as _engine
+from wayvoice.runtime import worker_client, model_preparation
 
 #: Every location the application may read or write on the user's behalf.
 #: ``XDG_RUNTIME_DIR`` is in the list because both sockets live there, and a test that
@@ -77,9 +78,10 @@ _ISOLATED_GLOBALS = {"_worker_retry_after": 0.0}
 #: through the patcher keeps the cleanup correct when a test patched the same name
 #: itself: ``mock.patch`` restores whatever it found when it stopped, which here would
 #: be this module's replacement rather than the real function.
-_ORIGINALS = {name: getattr(_engine, name) for name in _ISOLATED}
+_OWNERS = {"_start_worker": worker_client, "model_is_present": model_preparation, "download_model": model_preparation, "_worker_retry_after": worker_client}
+_ORIGINALS = {name: getattr(_OWNERS[name], name) for name in _ISOLATED}
 _ORIGINAL_GLOBALS = {
-    name: getattr(_engine, name) for name in _ISOLATED_GLOBALS
+    name: getattr(_OWNERS[name], name) for name in _ISOLATED_GLOBALS
 }
 
 
@@ -114,11 +116,11 @@ def isolate_engine(test) -> None:
     being kept costs a code path its only exercise.
     """
     for name, replacement in _ISOLATED.items():
-        test.addCleanup(setattr, _engine, name, _ORIGINALS[name])
-        setattr(_engine, name, replacement)
+        test.addCleanup(setattr, _OWNERS[name], name, _ORIGINALS[name])
+        setattr(_OWNERS[name], name, replacement)
     for name, value in _ISOLATED_GLOBALS.items():
-        test.addCleanup(setattr, _engine, name, _ORIGINAL_GLOBALS[name])
-        setattr(_engine, name, value)
+        test.addCleanup(setattr, _OWNERS[name], name, _ORIGINAL_GLOBALS[name])
+        setattr(_OWNERS[name], name, value)
     # The daemon imported the name, so patching the engine's does not reach it.
     from wayvoice import daemon as _daemon
 

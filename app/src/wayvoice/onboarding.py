@@ -9,6 +9,7 @@ from threading import Event
 from typing import Callable
 
 from . import config, engine
+from .runtime import model_preparation, processes
 from .i18n import SUPPORTED_UI_LANGUAGES
 from .paths import app_src_dir
 
@@ -32,19 +33,27 @@ def finish_config(language: str, model: str, deferred: bool = False) -> dict:
     """Build choices without saving, touching services or downloading anything."""
     if language not in SUPPORTED_UI_LANGUAGES or model not in MODELS:
         raise ValueError("Unsupported first-run language or model")
-    cfg = config.load_config()
-    if config.config_error():
-        raise ValueError(config.config_error())
+    cfg = config.load_config(strict=True)
     cfg.update(ui_language=language, engine="faster-whisper", model=model,
                device="cpu", language="auto", onboarding_deferred=bool(deferred))
     return cfg
 
 
-def save_selection(language: str, model: str, completed: bool, deferred: bool = False) -> dict:
-    cfg = finish_config(language, model, deferred=deferred)
-    cfg["onboarding_completed"] = bool(completed)
-    config.save_config(cfg)
-    return cfg
+def selection_changes(language: str, model: str, completed: bool, deferred: bool,
+                      expected: dict) -> dict:
+    if language not in SUPPORTED_UI_LANGUAGES or model not in MODELS:
+        raise ValueError("Unsupported first-run language or model")
+    desired = dict(ui_language=language, engine="faster-whisper", model=model,
+                   device="cpu", language="auto", onboarding_deferred=bool(deferred),
+                   onboarding_completed=bool(completed))
+    return {key: value for key, value in desired.items() if value != expected.get(key)}
+
+
+def save_selection(language: str, model: str, completed: bool, deferred: bool = False,
+                   *, expected: dict | None = None) -> dict:
+    baseline = config.load_config(strict=True) if expected is None else dict(expected)
+    changes = selection_changes(language, model, completed, deferred, baseline)
+    return config.update_config(changes, {key: baseline.get(key) for key in changes})
 
 
 def _check_cancel(event: Event) -> None:
@@ -106,7 +115,7 @@ def prepare_selection(
         if state.get("state") != "installing" or not _setup_running():
             env = dict(os.environ)
             env["PYTHONPATH"] = str(app_src_dir()) + os.pathsep + env.get("PYTHONPATH", "")
-            result = engine._run_cancelable(
+            result = processes._run_cancelable(
                 [sys.executable, "-m", "wayvoice.engine_setup"],
                 timeout=SETUP_TIMEOUT, cancel_event=cancel_event, env=env,
             )
@@ -120,7 +129,7 @@ def prepare_selection(
     if on_phase:
         on_phase("download")
     target["engine_worker"] = False
-    result = engine.prepare_model(
+    result = model_preparation.prepare_model(
         engine.engine_from_config(target), target, on_progress=on_progress,
         cancel_event=cancel_event, download=True,
     )

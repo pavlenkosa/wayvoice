@@ -8,6 +8,7 @@ download - and the warm-up that follows it.
 No network: the helper process is replaced by a script that speaks the same protocol,
 and the cache is a temporary directory.
 """
+from wayvoice.runtime import locations, processes, worker_client, model_preparation
 
 import json
 import os
@@ -154,7 +155,7 @@ class ModelStateTests(unittest.TestCase):
     def test_a_missing_hub_model_is_reported_as_missing(self):
         # The one case that is genuinely "not there": a repository we manage
         # whose weights are not in the cache.
-        with mock.patch.object(engine, "model_is_present", return_value=False):
+        with mock.patch.object(model_preparation, "model_is_present", return_value=False):
             state = self._state("Systran/faster-whisper-large-v3")
         self.assertEqual(
             state,
@@ -163,7 +164,7 @@ class ModelStateTests(unittest.TestCase):
         )
 
     def test_an_unreadable_cache_does_not_start_a_download_of_what_is_there(self):
-        with mock.patch.object(engine, "model_is_present", side_effect=OSError("nope")):
+        with mock.patch.object(model_preparation, "model_is_present", side_effect=OSError("nope")):
             state = self._state("small")
         self.assertTrue(state["supported"])
         self.assertTrue(state["present"])
@@ -185,16 +186,16 @@ class DownloadTests(unittest.TestCase):
         """
         kwargs.setdefault("language", "en")
         with mock.patch.object(
-            engine, "_model_download_args", return_value=_helper_args(mode, self.cache)
+            model_preparation, "_model_download_args", return_value=_helper_args(mode, self.cache)
         ):
             return engine.download_model("small", **kwargs)
 
     def test_a_model_that_is_already_there_is_not_downloaded_again(self):
         # The daemon asks on every start; an answer that talks to the network
         # would be slow, rude, and wrong when the machine is offline.
-        with mock.patch.object(engine, "model_is_present", return_value=True):
+        with mock.patch.object(model_preparation, "model_is_present", return_value=True):
             with mock.patch.object(
-                engine.subprocess, "Popen", side_effect=AssertionError("started a process")
+                processes.subprocess, "Popen", side_effect=AssertionError("started a process")
             ):
                 started = time.monotonic()
                 result = engine.download_model("small")
@@ -205,9 +206,9 @@ class DownloadTests(unittest.TestCase):
         seen = []
         # Absent before the download, there afterwards - which is the real
         # sequence, and the only reason the second check exists.
-        with mock.patch.object(engine, "model_is_present", side_effect=[False, True]):
+        with mock.patch.object(model_preparation, "model_is_present", side_effect=[False, True]):
             with mock.patch.object(
-                engine, "_model_download_args", return_value=_helper_args("slow", self.cache)
+                model_preparation, "_model_download_args", return_value=_helper_args("slow", self.cache)
             ):
                 result = engine.download_model(
                     "small", on_progress=lambda done, total: seen.append((done, total))
@@ -219,20 +220,20 @@ class DownloadTests(unittest.TestCase):
         self.assertEqual([d for d, _ in seen], sorted(d for d, _ in seen))
 
     def test_a_failed_download_reports_the_reason(self):
-        with mock.patch.object(engine, "model_is_present", return_value=False):
+        with mock.patch.object(model_preparation, "model_is_present", return_value=False):
             result = self._download("fail")
         self.assertEqual(result["state"], "error")
         self.assertIn("404", result["error"])
 
     def test_a_helper_that_finished_without_a_model_is_not_a_success(self):
         # Otherwise the user is sent to the hotkey for weights that are not there.
-        with mock.patch.object(engine, "model_is_present", return_value=False):
+        with mock.patch.object(model_preparation, "model_is_present", return_value=False):
             result = self._download("lying")
         self.assertEqual(result["state"], "error")
         self.assertIn("not on disk", result["error"])
 
     def test_a_cancel_stops_the_download(self):
-        with mock.patch.object(engine, "model_is_present", return_value=False):
+        with mock.patch.object(model_preparation, "model_is_present", return_value=False):
             cancel = threading.Event()
             threading.Timer(0.4, cancel.set).start()
             started = time.monotonic()
@@ -241,8 +242,8 @@ class DownloadTests(unittest.TestCase):
         self.assertLess(time.monotonic() - started, 10.0)
 
     def test_a_helper_that_will_not_start_is_reported_not_raised(self):
-        with mock.patch.object(engine, "model_is_present", return_value=False):
-            with mock.patch.object(engine, "_model_download_args", return_value=["/nope"]):
+        with mock.patch.object(model_preparation, "model_is_present", return_value=False):
+            with mock.patch.object(model_preparation, "_model_download_args", return_value=["/nope"]):
                 result = engine.download_model("small")
         self.assertEqual(result["state"], "error")
 
@@ -250,8 +251,8 @@ class DownloadTests(unittest.TestCase):
         # A local path (no repo) means "there is nothing this daemon can
         # download", not "download failed" - and it is a property of the model,
         # so the answer is "unsupported".
-        with mock.patch.object(engine, "model_is_present", return_value=False):
-            with mock.patch.object(engine, "_model_download_args", return_value=None):
+        with mock.patch.object(model_preparation, "model_is_present", return_value=False):
+            with mock.patch.object(model_preparation, "_model_download_args", return_value=None):
                 with mock.patch.object(model_store, "repo_id_for", return_value=None):
                     result = engine.download_model("small", language="en")
         self.assertEqual(result["state"], "unsupported")
@@ -262,13 +263,13 @@ class DownloadTests(unittest.TestCase):
         # the fetcher exists, the runtime that would run it does not. The
         # window hid the row, the button came back, and nothing said why. The
         # answer names the missing setup instead.
-        with mock.patch.object(engine, "model_is_present", return_value=False):
-            with mock.patch.object(engine, "_model_download_args", return_value=None):
+        with mock.patch.object(model_preparation, "model_is_present", return_value=False):
+            with mock.patch.object(model_preparation, "_model_download_args", return_value=None):
                 with mock.patch.object(
                         model_store, "repo_id_for",
                         return_value="Systran/faster-whisper-small"):
                     with mock.patch.object(
-                            engine, "faster_runtime",
+                            locations, "faster_runtime",
                             return_value=Path(self.tmp.name) / "no-runtime"):
                         result = engine.download_model("small", language="en")
         self.assertEqual(result["state"], "error")
@@ -285,20 +286,20 @@ class DownloadTests(unittest.TestCase):
         runtime = Path(self.tmp.name) / "runtime"
         (runtime / "bin").mkdir(parents=True)
         (runtime / "bin" / "python").touch()
-        with mock.patch.object(engine, "model_is_present", return_value=False):
-            with mock.patch.object(engine, "_model_download_args", return_value=None):
+        with mock.patch.object(model_preparation, "model_is_present", return_value=False):
+            with mock.patch.object(model_preparation, "_model_download_args", return_value=None):
                 with mock.patch.object(
                         model_store, "repo_id_for",
                         return_value="Systran/faster-whisper-small"):
-                    with mock.patch.object(engine, "faster_runtime", return_value=runtime):
+                    with mock.patch.object(locations, "faster_runtime", return_value=runtime):
                         result = engine.download_model("small", language="en")
         self.assertEqual(result["state"], "error")
         self.assertIn("reinstall", result["error"].lower())
 
     def test_a_model_that_cannot_be_fetched_never_starts_a_process(self):
-        with mock.patch.object(engine, "model_is_present", return_value=False):
-            with mock.patch.object(engine, "_model_download_args", return_value=None):
-                with mock.patch.object(engine.subprocess, "Popen") as popen:
+        with mock.patch.object(model_preparation, "model_is_present", return_value=False):
+            with mock.patch.object(model_preparation, "_model_download_args", return_value=None):
+                with mock.patch.object(processes.subprocess, "Popen") as popen:
                     engine.download_model("small")
         self.assertFalse(popen.called)
 
@@ -335,7 +336,7 @@ class PrepareTests(unittest.TestCase):
             return {"state": "ready", "error": "", "done": 100, "total": 100}
 
         fake = self._engine_with(model_download=download)
-        with mock.patch.object(engine, "warm_worker", return_value=True) as warm:
+        with mock.patch.object(worker_client, "warm_worker", return_value=True) as warm:
             reply = engine.prepare_model(fake, {"engine_worker": True})
         self.assertEqual(reply["state"], "ready")
         self.assertEqual(reply["done"], 100)
@@ -355,7 +356,7 @@ class PrepareTests(unittest.TestCase):
                 return {"state": "ready", "error": ""}
 
             fake = replace(base, model_present=lambda cfg: True, model_download=download)
-            with mock.patch.object(engine, "warm_worker") as warm:
+            with mock.patch.object(worker_client, "warm_worker") as warm:
                 reply = engine.prepare_model(fake, {"engine_worker": True})
             self.assertFalse(reply["warming"], engine_id)
             self.assertFalse(warm.called, engine_id)
@@ -365,7 +366,7 @@ class PrepareTests(unittest.TestCase):
             return {"state": "ready", "error": ""}
 
         fake = self._engine_with(model_download=download)
-        with mock.patch.object(engine, "warm_worker") as warm:
+        with mock.patch.object(worker_client, "warm_worker") as warm:
             reply = engine.prepare_model(fake, {"engine_worker": False})
         self.assertFalse(reply["warming"])
         self.assertFalse(warm.called)
@@ -377,7 +378,7 @@ class PrepareTests(unittest.TestCase):
             return {"state": "error", "error": "404", "done": 0, "total": 100}
 
         fake = self._engine_with(model_download=download)
-        with mock.patch.object(engine, "warm_worker") as warm:
+        with mock.patch.object(worker_client, "warm_worker") as warm:
             reply = engine.prepare_model(fake, {"engine_worker": True})
         self.assertEqual(reply["state"], "error")
         self.assertEqual(reply["error"], "404")
@@ -389,7 +390,7 @@ class PrepareTests(unittest.TestCase):
             return {"state": "cancelled", "error": "Download cancelled"}
 
         fake = self._engine_with(model_download=download)
-        with mock.patch.object(engine, "warm_worker") as warm:
+        with mock.patch.object(worker_client, "warm_worker") as warm:
             reply = engine.prepare_model(fake, {})
         self.assertEqual(reply["state"], "cancelled")
         self.assertFalse(warm.called)
@@ -401,7 +402,7 @@ class PrepareTests(unittest.TestCase):
             return {"state": "ready", "error": "", "done": 30, "total": 90}
 
         fake = self._engine_with(model_download=download)
-        with mock.patch.object(engine, "warm_worker", return_value=False):
+        with mock.patch.object(worker_client, "warm_worker", return_value=False):
             reply = engine.prepare_model(fake, {}, lambda d, t: seen.append((d, t)))
         self.assertEqual(seen, [(30, 90)])
         self.assertEqual((reply["done"], reply["total"]), (30, 90))
@@ -416,8 +417,8 @@ class PrepareTests(unittest.TestCase):
             asked.append(model_id)
             return None
 
-        with mock.patch.object(engine, "model_is_present", return_value=False):
-            with mock.patch.object(engine, "_model_download_args", side_effect=capture):
+        with mock.patch.object(model_preparation, "model_is_present", return_value=False):
+            with mock.patch.object(model_preparation, "_model_download_args", side_effect=capture):
                 with mock.patch.object(model_store, "repo_id_for", return_value=None):
                     reply = engine.ENGINES["faster-whisper"].model_download(
                         {"model": "medium"}, None, None
@@ -444,51 +445,51 @@ class WarmWorkerTests(unittest.TestCase):
     """Warm outcomes remain compatible through the owned request transport."""
 
     def test_a_worker_that_answers_and_loads_the_model(self):
-        with mock.patch.object(engine, "ensure_worker", return_value=True), \
-             mock.patch.object(engine, "_worker_request", return_value={"ok": True, "warm": True}) as call:
+        with mock.patch.object(worker_client, "ensure_worker", return_value=True), \
+             mock.patch.object(worker_client, "_worker_request", return_value={"ok": True, "warm": True}) as call:
             self.assertTrue(engine.warm_worker({}))
         payload, request_id, timeout, event = call.call_args.args
         self.assertEqual(payload, {"cmd": "warm", "request_id": request_id})
         self.assertTrue(request_id)
-        self.assertEqual(timeout, engine.WARM_TIMEOUT)
+        self.assertEqual(timeout, worker_client.WARM_TIMEOUT)
 
     def test_a_worker_that_cannot_be_started_is_not_a_failure(self):
-        with mock.patch.object(engine, "ensure_worker", return_value=False), \
-             mock.patch.object(engine, "_worker_request") as request:
+        with mock.patch.object(worker_client, "ensure_worker", return_value=False), \
+             mock.patch.object(worker_client, "_worker_request") as request:
             self.assertFalse(engine.warm_worker({}))
         request.assert_not_called()
 
     def test_a_worker_that_refuses_to_load_is_not_a_failure(self):
-        with mock.patch.object(engine, "ensure_worker", return_value=True), \
-             mock.patch.object(engine, "_worker_request", return_value={"ok": False, "error": "no such file"}):
+        with mock.patch.object(worker_client, "ensure_worker", return_value=True), \
+             mock.patch.object(worker_client, "_worker_request", return_value={"ok": False, "error": "no such file"}):
             self.assertFalse(engine.warm_worker({}))
 
     def test_a_worker_that_cannot_be_reached_is_not_a_failure(self):
         for error in (engine.WorkerUnavailable("gone"), OSError("gone")):
-            with self.subTest(error=error), mock.patch.object(engine, "ensure_worker", return_value=True), \
-                 mock.patch.object(engine, "_worker_request", side_effect=error):
+            with self.subTest(error=error), mock.patch.object(worker_client, "ensure_worker", return_value=True), \
+                 mock.patch.object(worker_client, "_worker_request", side_effect=error):
                 self.assertFalse(engine.warm_worker({}))
 
     def test_a_model_that_is_still_loading_is_watched_until_it_is_there(self):
         def loading(*args):
             time.sleep(0.02)
             return {"ok": True, "warm": True}
-        with mock.patch.object(engine, "ensure_worker", return_value=True), \
-             mock.patch.object(engine, "_worker_request", side_effect=loading) as call:
+        with mock.patch.object(worker_client, "ensure_worker", return_value=True), \
+             mock.patch.object(worker_client, "_worker_request", side_effect=loading) as call:
             self.assertTrue(engine.warm_worker({}, timeout=30.0))
         self.assertEqual(call.call_args.args[2], 30.0)
         call.assert_called_once()
 
     def test_a_worker_that_dies_while_being_watched_is_not_waited_for(self):
         began = time.monotonic()
-        with mock.patch.object(engine, "ensure_worker", return_value=True), \
-             mock.patch.object(engine, "_worker_request", side_effect=engine.WorkerUnavailable("worker closed connection")):
+        with mock.patch.object(worker_client, "ensure_worker", return_value=True), \
+             mock.patch.object(worker_client, "_worker_request", side_effect=engine.WorkerUnavailable("worker closed connection")):
             self.assertFalse(engine.warm_worker({}, timeout=WARM_DEADLINE))
         self.assertLess(time.monotonic() - began, 5.0)
 
     def test_a_model_that_never_arrives_is_reported_as_not_warm(self):
-        with mock.patch.object(engine, "ensure_worker", return_value=True), \
-             mock.patch.object(engine, "_worker_request", side_effect=engine.TranscriptionTimeout("warm timeout")) as call:
+        with mock.patch.object(worker_client, "ensure_worker", return_value=True), \
+             mock.patch.object(worker_client, "_worker_request", side_effect=engine.TranscriptionTimeout("warm timeout")) as call:
             self.assertFalse(engine.warm_worker({}, timeout=0.3))
         self.assertEqual(call.call_args.args[2], 0.3)
         call.assert_called_once()

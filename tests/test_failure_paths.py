@@ -9,6 +9,7 @@ forever and ran pip without a deadline.
 
 The processes here are fakes: what is under test is the reaction to a failure.
 """
+from wayvoice.runtime import processes
 
 import subprocess
 import unittest
@@ -58,19 +59,19 @@ class RunCancelableTests(unittest.TestCase):
         # that survived both signals left the daemon busy for the rest of the session:
         # it refused recording and only a restart cleared it.
         child = FakeChild()
-        with mock.patch.object(engine.subprocess, "Popen", return_value=child):
+        with mock.patch.object(processes.subprocess, "Popen", return_value=child):
             with mock.patch.object(engine.os, "killpg", side_effect=OSError("no such process")):
                 with self.assertRaises(engine.TranscriptionTimeout):
-                    engine._run_cancelable(["x"], timeout=0.01, cancel_event=None)
+                    processes._run_cancelable(["x"], timeout=0.01, cancel_event=None)
 
     def test_cancellation_also_gives_up_on_an_unkillable_child(self):
         child = FakeChild()
         cancel = mock.Mock()
         cancel.is_set.side_effect = [True]
-        with mock.patch.object(engine.subprocess, "Popen", return_value=child):
+        with mock.patch.object(processes.subprocess, "Popen", return_value=child):
             with mock.patch.object(engine.os, "killpg", side_effect=OSError("no such process")):
                 with self.assertRaises(engine.TranscriptionCancelled):
-                    engine._run_cancelable(["x"], timeout=30.0, cancel_event=cancel)
+                    processes._run_cancelable(["x"], timeout=30.0, cancel_event=cancel)
 
     def test_a_child_that_floods_its_pipes_still_returns(self):
         # ctranslate2 is not quiet about a model it dislikes. Nothing drained the pipes
@@ -81,7 +82,7 @@ class RunCancelableTests(unittest.TestCase):
             "sys.stdout.write('x' * 400000)\n"
             "sys.stdout.write('done')\n"
         )
-        result = engine._run_cancelable(
+        result = processes._run_cancelable(
             [__import__("sys").executable, "-c", script],
             timeout=30.0,
             cancel_event=None,
@@ -94,82 +95,73 @@ class RunCancelableTests(unittest.TestCase):
     def test_oversized_recognition_output_stops_child_and_releases_job(self):
         import sys
         with self.assertRaisesRegex(RuntimeError, 'output exceeds text limit'):
-            engine._run_cancelable(
+            processes._run_cancelable(
                 [sys.executable, '-c',
                  "import sys,time; sys.stdout.write('x' * 2000000); sys.stdout.flush(); time.sleep(60)"],
                 timeout=5, cancel_event=None,
             )
-        self.assertFalse(engine._job_procs)
+        self.assertFalse(processes._job_procs)
 
     def test_stderr_flood_keeps_only_tail_without_blocking_transcript(self):
         import sys
-        result = engine._run_cancelable(
+        result = processes._run_cancelable(
             [sys.executable, '-c',
              "import sys; sys.stderr.write('x' * 2000000 + 'last diagnostic'); print('transcript')"],
             timeout=5, cancel_event=None,
         )
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout.strip(), 'transcript')
-        self.assertEqual(len(result.stderr), engine.PROCESS_ERROR_TAIL)
+        self.assertEqual(len(result.stderr), processes.PROCESS_ERROR_TAIL)
         self.assertTrue(result.stderr.endswith('last diagnostic'))
 
 
 class InstallTimeoutTests(unittest.TestCase):
-    """A timeout has to take the package manager's children with it.
+    """An observation timeout must not cancel or release a package transaction.
 
-    Every question about the machine is answered here rather than inherited: whether the
-    caller is root, whether pkexec is installed and whether the package is in the
-    repositories are three different questions, and on a machine where the first two
-    answered "no" the code returned before starting anything, so these tests failed on a
-    missing attribute instead of on the behaviour they are about.
+    The old kill-on-timeout assertions described the unsafe policy fixed by A01.
+    Preserve their session/output checks, and require eventual real completion.
     """
 
     ARGV = ["apt-get", "install", "-y", "wl-clipboard"]
 
     def _run(self, stderr: str):
         child = FakeChild(stderr=stderr)
-
+        attempts = []
+        def communicate(timeout=None):
+            attempts.append(timeout)
+            if len(attempts) == 1:
+                raise subprocess.TimeoutExpired("owner", timeout)
+            child.returncode = 1 if stderr else 0
+            return "", stderr
+        child.communicate = communicate
         def fake_popen(command, **kwargs):
             child.command = command
             child.kwargs = kwargs
             return child
-
-        def kill_tree(proc):
-            proc.returncode = -9
-
         with mock.patch.object(pkgsys.subprocess, "Popen", side_effect=fake_popen), \
-             mock.patch.object(pkgsys, "_kill_tree", side_effect=kill_tree), \
              mock.patch.object(pkgsys, "requires_privilege", return_value=False), \
              mock.patch.object(pkgsys, "pkexec_path", return_value=None) as pkexec, \
              mock.patch.object(pkgsys, "package_available", return_value=None), \
              mock.patch.object(pkgsys, "dry_run_command", return_value=list(self.ARGV)):
-            ok, message = pkgsys.install_packages(
-                ["wl-clipboard"], timeout=0.1, language="en"
-            )
-        # Proof that the path under test is the one these tests are about: had the code
-        # asked for pkexec, the answer above would have turned the run into "needs root
-        # privileges" and the tests would have reported what this machine has
-        # installed.
-        self.assertFalse(pkexec.called, "the privileged path was taken")
+            ok, message = pkgsys.install_packages(["wl-clipboard"], timeout=.1, language="en")
+        self.assertFalse(pkexec.called)
+        self.assertEqual(child.signals, [], "a live package transaction was signalled")
+        self.assertEqual(len(attempts), 2)
         return ok, message, child
 
-    def test_the_manager_runs_in_its_own_session(self):
-        # Killing only pkexec leaves apt-get running, and apt still holds
-        # /var/lib/dpkg/lock - which is what the user sees on the next attempt.
+    def test_the_owner_runs_in_its_own_session(self):
         _ok, _message, child = self._run("")
-        self.assertEqual(child.command, self.ARGV)
+        self.assertEqual(child.command[-len(self.ARGV):], self.ARGV)
         self.assertTrue(child.kwargs.get("start_new_session"))
 
-    def test_a_timed_out_install_says_so_in_seconds(self):
-        # The message has to name the deadline that was hit. "It contains a 1" - what
-        # this used to assert - is true of half of apt's output.
+    def test_an_observation_timeout_waits_for_real_success(self):
         ok, message, _child = self._run("")
-        self.assertFalse(ok)
-        self.assertIn("1s", message)
-        self.assertNotIn("0s", message)
+        self.assertTrue(ok, message)
+        self.assertIn("wl-clipboard", message)
 
     def test_the_reason_the_manager_gave_is_kept(self):
-        _ok, message, _child = self._run("E: Could not get lock /var/lib/dpkg/lock")
+        ok, message, _child = self._run("E: Could not get lock /var/lib/dpkg/lock")
+        self.assertFalse(ok)
         self.assertIn("dpkg/lock", message)
 
 

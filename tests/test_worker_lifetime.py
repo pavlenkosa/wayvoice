@@ -21,6 +21,7 @@
 The first is the reason these were hard to see: nothing fails, nothing is logged, the
 application simply gets slower and stays slower.
 """
+from wayvoice.runtime import locations, worker_client
 
 import tempfile
 import unittest
@@ -50,13 +51,13 @@ class StopWorkerSocketTests(unittest.TestCase):
         def fake_ping():
             return {"ok": True} if alive else None
 
-        with mock.patch.object(engine_mod, "_worker_ping", side_effect=fake_ping), \
-             mock.patch.object(engine_mod, "worker_pid_path", return_value=self.pid_file), \
-             mock.patch.object(engine_mod, "worker_socket_path",
+        with mock.patch.object(worker_client, "_worker_ping", side_effect=fake_ping), \
+             mock.patch.object(locations, "worker_pid_path", return_value=self.pid_file), \
+             mock.patch.object(locations, "worker_socket_path",
                                return_value=self.socket_file), \
-             mock.patch.object(engine_mod, "_is_worker_process",
+             mock.patch.object(worker_client, "_is_worker_process",
                                return_value=stopped_by_signal), \
-             mock.patch.object(engine_mod, "_pid_alive", return_value=False), \
+             mock.patch.object(worker_client, "_pid_alive", return_value=False), \
              mock.patch.object(engine_mod.os, "kill"):
             return engine_mod.stop_worker()
 
@@ -88,16 +89,16 @@ class NumericSettingsTests(unittest.TestCase):
     def test_beam_size_falls_back_instead_of_raising(self):
         for value in (None, "soon", [], {}, "5"):
             with self.subTest(value=value):
-                settings = engine_mod._worker_settings({"beam_size": value})
+                settings = worker_client._worker_settings({"beam_size": value})
                 self.assertIsInstance(settings["beam_size"], int)
 
     def test_the_default_is_used_when_the_value_is_not_a_number(self):
-        self.assertEqual(engine_mod._worker_settings({"beam_size": None})["beam_size"], 5)
-        self.assertEqual(engine_mod._worker_settings({"beam_size": "x"})["beam_size"], 5)
+        self.assertEqual(worker_client._worker_settings({"beam_size": None})["beam_size"], 5)
+        self.assertEqual(worker_client._worker_settings({"beam_size": "x"})["beam_size"], 5)
 
     def test_a_good_value_is_kept(self):
-        self.assertEqual(engine_mod._worker_settings({"beam_size": 3})["beam_size"], 3)
-        self.assertEqual(engine_mod._worker_settings({"beam_size": "3"})["beam_size"], 3)
+        self.assertEqual(worker_client._worker_settings({"beam_size": 3})["beam_size"], 3)
+        self.assertEqual(worker_client._worker_settings({"beam_size": "3"})["beam_size"], 3)
 
     def test_the_helper_keeps_integers_and_floats_apart(self):
         from wayvoice.config import number
@@ -136,45 +137,45 @@ class PreparationThreadTests(unittest.TestCase):
     def setUp(self):
         import threading
 
-        self.daemon = WayVoiceDaemon.__new__(WayVoiceDaemon)
+        self.daemon = WayVoiceDaemon()
         self.daemon._lock = threading.RLock()
-        self.daemon._prepare_running = True
-        self.daemon._prepare_cancel = threading.Event()
-        self.daemon._download = {}
+        self.daemon.preparation.running = True
+        self.daemon.preparation.cancel_event = threading.Event()
+        self.daemon.preparation.report = {}
         self.daemon.last_error = ""
 
     def _worker(self, **patch_kwargs):
-        engine_patch = mock.patch("wayvoice.daemon.engine_from_config",
+        engine_patch = mock.patch("wayvoice.daemon_preparation.engine_from_config",
                                   return_value=mock.Mock())
         engine_patch.start()
         self.addCleanup(engine_patch.stop)
-        prepare_patch = mock.patch("wayvoice.daemon.prepare_model", **patch_kwargs)
+        prepare_patch = mock.patch("wayvoice.daemon_preparation.prepare_model", **patch_kwargs)
         prepare_patch.start()
         self.addCleanup(prepare_patch.stop)
-        self.daemon._prepare_model_worker(mock.Mock(), {"model": "small"}, False)
+        self.daemon.preparation.run(mock.Mock(), {"model": "small"}, False)
 
     def test_a_raising_prepare_model_does_not_wedge_the_daemon(self):
         # The regression: the thread ended at the raise, so _prepare_running stayed
         # True and every later request was refused with "already preparing".
         self._worker(side_effect=RuntimeError("probe failed"))
-        self.assertFalse(self.daemon._prepare_running)
-        self.assertIsNone(self.daemon._prepare_thread)
-        self.assertEqual(self.daemon._download["state"], "error")
-        self.assertIn("probe failed", self.daemon._download["error"])
+        self.assertFalse(self.daemon.preparation.running)
+        self.assertIsNone(self.daemon.preparation.thread)
+        self.assertEqual(self.daemon.preparation.report["state"], "error")
+        self.assertIn("probe failed", self.daemon.preparation.report["error"])
 
     def test_the_answer_is_still_published_on_success(self):
         self._worker(return_value={"state": "ready", "done": 1, "total": 2, "error": ""})
-        self.assertEqual(self.daemon._download["state"], "ready")
-        self.assertEqual(self.daemon._download["total_bytes"], 2)
-        self.assertFalse(self.daemon._download["warming"])
-        self.assertFalse(self.daemon._prepare_running)
+        self.assertEqual(self.daemon.preparation.report["state"], "ready")
+        self.assertEqual(self.daemon.preparation.report["total_bytes"], 2)
+        self.assertFalse(self.daemon.preparation.report["warming"])
+        self.assertFalse(self.daemon.preparation.running)
 
     def test_a_cancelled_prepare_model_is_not_an_error_state(self):
         from wayvoice.engine import TranscriptionCancelled
 
         self._worker(side_effect=TranscriptionCancelled())
-        self.assertFalse(self.daemon._prepare_running)
-        self.assertNotEqual(self.daemon._download["state"], "error")
+        self.assertFalse(self.daemon.preparation.running)
+        self.assertNotEqual(self.daemon.preparation.report["state"], "error")
 
 
 if __name__ == "__main__":
