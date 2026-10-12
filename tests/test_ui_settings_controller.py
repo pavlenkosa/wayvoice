@@ -90,6 +90,33 @@ class SaveGuardTests(unittest.TestCase):
         save.assert_called_once_with(cfg)
         apply.assert_not_called()
 
+    def test_save_of_other_setting_preserves_malformed_config(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from wayvoice import config
+        ctx = self._window()
+        controller = ctx.preferences
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            for raw in (json.dumps({"vocabulary_rules": "valuable => valid\nbroken rule"}), "{broken json"):
+                with self.subTest(raw=raw):
+                    path.write_text(raw)
+                    controller._saving = False
+                    with (mock.patch.object(controller, '_selected_engine_uses_models', return_value=False),
+                          mock.patch.object(ctx.models, '_selected_model_preset', return_value={}),
+                          mock.patch.object(controller, '_draft_values', return_value={'notify': False}),
+                          mock.patch.object(controller, '_queue_mutation') as queue,
+                          mock.patch.object(config, 'config_path', return_value=path),
+                          mock.patch('wayvoice.ui.controllers.settings.apply_shortcut') as apply,
+                          mock.patch.object(controller, '_prepare_selected_engine') as prepare):
+                        self.assertTrue(controller._save())
+                        with self.assertRaises(ValueError):
+                            queue.call_args.args[0]()
+                    self.assertEqual(path.read_text(), raw)
+                    apply.assert_not_called()
+                    prepare.assert_not_called()
+
     def test_an_empty_custom_model_path_is_refused(self):
         window = self._window()
         window.settings.custom_model = FakeEntry("   ")

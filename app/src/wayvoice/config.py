@@ -3,6 +3,7 @@ import json
 import math
 import sys
 import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -68,12 +69,13 @@ def config_error() -> str:
     return _LAST_ERROR
 
 
-def load_config() -> dict[str, Any]:
+def load_config(*, strict: bool = False) -> dict[str, Any]:
+    """Load safe fallbacks; mutation callers use strict mode to preserve damage."""
     global _LAST_ERROR
 
     data = dict(DEFAULTS)
     path = config_path()
-    _LAST_ERROR = ""
+    error = ""
     if path.exists():
         try:
             loaded = json.loads(path.read_text(encoding="utf-8"))
@@ -104,14 +106,17 @@ def load_config() -> dict[str, Any]:
                             continue
                     data[key] = value
                 if invalid:
-                    _LAST_ERROR = (
+                    error = (
                         f"{path}: invalid setting values: {', '.join(invalid)}; "
                         "using defaults for these keys"
                     )
             else:
-                _LAST_ERROR = f"{path} does not contain an object"
+                error = f"{path} does not contain an object"
         except Exception as exc:
-            _LAST_ERROR = f"{path}: {exc}"
+            error = f"{path}: {exc}"
+    _LAST_ERROR = error
+    if strict and error:
+        raise ValueError(error)
     return data
 
 
@@ -124,12 +129,15 @@ def save_config(data: dict[str, Any]) -> None:
     # several times a minute, and a reader that catches a half-written config falls
     # back to DEFAULTS - a different engine, model, language or recording limit,
     # with nothing said. engine_setup does the same for its status file.
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(
-        json.dumps(merged, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    tmp.replace(path)
+    # Unique private temporary files avoid collisions between independent writers.
+    fd, temporary = tempfile.mkstemp(prefix=".config-", suffix=".json.tmp", dir=path.parent)
+    tmp = Path(temporary)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(merged, handle, ensure_ascii=False, indent=2)
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def number(cfg: dict, key: str, default):

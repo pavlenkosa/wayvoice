@@ -165,7 +165,8 @@ class SettingsController:
             self.ctx.window.save_button.set_sensitive(False)
 
         def work():
-            cfg = load_config()
+            # Never overwrite raw damaged settings with load_config's fallbacks.
+            cfg = load_config(strict=True)
             cfg.update(updates)
             save_config(cfg)
             problems = []
