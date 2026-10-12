@@ -239,12 +239,13 @@ class AvailabilityTests(unittest.TestCase):
 
         def __init__(self, returncode: int = 0, stdout: str = "", stderr: str = ""):
             self.returncode = returncode
-            self.stdout = stdout
-            self.stderr = stderr
+            self._stdout = stdout
+            self._stderr = stderr
+            self.stdout = self.stderr = None
             self.killed = False
 
         def communicate(self, timeout=None):
-            return self.stdout, self.stderr
+            return self._stdout, self._stderr
 
         def kill(self):
             self.killed = True
@@ -291,7 +292,7 @@ class AvailabilityTests(unittest.TestCase):
         ok, _message, _lookups, started = self._install(self.PRESENT)
         self.assertTrue(ok)
         self.assertEqual(len(started), 1, "the install never ran")
-        self.assertIn("apt-get", started[0][0][0])
+        self.assertIn("apt-get", started[0][0])
 
     def test_a_name_the_manager_has_never_heard_of_is_also_refused(self):
         # The other shape of "not there": apt prints nothing at all, which is an answer
