@@ -3,7 +3,6 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-import threading
 from concurrent.futures import ThreadPoolExecutor
 from unittest import mock
 
@@ -36,12 +35,10 @@ class ConfigValidationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
             target = folder / "config.json"
-            barrier = threading.Barrier(2)
             original = Path.replace
             temporary_names = []
             def replace(temporary, destination):
                 temporary_names.append(temporary)
-                barrier.wait(timeout=3)
                 return original(temporary, destination)
             with mock.patch.object(config, "config_dir", return_value=folder), mock.patch.object(config, "config_path", return_value=target), mock.patch.object(Path, "replace", replace):
                 with ThreadPoolExecutor(max_workers=2) as workers:
@@ -51,7 +48,7 @@ class ConfigValidationTests(unittest.TestCase):
             self.assertEqual(len(set(temporary_names)), 2)
             self.assertIn(json.loads(target.read_text())["model"], ("small", "tiny"))
             self.assertEqual(target.stat().st_mode & 0o777, 0o600)
-            self.assertEqual(set(folder.iterdir()), {target})
+            self.assertEqual(set(folder.iterdir()), {target, target.with_suffix(".lock")})
 
     def test_nonfinite_numbers_fall_back_and_recording_refuses_them(self):
         for value in (float("inf"), float("-inf"), float("nan"), "Infinity", "NaN"):

@@ -21,6 +21,7 @@ class OnboardingWindow(Adw.ApplicationWindow):
         self.tasks = TaskRunner()
         self.finished = finished
         saved = load_config()
+        self._expected_config = dict(saved)
         self.language = saved.get('ui_language', 'auto')
         if self.language not in SUPPORTED_UI_LANGUAGES:
             self.language = 'auto'
@@ -182,12 +183,19 @@ class OnboardingWindow(Adw.ApplicationWindow):
         self.cancel_event = threading.Event()
         self._render()
         language, model, event = self.language, self.model, self.cancel_event
+        expected = dict(self._expected_config)
         def work():
-            cfg = onboarding.save_selection(language, model, completed=False)
+            cfg = onboarding.save_selection(language, model, completed=False, expected=expected)
+            accepted = onboarding.selection_changes(language, model, False, False, expected)
+            self.tasks.idle(self._selection_saved, accepted)
             return onboarding.prepare_selection(cfg, event,
                 lambda done, total: self.tasks.idle(self._progress, done, total),
                 lambda phase: self.tasks.idle(self._phase_changed, phase))
         self.tasks.run(work, self._prepared, self._failed)
+
+    def _selection_saved(self, accepted):
+        # Publication runs on the GTK loop even if subsequent preparation fails.
+        self._expected_config.update(accepted)
 
     def _phase_changed(self, phase):
         self.phase_label.set_text(self.t(phase))
@@ -229,7 +237,8 @@ class OnboardingWindow(Adw.ApplicationWindow):
         self.busy = True
         self.primary.set_sensitive(False)
         language, model, deferred = self.language, self.model, not self.prepared
-        self.tasks.run(lambda: onboarding.save_selection(language, model, completed=True, deferred=deferred),
+        expected = dict(self._expected_config)
+        self.tasks.run(lambda: onboarding.save_selection(language, model, completed=True, deferred=deferred, expected=expected),
                        self._finished, self._finish_failed)
 
     def _finished(self, _cfg):

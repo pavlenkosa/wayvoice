@@ -39,6 +39,7 @@ class OwnedJobTests(unittest.TestCase):
         from tests.support import isolate_environment
         isolate_environment(self)
         ctx = self.ctx
+        ctx.state.cfg = load_config()
         glib = FakeGLib()
         ctx.tasks = TaskRunner(glib)
         self.addCleanup(ctx.tasks.close)

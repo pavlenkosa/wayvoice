@@ -78,8 +78,7 @@ class SaveGuardTests(unittest.TestCase):
               mock.patch.object(controller, '_draft_values', return_value=updates),
               mock.patch.object(controller, '_queue_mutation') as queue,
               mock.patch.object(controller, '_prepare_selected_engine'),
-              mock.patch('wayvoice.ui.controllers.settings.load_config', return_value={}),
-              mock.patch('wayvoice.ui.controllers.settings.save_config') as save,
+              mock.patch('wayvoice.ui.controllers.settings.update_config', return_value=updates) as save,
               mock.patch('wayvoice.ui.controllers.settings.manual_shortcut_required', return_value=True),
               mock.patch('wayvoice.ui.controllers.settings.apply_shortcut') as apply):
             controller._save()
@@ -87,7 +86,7 @@ class SaveGuardTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(message, '')
         self.assertEqual(cfg['ui_language'], 'ru')
-        save.assert_called_once_with(cfg)
+        save.assert_called_once_with(updates, {key: None for key in updates})
         apply.assert_not_called()
 
     def test_save_of_other_setting_preserves_malformed_config(self):
@@ -126,7 +125,7 @@ class SaveGuardTests(unittest.TestCase):
             mock.patch.object(SettingsController, "_selected_engine_uses_models",
                               return_value=True),
             mock.patch("wayvoice.ui.controllers.settings.Adw") as adw,
-            mock.patch("wayvoice.ui.controllers.settings.save_config") as save_config,
+            mock.patch("wayvoice.ui.controllers.settings.update_config") as save_config,
         ):
             window.preferences._save()
         self.assertEqual(save_config.call_count, 0)
@@ -146,6 +145,37 @@ class UnsavedNavigationTests(unittest.TestCase):
         self.controller._poll_engine_settings = mock.Mock()
         self.ctx.models._refresh_model_state = mock.Mock()
         self.ctx.status._update_cards = mock.Mock()
+
+    def test_merged_external_field_keeps_original_visible_expectation(self):
+        self.ctx.window.save_button = mock.Mock()
+        self.controller._expected_config = dict(self.draft)
+        self.draft["notify"] = False
+        self.controller._saved_draft = dict(self.draft)
+        merged = dict(self.draft, model="medium")
+        self.controller._save_finished((merged, True, ""))
+        self.assertEqual(self.controller._expected_config["model"], "small")
+        self.assertEqual(self.controller._expected_config["notify"], False)
+        self.draft["model"] = "tiny"
+        with (mock.patch.object(self.controller, "_selected_engine_uses_models", return_value=False),
+              mock.patch.object(self.ctx.models, "_selected_model_preset", return_value={}),
+              mock.patch.object(self.controller, "_queue_mutation") as queue,
+              mock.patch("wayvoice.ui.controllers.settings.update_config") as update,
+              mock.patch("wayvoice.ui.controllers.settings.apply_shortcut") as apply,
+              mock.patch.object(self.controller, "_prepare_selected_engine") as prepare):
+            from wayvoice.config import ConfigConflictError
+            update.side_effect = ConfigConflictError(["model"])
+            self.controller._save()
+            with self.assertRaises(ConfigConflictError) as caught:
+                queue.call_args.args[0]()
+            self.controller._save_failed(caught.exception)
+            update.assert_called_once_with({"model": "tiny"}, {"model": "small"})
+            apply.assert_not_called()
+            prepare.assert_not_called()
+        self.assertEqual(self.draft["model"], "tiny")
+        self.assertTrue(self.controller.has_unsaved_changes())
+        self.assertFalse(self.controller._save())
+        self.controller._refresh_save_state()
+        self.ctx.window.save_button.set_sensitive.assert_called_with(False)
 
     def test_draft_change_revert_and_navigation_stay(self):
         self.assertFalse(self.controller.has_unsaved_changes())
@@ -271,7 +301,7 @@ class ExitPolicyTests(unittest.TestCase):
     def test_prepare_engine_does_not_save_draft(self):
         ctx = controller_context()
         ctx.preferences._selected_engine = lambda: "faster-whisper"
-        with mock.patch("wayvoice.ui.controllers.settings.load_config", return_value={"engine": "whisper-cpp"}), mock.patch("wayvoice.ui.controllers.settings.save_config") as save, mock.patch("wayvoice.ui.controllers.settings.request_engine_setup", return_value=False):
+        with mock.patch("wayvoice.ui.controllers.settings.load_config", return_value={"engine": "whisper-cpp"}), mock.patch("wayvoice.ui.controllers.settings.update_config") as save, mock.patch("wayvoice.ui.controllers.settings.request_engine_setup", return_value=False):
             ctx.preferences._setup_engine()
         save.assert_not_called()
         self.assertFalse(ctx.preferences._setup_running)
