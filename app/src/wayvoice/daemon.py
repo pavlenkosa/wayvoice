@@ -143,6 +143,7 @@ class WayVoiceDaemon:
         self._record_delivery_mode = None
         self._record_timer: threading.Timer | None = None
         self._record_started = 0.0
+        self._record_generation = 0
         self._busy_started = 0.0
         #: Progress of the background model preparation, and how to stop it.
         self._download: dict = {
@@ -489,8 +490,12 @@ class WayVoiceDaemon:
             except Exception:
                 pass
 
-    def _auto_stop_recording(self) -> None:
+    def _auto_stop_recording(self, generation=None) -> None:
         with self._lock:
+            if generation is None:
+                generation = self._record_generation
+            if generation != self._record_generation:
+                return
             if self._reconcile_recorder():
                 return
             if not self.recorder.recording:
@@ -506,7 +511,7 @@ class WayVoiceDaemon:
                 seconds = max(5, int(_CONFIG_DEFAULTS["max_recording_sec"]))
             self.last_warning = tr("daemon.recording_limit", cfg.get("ui_language"), seconds=seconds)
         notify(self.last_warning, enabled=cfg.get("notify", True))
-        self.stop_recording()
+        self.stop_recording(expected_generation=generation)
 
     def _remove_finished_wav(self, wav: Path) -> None:
         """Called only after the ASR reader has released this recording."""
@@ -595,8 +600,10 @@ class WayVoiceDaemon:
                     self.recorder.start()
                 self._record_delivery_mode = delivery_mode
                 self._record_started = time.monotonic()
+                self._record_generation += 1
                 self._cancel_record_timer()
-                self._record_timer = threading.Timer(max_seconds, self._auto_stop_recording)
+                self._record_timer = threading.Timer(
+                    max_seconds, self._auto_stop_recording, args=(self._record_generation,))
                 self._record_timer.daemon = True
                 self._record_timer.start()
                 # A dictation gets its own notification, and the states inside it
@@ -653,8 +660,12 @@ class WayVoiceDaemon:
                 return {"ok": False, "error": str(exc)}
             return {"ok": True, "state": "idle"}
 
-    def stop_recording(self, delivery_mode=None) -> dict:
+    def stop_recording(self, delivery_mode=None, *, expected_generation=None) -> dict:
         with self._lock:
+            # A cancelled timer can already be executing or waiting on this lock.
+            # Check identity at the same ownership boundary as the stop transition.
+            if expected_generation is not None and expected_generation != self._record_generation:
+                return {"ok": True, "state": "stale-timer"}
             failure = self._reconcile_recorder()
             if failure:
                 return {"ok": False, "error": failure}
@@ -876,8 +887,9 @@ class WayVoiceDaemon:
         if command == "status":
             return {"ok": True, **self.status()}
         if command == "clear-text":
-            with self._lock:
-                self.last_text = ""
+            # Like clear-status and transcript publication, this is one reference
+            # assignment. Never wait for microphone I/O in the accept loop.
+            self.last_text = ""
             return {"ok": True}
         if command == "clear-status":
             self.last_error = ""
@@ -1123,16 +1135,21 @@ class WayVoiceDaemon:
                     # deadline. Without it a client that connects and stays quiet
                     # blocks this loop - and with it the hot key - until the
                     # daemon is restarted.
-                    conn.settimeout(CLIENT_TIMEOUT)
+                    deadline = time.monotonic() + CLIENT_TIMEOUT
                     data = b""
                     while not data.endswith(b"\n"):
-                        if len(data) > MAX_REQUEST_BYTES:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0 or self._shutdown.is_set():
                             data = b""
                             break
-                        chunk = conn.recv(4096)
+                        conn.settimeout(remaining)
+                        chunk = conn.recv(min(4096, MAX_REQUEST_BYTES + 1 - len(data)))
                         if not chunk:
                             break
                         data += chunk
+                        if len(data) > MAX_REQUEST_BYTES:
+                            data = b""
+                            break
                 except OSError:
                     # A client that hung up mid-request, and one whose request
                     # took longer than CLIENT_TIMEOUT.
