@@ -106,7 +106,21 @@ Installation, upgrade and removal have been checked in a disposable Fedora 44 co
 
 ### Flatpak
 
-The [Flatpak manifest](io.github.stepan.WayVoice.json) is experimental. WayVoice is not currently published on Flathub.
+Experimental `wayvoice-VERSION-x86_64.flatpak` bundles are built for GitHub Releases. WayVoice is not currently published on Flathub. Installed sandbox dictation still requires user acceptance testing.
+
+The bundle contains WayVoice and its Faster-Whisper runtime, but GNOME Platform 50 is a separate dependency. With Flatpak and the Flathub remote configured:
+
+```bash
+flatpak install --user flathub org.gnome.Platform//50
+flatpak install --user ./wayvoice-VERSION-x86_64.flatpak
+flatpak run io.github.stepan.WayVoice
+```
+
+Replace `VERSION` with the downloaded release version. Verify the bundle against the release `SHA256SUMS` before installation. Models are prepared explicitly in Settings; ordinary dictation does not download them.
+
+Update manually by downloading and installing the newer bundle with the same `flatpak install --user ./...flatpak` command. These bundles do not configure a WayVoice update remote, and the native package updater is unavailable in Flatpak.
+
+To build without installing the application, use `python3 scripts/build-flatpak.py` from a clean tracked checkout with GNOME SDK/Platform 50, `flatpak-builder` and `ostree` available. The script retains a unique workspace under `build/`, inspects the exported bundle, and writes it with a checksum under `dist/`.
 
 Flatpak builds use direct background processes instead of systemd user services. Configure the shortcut in your desktop and paste manually from the clipboard; native shortcut registration and the bundled paste helper are not supported in the sandbox.
 

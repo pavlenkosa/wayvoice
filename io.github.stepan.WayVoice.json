@@ -4,11 +4,6 @@
   "runtime-version": "50",
   "sdk": "org.gnome.Sdk",
   "command": "wayvoice-settings",
-  "build-options": {
-    "build-args": [
-      "--share=network"
-    ]
-  },
   "finish-args": [
     "--share=ipc",
     "--share=network",
@@ -45,7 +40,9 @@
             "type": "anitya",
             "project-id": 49082,
             "stable-only": true,
-            "versions": { "<": "3.0.0" }
+            "versions": {
+              "<": "3.0.0"
+            }
           }
         }
       ]
@@ -161,8 +158,8 @@
         "# packaging bug, and it cannot be worked around without asking the",
         "# user for a privileged host helper.",
         "#",
-        "# Engine dependencies are pinned in the shared runtime-requirements.txt.",
-        "# Native explicit setup and this build consume the same dependency set.",
+        "# Flatpak dependencies are pinned with wheel SHA256 in packaging/flatpak/runtime-requirements.txt.",
+        "# This lock targets Python 3.13 / Linux x86_64 from GNOME SDK 50.",
         "# Wheel downloads need network during this explicit build only.",
         "# The venv is placed next to the app sources, i.e. /app/lib/wayvoice/runtime,",
         "# and engine.py looks there first (paths.app_dir().parent / \"runtime\",",
@@ -173,7 +170,7 @@
         "# prebuilt engine: this is what makes the image work offline.",
         "# WAYVOICE_RUNTIME overrides both, for unusual layouts.",
         "python3 -m venv /app/lib/wayvoice/runtime",
-        "/app/lib/wayvoice/runtime/bin/python -m pip install --disable-pip-version-check --no-input --upgrade --requirement /app/lib/wayvoice/app/src/wayvoice/runtime-requirements.txt",
+        "/app/lib/wayvoice/runtime/bin/python -m pip install --disable-pip-version-check --no-input --require-hashes --only-binary=:all: --requirement packaging/flatpak/runtime-requirements.txt",
         "/app/lib/wayvoice/runtime/bin/python -c \"import av, faster_whisper; m = int(av.__version__.split('.')[0]); assert m < 19, av.__version__; print('PyAV', av.__version__, 'faster-whisper', faster_whisper.__version__)\"",
         "touch /app/lib/wayvoice/runtime/.engine-v1-ready",
         "# cleanup: the __pycache__/.pyc trees pip leaves behind plus pip itself are",
@@ -251,7 +248,12 @@
         "#                                              notifications arrive through",
         "#                                              org.freedesktop.Notifications",
         "true"
-      ]
+      ],
+      "build-options": {
+        "build-args": [
+          "--share=network"
+        ]
+      }
     }
   ]
 }

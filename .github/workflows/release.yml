@@ -27,7 +27,7 @@ jobs:
   release:
     name: Build & publish GitHub Release
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 45
 
     steps:
       - name: Checkout source
@@ -217,6 +217,14 @@ jobs:
           dpkg-deb --info "$DEB"
           dpkg-deb --contents "$DEB" > /dev/null
 
+      - name: Build and inspect Flatpak bundle
+        if: steps.version.outputs.release == 'true'
+        run: |
+          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder ostree
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user --noninteractive flathub org.gnome.Platform//50 org.gnome.Sdk//50
+          python3 scripts/build-flatpak.py
+
       - name: Create source archive and checksums
         if: steps.version.outputs.release == 'true'
         shell: bash
@@ -230,7 +238,7 @@ jobs:
 
           (
             cd dist
-            sha256sum *.deb *.rpm wayvoice-${VERSION}-source.zip > SHA256SUMS
+            sha256sum *.deb *.rpm wayvoice-${VERSION}-x86_64.flatpak wayvoice-${VERSION}-source.zip > SHA256SUMS
           )
 
       - name: Upload release artifact
@@ -243,6 +251,8 @@ jobs:
             dist/*.deb.sha256
             dist/*.rpm
             dist/*.rpm.sha256
+            dist/wayvoice-${{ steps.version.outputs.version }}-x86_64.flatpak
+            dist/wayvoice-${{ steps.version.outputs.version }}-x86_64.flatpak.sha256
             dist/*-source.zip
             dist/SHA256SUMS
           if-no-files-found: error
@@ -265,6 +275,8 @@ jobs:
             dist/*.deb.sha256
             dist/*.rpm
             dist/*.rpm.sha256
+            dist/wayvoice-${{ steps.version.outputs.version }}-x86_64.flatpak
+            dist/wayvoice-${{ steps.version.outputs.version }}-x86_64.flatpak.sha256
             dist/*-source.zip
             dist/SHA256SUMS
           fail_on_unmatched_files: true
