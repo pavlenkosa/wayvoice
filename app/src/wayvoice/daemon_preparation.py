@@ -192,4 +192,3 @@ class ModelPreparationController:
                 return "nothing"
             self.cancel_event.set()
             return "warming" if self.report.get("warming") or self.report.get("state") == "warming" else "download"
-

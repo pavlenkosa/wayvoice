@@ -63,4 +63,3 @@ def worker_pid_path() -> Path:
 def worker_log_path() -> Path:
     """Return the log file the worker writes stdout/stderr into."""
     return _state_home() / "wayvoice" / "engine-worker.log"
-

@@ -358,4 +358,3 @@ def prepare_model(
     reply["warming"] = (worker_client.warm_worker(cfg) if cancel_event is None
                         else worker_client.warm_worker(cfg, cancel_event=cancel_event))
     return reply
-
