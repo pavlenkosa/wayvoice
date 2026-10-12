@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.3 — 2026-10-12
+
+- Include the reliability changes listed under 0.7.2; its publication was blocked by a host-dependent test failure.
+- Isolate the update metadata rejection test from package-manager and authorization tools installed on the build host, preserving the assertion that invalid packages are never installed.
+
 ## 0.7.2 — 2026-10-12
 
 - Merge concurrent settings changes under an interprocess lock, report conflicting fields, and preserve malformed configuration files and unsaved drafts.
