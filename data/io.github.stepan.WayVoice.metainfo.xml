@@ -35,6 +35,9 @@
   <supports><control>pointing</control><control>keyboard</control></supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.7.3" date="2026-10-12">
+      <description><p>Include the reliability improvements from 0.7.2 and correct the update metadata regression test on build hosts without package authorization tools.</p></description>
+    </release>
     <release version="0.7.2" date="2026-10-12">
       <description><p>Improve concurrent settings saves, Unicode dictionary matching, recording cancellation and worker resource limits. Preserve malformed configuration files, retain package transaction ownership, and report partial model deletion accurately.</p></description>
     </release>
