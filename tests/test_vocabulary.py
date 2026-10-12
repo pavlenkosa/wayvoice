@@ -37,6 +37,22 @@ class VocabularyTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     parse_rules(raw)
 
+    def test_combining_marks_are_part_of_word_boundaries(self):
+        for text, source in (("किताब", "क"), ("cafe\u0301", "cafe"),
+                             ("\u0301cafe", "cafe"), ("a\U0001d185b", "a")):
+            with self.subTest(text=text):
+                self.assertEqual(self.apply(text, source + " => REPLACED"), text)
+        self.assertEqual(self.apply("cafe\u0301", "cafe\u0301 => Exact"), "Exact")
+        self.assertEqual(self.apply("alpha cafe\u0301", "alpha cafe => long\nalpha => short"),
+                         "short cafe\u0301")
+
+    def test_duplicates_use_the_same_unicode_matching_as_replacements(self):
+        for first, second in (("i", "ı"), ("i", "İ"), ("s", "ſ"), ("k", "K"), ("σ", "ς")):
+            with self.subTest(first=first, second=second):
+                with self.assertRaises(ValueError):
+                    parse_rules(f"{first} => first\n{second} => second")
+                self.assertEqual(self.apply(second, f"{first} => Exact"), "Exact")
+
     def test_malformed_direct_config_is_reported(self):
         for cfg in ({"vocabulary_enabled": 1}, {"vocabulary_enabled": True, "vocabulary_rules": "invalid"}):
             with self.assertRaises(ValueError):
