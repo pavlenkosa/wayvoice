@@ -1,12 +1,13 @@
 """GUI update ownership and restart are tested without installing any package."""
 import io
+import time
 import unittest
 from unittest import mock
 try:
     import gi
     gi.require_version('Gtk', '4.0')
     gi.require_version('Adw', '1')
-    from gi.repository import Gtk, Adw, Gio
+    from gi.repository import Gtk, Adw, Gio, GLib
     from wayvoice.ui.dialogs.update import UpdateDialog, show_update
     from wayvoice.ui.window import WayVoiceWindow
     from wayvoice.ui.state import UiState
@@ -33,6 +34,41 @@ class UpdateUITests(unittest.TestCase):
         self.update = UpdateDialog(self.window)
         self.window._update_dialog = self.update
         self.addCleanup(self.update.dialog.destroy)
+
+    def test_update_geometry_remains_stable_across_normal_stages(self):
+        def settled_size():
+            deadline = time.monotonic() + .25
+            while time.monotonic() < deadline:
+                while GLib.MainContext.default().pending():
+                    GLib.MainContext.default().iteration(False)
+                time.sleep(.005)
+            size = (self.update.dialog.get_width(), self.update.dialog.get_height())
+            self.assertGreaterEqual(size[0], 420)
+            self.assertGreaterEqual(size[1], 320)
+            return size
+
+        self.window.present()
+        for language in ('en', 'ru'):
+            with self.subTest(language=language):
+                self.update.dialog.destroy()
+                self.window.state.ui_lang = language
+                self.update = UpdateDialog(self.window)
+                self.window._update_dialog = self.update
+                self.addCleanup(self.update.dialog.destroy)
+                initial = settled_size()
+                self.update._checked({'available': True, 'version': '99.0.0'})
+                self.update._supported(('deb', 'amd64'))
+                self.assertEqual(settled_size(), initial)
+                self.update._start()
+                for stage in ('download', 'verify', 'authorize', 'install', 'restart'):
+                    self.update._progress({'stage': stage})
+                    self.assertEqual(settled_size(), initial)
+                self.update._failed(RuntimeError('Authorization declined'))
+                settled_size()
+                self.update.details.set_text('Diagnostic detail\n' * 100)
+                self.update.details_expander.set_expanded(True)
+                settled_size()
+                self.assertEqual(self.update.details.get_text().count('Diagnostic detail'), 100)
 
     def test_one_dialog_and_no_install_for_source_or_flatpak(self):
         show_update(self.window)

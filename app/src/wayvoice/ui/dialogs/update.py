@@ -28,6 +28,7 @@ class UpdateDialog:
         self.target_version = None
         self.dialog = Adw.MessageDialog(transient_for=window, modal=True,
             heading=self.t('update.title'), body=self.t('update.checking'))
+        self.dialog.set_size_request(420, 320)
         self.dialog.add_response('close', self.t('common.close'))
         self.dialog.set_close_response('close')
         self.dialog.connect('close-request', lambda *_: self.busy)
