@@ -9,6 +9,7 @@ forever and ran pip without a deadline.
 
 The processes here are fakes: what is under test is the reaction to a failure.
 """
+from wayvoice.runtime import processes
 
 import subprocess
 import unittest
@@ -58,19 +59,19 @@ class RunCancelableTests(unittest.TestCase):
         # that survived both signals left the daemon busy for the rest of the session:
         # it refused recording and only a restart cleared it.
         child = FakeChild()
-        with mock.patch.object(engine.subprocess, "Popen", return_value=child):
+        with mock.patch.object(processes.subprocess, "Popen", return_value=child):
             with mock.patch.object(engine.os, "killpg", side_effect=OSError("no such process")):
                 with self.assertRaises(engine.TranscriptionTimeout):
-                    engine._run_cancelable(["x"], timeout=0.01, cancel_event=None)
+                    processes._run_cancelable(["x"], timeout=0.01, cancel_event=None)
 
     def test_cancellation_also_gives_up_on_an_unkillable_child(self):
         child = FakeChild()
         cancel = mock.Mock()
         cancel.is_set.side_effect = [True]
-        with mock.patch.object(engine.subprocess, "Popen", return_value=child):
+        with mock.patch.object(processes.subprocess, "Popen", return_value=child):
             with mock.patch.object(engine.os, "killpg", side_effect=OSError("no such process")):
                 with self.assertRaises(engine.TranscriptionCancelled):
-                    engine._run_cancelable(["x"], timeout=30.0, cancel_event=cancel)
+                    processes._run_cancelable(["x"], timeout=30.0, cancel_event=cancel)
 
     def test_a_child_that_floods_its_pipes_still_returns(self):
         # ctranslate2 is not quiet about a model it dislikes. Nothing drained the pipes
@@ -81,7 +82,7 @@ class RunCancelableTests(unittest.TestCase):
             "sys.stdout.write('x' * 400000)\n"
             "sys.stdout.write('done')\n"
         )
-        result = engine._run_cancelable(
+        result = processes._run_cancelable(
             [__import__("sys").executable, "-c", script],
             timeout=30.0,
             cancel_event=None,
@@ -94,23 +95,23 @@ class RunCancelableTests(unittest.TestCase):
     def test_oversized_recognition_output_stops_child_and_releases_job(self):
         import sys
         with self.assertRaisesRegex(RuntimeError, 'output exceeds text limit'):
-            engine._run_cancelable(
+            processes._run_cancelable(
                 [sys.executable, '-c',
                  "import sys,time; sys.stdout.write('x' * 2000000); sys.stdout.flush(); time.sleep(60)"],
                 timeout=5, cancel_event=None,
             )
-        self.assertFalse(engine._job_procs)
+        self.assertFalse(processes._job_procs)
 
     def test_stderr_flood_keeps_only_tail_without_blocking_transcript(self):
         import sys
-        result = engine._run_cancelable(
+        result = processes._run_cancelable(
             [sys.executable, '-c',
              "import sys; sys.stderr.write('x' * 2000000 + 'last diagnostic'); print('transcript')"],
             timeout=5, cancel_event=None,
         )
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout.strip(), 'transcript')
-        self.assertEqual(len(result.stderr), engine.PROCESS_ERROR_TAIL)
+        self.assertEqual(len(result.stderr), processes.PROCESS_ERROR_TAIL)
         self.assertTrue(result.stderr.endswith('last diagnostic'))
 
 

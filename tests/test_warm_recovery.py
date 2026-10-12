@@ -1,4 +1,5 @@
 """Addressed warm-up owns cancellation through queue, load and recovery."""
+from wayvoice.runtime import worker_client
 import threading
 import time
 import unittest
@@ -13,7 +14,7 @@ class WarmRecoveryTests(unittest.TestCase):
     worker = helpers.WorkerRecoveryTests.worker
 
     def warm(self, event=None, timeout=2):
-        with mock.patch.object(engine, 'ensure_worker', return_value=True):
+        with mock.patch.object(worker_client, 'ensure_worker', return_value=True):
             return engine.warm_worker({}, timeout=timeout, cancel_event=event)
 
     def test_hung_load_cancel_retires_worker_and_next_warm_succeeds(self):
@@ -25,7 +26,7 @@ class WarmRecoveryTests(unittest.TestCase):
         with self.assertRaises(engine.TranscriptionCancelled):
             self.warm(event)
         proc.wait(timeout=2)
-        self.assertNotIn(event, engine._worker_jobs)
+        self.assertNotIn(event, worker_client._worker_jobs)
         self.worker('instant')
         self.assertTrue(self.warm())
 
@@ -58,7 +59,7 @@ class WarmRecoveryTests(unittest.TestCase):
         thread = threading.Thread(target=warm)
         thread.start()
         deadline = time.monotonic() + 1
-        while event not in engine._worker_jobs and time.monotonic() < deadline:
+        while event not in worker_client._worker_jobs and time.monotonic() < deadline:
             time.sleep(0.005)
         active = engine.cancel_jobs(event)
         self.assertTrue(active)
@@ -67,7 +68,7 @@ class WarmRecoveryTests(unittest.TestCase):
         proc.wait(timeout=2)
         self.assertFalse(thread.is_alive())
         self.assertIsInstance(errors[0], engine.TranscriptionCancelled)
-        self.assertNotIn(event, engine._worker_jobs)
+        self.assertNotIn(event, worker_client._worker_jobs)
 
     def test_cancel_during_transport_failure_remains_explicit(self):
         for error in (engine.WorkerUnavailable('worker stopped'), OSError('gone')):
@@ -76,15 +77,15 @@ class WarmRecoveryTests(unittest.TestCase):
                 def unavailable(*args):
                     event.set()
                     raise error
-                with mock.patch.object(engine, 'ensure_worker', return_value=True), \
-                     mock.patch.object(engine, '_worker_request', side_effect=unavailable):
+                with mock.patch.object(worker_client, 'ensure_worker', return_value=True), \
+                     mock.patch.object(worker_client, '_worker_request', side_effect=unavailable):
                     with self.assertRaises(engine.TranscriptionCancelled):
                         engine.warm_worker({}, cancel_event=event)
-                self.assertNotIn(event, engine._worker_jobs)
+                self.assertNotIn(event, worker_client._worker_jobs)
 
     def test_previous_same_version_worker_without_addressed_warm_is_replaced(self):
         reply = {'version': __version__, 'request_status': True}
-        self.assertFalse(engine._worker_settings_match(reply, {}))
+        self.assertFalse(worker_client._worker_settings_match(reply, {}))
 
 
 class AddressedWarmDispatchTests(unittest.TestCase):

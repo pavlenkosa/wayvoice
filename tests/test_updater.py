@@ -97,6 +97,20 @@ class UpdateTests(unittest.TestCase):
                 updater.install()
             run.assert_not_called()
 
+    def test_package_metadata_failure_never_installs(self):
+        release = self.release()
+        data = b'package'
+        sums = (hashlib.sha256(data).hexdigest() + '  wayvoice_0.6.9_amd64.deb\n').encode()
+        with patch.object(updater, 'package_system', return_value=('deb', 'amd64')), \
+             patch.object(updater, 'check', return_value={'available': True, 'version': '0.6.9', 'release': release}), \
+             patch.object(updater, '_read', side_effect=[sums, data]), \
+             patch.object(updater, 'validate_package', side_effect=ValueError('metadata mismatch')) as validate, \
+             patch.object(updater, '_install_process') as install:
+            with self.assertRaisesRegex(ValueError, 'metadata mismatch'):
+                updater.install()
+        validate.assert_called_once()
+        install.assert_not_called()
+
     def test_install_then_fresh_launcher_restart(self):
         release = self.release()
         data = b'package'
@@ -201,15 +215,18 @@ class UpdateTests(unittest.TestCase):
             daemon._lock = threading.RLock()
             daemon.recorder = SimpleNamespace(recording=False)
             daemon.busy = False
-            daemon._prepare_running = False
+            daemon.preparation = SimpleNamespace(running=False)
             daemon._model_maintenance = None
             self.assertFalse(daemon.dispatch('update-ready')['ok'])
             with updater.update_lock():
                 self.assertTrue(daemon.dispatch('update-ready')['ok'])
-                for field in ('busy', '_prepare_running', '_model_maintenance'):
+                for field in ('busy', '_model_maintenance'):
                     setattr(daemon, field, True)
                     self.assertFalse(daemon.dispatch('update-ready')['ok'])
                     setattr(daemon, field, False)
+                daemon.preparation.running = True
+                self.assertFalse(daemon.dispatch('update-ready')['ok'])
+                daemon.preparation.running = False
                 daemon.recorder.recording = True
                 self.assertFalse(daemon.dispatch('update-ready')['ok'])
 

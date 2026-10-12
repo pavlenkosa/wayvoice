@@ -3,6 +3,7 @@
 This reproduces the bug where pressing Download in Settings for a hub model
 silently does nothing when the Faster-Whisper runtime is NOT prepared.
 """
+from wayvoice.runtime import locations, model_preparation
 
 import os
 import tempfile
@@ -34,8 +35,8 @@ class RuntimeMissingTests(unittest.TestCase):
     def test_download_model_with_missing_runtime_returns_error_state(self):
         """Test that download_model returns 'error' state when runtime is missing."""
         # Mock the _model_download_args to return None when runtime python is missing
-        with mock.patch.object(engine, "model_is_present", return_value=False):
-            with mock.patch.object(engine, "_model_download_args", return_value=None):
+        with mock.patch.object(model_preparation, "model_is_present", return_value=False):
+            with mock.patch.object(model_preparation, "_model_download_args", return_value=None):
                 # This should return error state, not unsupported
                 result = engine.download_model("small", language="en")
                 
@@ -49,8 +50,8 @@ class RuntimeMissingTests(unittest.TestCase):
     def test_download_model_with_non_hub_id_still_returns_unsupported(self):
         """Test that download_model still returns 'unsupported' for non-hub models."""
         # Mock the _model_download_args to return None for a local path
-        with mock.patch.object(engine, "model_is_present", return_value=False):
-            with mock.patch.object(engine, "_model_download_args", return_value=None):
+        with mock.patch.object(model_preparation, "model_is_present", return_value=False):
+            with mock.patch.object(model_preparation, "_model_download_args", return_value=None):
                 # This should still return unsupported state
                 result = engine.download_model("/some/local/path", language="en")
                 
@@ -60,8 +61,8 @@ class RuntimeMissingTests(unittest.TestCase):
     def test_model_download_args_returns_none_when_runtime_python_missing(self):
         """Test that _model_download_args returns None when runtime python is missing."""
         # Make sure the runtime directory doesn't exist or python doesn't exist
-        with mock.patch.object(engine, "faster_runtime", return_value=Path("/nonexistent/runtime")):
-            args = engine._model_download_args("small")
+        with mock.patch.object(locations, "faster_runtime", return_value=Path("/nonexistent/runtime")):
+            args = model_preparation._model_download_args("small")
             self.assertIsNone(args)
 
     def test_model_download_args_returns_args_when_runtime_python_exists(self):
@@ -80,9 +81,9 @@ class RuntimeMissingTests(unittest.TestCase):
         fetch_script.write_text("#!/usr/bin/env python\nprint('fake fetch')\n")
         fetch_script.chmod(0o755)
         
-        with mock.patch.object(engine, "faster_runtime", return_value=fake_runtime):
-            with mock.patch.object(engine, "script_path", return_value=fetch_script):
-                args = engine._model_download_args("small")
+        with mock.patch.object(locations, "faster_runtime", return_value=fake_runtime):
+            with mock.patch.object(model_preparation, "script_path", return_value=fetch_script):
+                args = model_preparation._model_download_args("small")
                 self.assertIsInstance(args, list)
                 self.assertIn(str(python_exe), args)
                 self.assertIn(str(fetch_script), args)
@@ -102,19 +103,19 @@ class RuntimeMissingTests(unittest.TestCase):
         self.addCleanup(daemon_instance._shutdown.set)
         # The language is pinned because replies are translated: a test that
         # asserts on a message must not depend on the machine's locale.
-        phase = daemon_instance._start_model_prepare(
+        phase = daemon_instance.preparation.start(
             cfg={"model": "small", "ui_language": "en"}, download=True
         )
         self.assertEqual(phase, "downloading")
-        if daemon_instance._prepare_thread is not None:
-            daemon_instance._prepare_thread.join(timeout=10.0)
-        download_state = daemon_instance._download
+        if daemon_instance.preparation.thread is not None:
+            daemon_instance.preparation.thread.join(timeout=10.0)
+        download_state = daemon_instance.preparation.report
         self.assertEqual(download_state["state"], "error")
         self.assertIn("runtime", download_state["error"].lower())
         self.assertIn("setup", download_state["error"].lower())
         # The thread bookkeeping is unwound, so the next press is not refused.
-        self.assertFalse(daemon_instance._prepare_running)
-        self.assertIsNone(daemon_instance._prepare_thread)
+        self.assertFalse(daemon_instance.preparation.running)
+        self.assertIsNone(daemon_instance.preparation.thread)
 
 
 if __name__ == "__main__":

@@ -18,7 +18,7 @@ class WorkerInfoTests(unittest.TestCase):
     def test_no_worker_is_reported_as_not_running(self):
         from unittest import mock
 
-        with mock.patch("wayvoice.engine._worker_ping", return_value=None):
+        with mock.patch("wayvoice.runtime.worker_client._worker_ping", return_value=None):
             self.assertEqual(
                 worker_info(), {"running": False, "model": "", "version": ""}
             )
@@ -27,7 +27,7 @@ class WorkerInfoTests(unittest.TestCase):
         from unittest import mock
 
         with mock.patch(
-            "wayvoice.engine._worker_ping",
+            "wayvoice.runtime.worker_client._worker_ping",
             return_value={"ok": True, "config": {"model": "medium", "device": "cpu"}},
         ):
             info = worker_info()
@@ -37,7 +37,7 @@ class WorkerInfoTests(unittest.TestCase):
     def test_worker_without_config_is_running_but_unknown(self):
         from unittest import mock
 
-        with mock.patch("wayvoice.engine._worker_ping", return_value={"ok": True}):
+        with mock.patch("wayvoice.runtime.worker_client._worker_ping", return_value={"ok": True}):
             info = worker_info()
         self.assertTrue(info["running"])
         self.assertEqual(info["model"], "")

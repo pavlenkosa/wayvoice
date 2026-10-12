@@ -46,7 +46,7 @@ class DaemonCase(unittest.TestCase):
     def settle(self, daemon, timeout: float = 10.0) -> None:
         """Wait until the preparation thread the constructor started has ended."""
         deadline = time.monotonic() + timeout
-        while daemon._prepare_thread is not None and time.monotonic() < deadline:
+        while daemon.preparation.thread is not None and time.monotonic() < deadline:
             time.sleep(0.02)
 
 CONFIG = {
@@ -67,7 +67,7 @@ def _daemon(test, recorder=None):
     testing the harness rather than the daemon.
     """
     test.patch("wayvoice.daemon.engine_from_config", return_value=mock.Mock())
-    test.patch("wayvoice.engine.warm_worker", return_value=True)
+    test.patch("wayvoice.runtime.worker_client.warm_worker", return_value=True)
     d = WayVoiceDaemon()
     d.recorder = recorder if recorder is not None else mock.Mock(recording=False)
     d._prepare_engine = mock.Mock()
@@ -151,7 +151,7 @@ class BusySurvivesAFailedUnlinkTests(DaemonCase):
     def setUp(self):
         for target, value in (
             ("wayvoice.daemon.load_config", dict(CONFIG)),
-            ("wayvoice.engine.warm_worker", True),
+            ("wayvoice.runtime.worker_client.warm_worker", True),
         ):
             patcher = mock.patch(target, return_value=value)
             patcher.start()

@@ -1,3 +1,4 @@
+from wayvoice.runtime import locations
 import os
 import tempfile
 import unittest
@@ -33,7 +34,7 @@ class FasterRuntimeLocationTests(unittest.TestCase):
         self._make_bundled()
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("WAYVOICE_RUNTIME", None)
-            with mock.patch.object(engine, "app_dir", return_value=self.app):
+            with mock.patch.object(locations, "app_dir", return_value=self.app):
                 self.assertEqual(engine.faster_runtime(), self.bundled)
 
     def test_a_directory_that_holds_no_runtime_is_ignored(self):
@@ -44,7 +45,7 @@ class FasterRuntimeLocationTests(unittest.TestCase):
         (self.bundled / "bin" / "not-python").write_text("#!/bin/sh\n")
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("WAYVOICE_RUNTIME", None)
-            with mock.patch.object(engine, "app_dir", return_value=self.app):
+            with mock.patch.object(locations, "app_dir", return_value=self.app):
                 with mock.patch.dict(os.environ, {"XDG_DATA_HOME": self.tmp.name}):
                     resolved = engine.faster_runtime()
         self.assertEqual(resolved, Path(self.tmp.name) / "wayvoice" / "runtime")
@@ -52,7 +53,7 @@ class FasterRuntimeLocationTests(unittest.TestCase):
     def test_per_user_runtime_is_the_default(self):
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("WAYVOICE_RUNTIME", None)
-            with mock.patch.object(engine, "app_dir", return_value=self.app):
+            with mock.patch.object(locations, "app_dir", return_value=self.app):
                 with mock.patch.dict(os.environ, {"XDG_DATA_HOME": self.tmp.name}):
                     resolved = engine.faster_runtime()
         self.assertEqual(resolved, Path(self.tmp.name) / "wayvoice" / "runtime")
@@ -60,7 +61,7 @@ class FasterRuntimeLocationTests(unittest.TestCase):
     def test_stamp_follows_the_runtime(self):
         self._make_bundled()
         with mock.patch.dict(os.environ, {"WAYVOICE_RUNTIME": str(self.bundled)}):
-            self.assertEqual(engine.faster_stamp(), self.bundled / engine.RUNTIME_STAMP)
+            self.assertEqual(engine.faster_stamp(), self.bundled / locations.RUNTIME_STAMP)
 
 
 class AppDirTests(unittest.TestCase):

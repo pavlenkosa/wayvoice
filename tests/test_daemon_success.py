@@ -40,7 +40,7 @@ class SuccessfulDictationTests(unittest.TestCase):
         patcher = mock.patch("wayvoice.daemon.load_config", return_value=dict(CONFIG))
         patcher.start()
         self.addCleanup(patcher.stop)
-        patcher = mock.patch("wayvoice.engine.warm_worker", return_value=True)
+        patcher = mock.patch("wayvoice.runtime.worker_client.warm_worker", return_value=True)
         patcher.start()
         self.addCleanup(patcher.stop)
         # The real notify() runs, with nothing to notify: a spy that calls through

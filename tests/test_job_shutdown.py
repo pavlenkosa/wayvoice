@@ -1,4 +1,5 @@
 """Lifecycle checks use fake Python children, never microphone or desktop input."""
+from wayvoice.runtime import processes, worker_client
 import json
 import os
 import signal
@@ -45,13 +46,14 @@ import sys
 from pathlib import Path
 from unittest import mock
 from wayvoice import daemon as dm, engine
+from wayvoice.runtime import locations, processes, worker_client, model_preparation
 root = Path(sys.argv[1])
 mode = sys.argv[2]
 args = [sys.executable, str(root / 'child.py'), str(root / 'child.pid')]
 cfg = {'engine': 'faster-whisper', 'model': 'small', 'notify': False, 'engine_worker': False}
 dm.load_config = lambda: dict(cfg)
 engine.model_is_present = lambda *a: False
-engine._model_download_args = lambda *a: args
+model_preparation._model_download_args = lambda *a: args
 d = dm.WayVoiceDaemon()
 d.prepare_on_start = lambda: None
 d.recorder = mock.Mock(recording=False)
@@ -63,12 +65,12 @@ if mode == 'asr':
         d.recorder.recording = False
         return wav
     d.recorder.stop_to_wav = stop
-    dm.transcribe = lambda audio, cfg, event: engine._run_cancelable(args, timeout=60, cancel_event=event).stdout
+    dm.transcribe = lambda audio, cfg, event: processes._run_cancelable(args, timeout=60, cancel_event=event).stdout
     dm.inject = lambda *a: (_ for _ in ()).throw(AssertionError('late injection'))
     d.stop_recording()
 else:
     dm.prepare_model = lambda eng, cfg, progress, event, warming, download: engine.download_model('small', progress, event)
-    d._start_model_prepare(cfg)
+    d.preparation.start(cfg)
 dm._install_signal_handlers(d)
 d.serve()
 """
@@ -124,7 +126,7 @@ class DirectShutdownTests(unittest.TestCase):
             try:
                 wait_for(marker.exists)
                 pid = int(marker.read_text())
-                self.assertTrue(engine._terminate_process(proc))
+                self.assertTrue(processes._terminate_process(proc))
                 wait_for(lambda: not alive(pid))
             finally:
                 try:
@@ -142,25 +144,25 @@ class OwnershipTests(unittest.TestCase):
     def test_cancelled_owner_cannot_spawn_after_shutdown_sweep(self):
         event = threading.Event()
         event.set()
-        with mock.patch.object(engine.subprocess, "Popen") as spawn:
+        with mock.patch.object(processes.subprocess, "Popen") as spawn:
             with self.assertRaises(engine.TranscriptionCancelled):
-                engine._run_cancelable([sys.executable, "-c", "pass"], timeout=10, cancel_event=event)
+                processes._run_cancelable([sys.executable, "-c", "pass"], timeout=10, cancel_event=event)
         spawn.assert_not_called()
 
     def test_shutdown_refuses_queued_mutations_and_keeps_idle_worker(self):
         d = daemon_mod.WayVoiceDaemon()
         d.recorder = mock.Mock(recording=False)
-        with mock.patch.object(engine, "stop_worker") as stop:
+        with mock.patch.object(worker_client, "stop_worker") as stop:
             d._stop_work()
             for command in ("start", "toggle", "prepare-model", "engine-setup"):
                 self.assertFalse(d.dispatch(command)["ok"])
         d.recorder.start.assert_not_called()
-        self.assertIsNone(d._prepare_thread)
+        self.assertIsNone(d.preparation.thread)
         stop.assert_not_called()
 
     def test_worker_start_wait_obeys_owner_cancellation(self):
         event = threading.Event()
-        with mock.patch.object(engine, "_worker_retry_after", 0), mock.patch.object(engine, "_worker_ping", return_value=None), mock.patch.object(engine, "_start_worker", return_value=True):
+        with mock.patch.object(worker_client, "_worker_retry_after", 0), mock.patch.object(worker_client, "_worker_ping", return_value=None), mock.patch.object(worker_client, "_start_worker", return_value=True):
             timer = threading.Timer(0.05, event.set)
             timer.start()
             try:
@@ -188,7 +190,7 @@ class OwnershipTests(unittest.TestCase):
 
     def test_worker_lock_wait_is_cancellable(self):
         event = threading.Event()
-        with engine._worker_lock:
+        with worker_client._worker_lock:
             timer = threading.Timer(0.02, event.set)
             timer.start()
             try:
@@ -199,14 +201,14 @@ class OwnershipTests(unittest.TestCase):
 
     def test_active_worker_is_stopped_but_idle_worker_is_preserved(self):
         event = threading.Event()
-        with mock.patch.object(engine, "stop_worker") as stop:
+        with mock.patch.object(worker_client, "stop_worker") as stop:
             engine.stop_jobs(event)
             stop.assert_not_called()
-            with engine._worker_job(event):
+            with worker_client._worker_job(event):
                 event.set()
                 engine.stop_jobs(event)
             stop.assert_called_once()
-        self.assertNotIn(event, engine._worker_jobs)
+        self.assertNotIn(event, worker_client._worker_jobs)
 
     def test_reader_start_failure_reaps_registered_child(self):
         procs = []
@@ -215,11 +217,11 @@ class OwnershipTests(unittest.TestCase):
             proc = popen(*args, **kwargs)
             procs.append(proc)
             return proc
-        with mock.patch.object(engine.subprocess, "Popen", side_effect=spawn), mock.patch.object(engine, "_start_readers", side_effect=RuntimeError("reader start failed")):
+        with mock.patch.object(processes.subprocess, "Popen", side_effect=spawn), mock.patch.object(processes, "_start_readers", side_effect=RuntimeError("reader start failed")):
             with self.assertRaisesRegex(RuntimeError, "reader start failed"):
-                engine._run_cancelable([sys.executable, "-c", "import time; time.sleep(60)"], timeout=10, cancel_event=threading.Event())
+                processes._run_cancelable([sys.executable, "-c", "import time; time.sleep(60)"], timeout=10, cancel_event=threading.Event())
         self.assertIsNotNone(procs[0].poll())
-        self.assertNotIn(procs[0], engine._job_procs)
+        self.assertNotIn(procs[0], processes._job_procs)
         self.assertTrue(procs[0].stdout.closed)
 
     def test_malformed_config_unwinds_job_and_wav(self):
@@ -243,9 +245,9 @@ class OwnershipTests(unittest.TestCase):
             joined.append(timeout)
             now[0] += 2
         d._transcribe_thread = mock.Mock(ident=1)
-        d._prepare_thread = mock.Mock(ident=2)
+        d.preparation.thread = mock.Mock(ident=2)
         d._transcribe_thread.join.side_effect = join
-        d._prepare_thread.join.side_effect = join
+        d.preparation.thread.join.side_effect = join
         with mock.patch.object(daemon_mod.time, "monotonic", side_effect=lambda: now[0]), mock.patch.object(daemon_mod, "stop_jobs"):
             d._stop_work()
         self.assertEqual(joined, [daemon_mod.JOB_DRAIN_TIMEOUT, daemon_mod.JOB_DRAIN_TIMEOUT - 2])
@@ -261,7 +263,7 @@ class OwnershipTests(unittest.TestCase):
             raise engine.TranscriptionCancelled("Warm-up cancelled")
         def warm():
             try:
-                engine.warm_worker({}, cancel_event=d._prepare_cancel)
+                engine.warm_worker({}, cancel_event=d.preparation.cancel_event)
             except engine.TranscriptionCancelled:
                 pass
             except Exception as exc:
@@ -270,13 +272,13 @@ class OwnershipTests(unittest.TestCase):
                 finished.set()
         d.recorder = mock.Mock(recording=False)
         d.recorder.cancel.side_effect = lambda: self.assertTrue(finished.wait(2))
-        with mock.patch.object(engine, "ensure_worker", return_value=True), mock.patch.object(engine, "_worker_request", side_effect=warm_call), mock.patch.object(engine, "_worker_ping", return_value={"warm": False}), mock.patch.object(engine, "stop_worker") as stop:
-            d._prepare_thread = threading.Thread(target=warm)
-            d._prepare_thread.start()
+        with mock.patch.object(worker_client, "ensure_worker", return_value=True), mock.patch.object(worker_client, "_worker_request", side_effect=warm_call), mock.patch.object(worker_client, "_worker_ping", return_value={"warm": False}), mock.patch.object(worker_client, "stop_worker") as stop:
+            d.preparation.thread = threading.Thread(target=warm)
+            d.preparation.thread.start()
             self.assertTrue(sent.wait(2))
             d._stop_work()
-            d._prepare_thread.join(timeout=2)
-            self.assertNotIn(d._prepare_cancel, engine._worker_jobs)
+            d.preparation.thread.join(timeout=2)
+            self.assertNotIn(d.preparation.cancel_event, worker_client._worker_jobs)
             stop.assert_called_once()
         self.assertEqual(errors, [])
 
