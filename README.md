@@ -39,15 +39,15 @@ Use **Open indicator** on Home to show the compact recording status window.
 
 ## Screenshots
 
-The screenshots show WayVoice in English.
+The screenshots show the current English interface with an isolated demo state; no personal dictation is shown.
 
 **Home** — dictation controls, preparation checks and the latest recognized text.
 
 ![WayVoice Home: dictation button, preparation checks and recognition settings](data/screenshots/home-en.png)
 
-**Settings** — recognition presets, model downloads and compute device.
+**Settings** — microphone selection, recording sounds and recognition presets.
 
-![Settings: recognition presets, model downloads and compute device](data/screenshots/settings-en.png)
+![Settings: microphone selection, recording sounds and recognition presets](data/screenshots/settings-en.png)
 
 **First launch** — interface language and initial setup.
 
@@ -65,7 +65,20 @@ The screenshots show WayVoice in English.
 - First-run setup, prompts for unsaved settings, and diagnostics you can review before sharing.
 - Ten interface languages: English, Russian, Spanish, Portuguese, French, German, Simplified Chinese, Japanese, Arabic and Hindi. Arabic uses a right-to-left layout.
 
-The interface language and recognition language are separate settings. Translations are included with the app and work offline.
+## Supported languages
+
+**Interface (10):** English (`en`), Russian (`ru`), Spanish (`es`), Portuguese (`pt`), French (`fr`), German (`de`), Simplified Chinese (`zh`), Japanese (`ja`), Arabic (`ar`) and Hindi (`hi`). Automatic selection follows the system language. Arabic uses a right-to-left layout. Translations are bundled and work offline.
+
+**Speech recognition:** multilingual Faster-Whisper and whisper.cpp models use the following language choices, with automatic detection or a fixed language. Actual availability and accuracy depend on the selected engine and model; English-only models recognize English. External commands define their own language support.
+
+<details>
+<summary>Show all 100 recognition language choices</summary>
+
+Afrikaans (`af`), Albanian (`sq`), Amharic (`am`), Arabic (`ar`), Armenian (`hy`), Assamese (`as`), Azerbaijani (`az`), Bashkir (`ba`), Basque (`eu`), Belarusian (`be`), Bengali (`bn`), Bosnian (`bs`), Breton (`br`), Bulgarian (`bg`), Cantonese (`yue`), Catalan (`ca`), Chinese (`zh`), Croatian (`hr`), Czech (`cs`), Danish (`da`), Dutch (`nl`), English (`en`), Estonian (`et`), Faroese (`fo`), Finnish (`fi`), French (`fr`), Galician (`gl`), Georgian (`ka`), German (`de`), Greek (`el`), Gujarati (`gu`), Haitian creole (`ht`), Hausa (`ha`), Hawaiian (`haw`), Hebrew (`he`), Hindi (`hi`), Hungarian (`hu`), Icelandic (`is`), Indonesian (`id`), Italian (`it`), Japanese (`ja`), Javanese (`jw`), Kannada (`kn`), Kazakh (`kk`), Khmer (`km`), Korean (`ko`), Lao (`lo`), Latin (`la`), Latvian (`lv`), Lingala (`ln`), Lithuanian (`lt`), Luxembourgish (`lb`), Macedonian (`mk`), Malagasy (`mg`), Malay (`ms`), Malayalam (`ml`), Maltese (`mt`), Maori (`mi`), Marathi (`mr`), Mongolian (`mn`), Myanmar (`my`), Nepali (`ne`), Norwegian (`no`), Nynorsk (`nn`), Occitan (`oc`), Pashto (`ps`), Persian (`fa`), Polish (`pl`), Portuguese (`pt`), Punjabi (`pa`), Romanian (`ro`), Russian (`ru`), Sanskrit (`sa`), Serbian (`sr`), Shona (`sn`), Sindhi (`sd`), Sinhala (`si`), Slovak (`sk`), Slovenian (`sl`), Somali (`so`), Spanish (`es`), Sundanese (`su`), Swahili (`sw`), Swedish (`sv`), Tagalog (`tl`), Tajik (`tg`), Tamil (`ta`), Tatar (`tt`), Telugu (`te`), Thai (`th`), Tibetan (`bo`), Turkish (`tr`), Turkmen (`tk`), Ukrainian (`uk`), Urdu (`ur`), Uzbek (`uz`), Vietnamese (`vi`), Welsh (`cy`), Yiddish (`yi`), Yoruba (`yo`).
+
+</details>
+
+The interface language and recognition language are separate settings.
 
 ## Installation
 
