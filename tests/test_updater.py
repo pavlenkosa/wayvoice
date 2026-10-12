@@ -104,6 +104,7 @@ class UpdateTests(unittest.TestCase):
         with patch.object(updater, 'package_system', return_value=('deb', 'amd64')), \
              patch.object(updater, 'check', return_value={'available': True, 'version': '0.6.9', 'release': release}), \
              patch.object(updater, '_read', side_effect=[sums, data]), \
+             patch.object(updater.shutil, 'which', return_value='/usr/bin/tool'), \
              patch.object(updater, 'validate_package', side_effect=ValueError('metadata mismatch')) as validate, \
              patch.object(updater, '_install_process') as install:
             with self.assertRaisesRegex(ValueError, 'metadata mismatch'):
