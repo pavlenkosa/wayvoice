@@ -21,6 +21,7 @@ The daemon side lives in :mod:`wayvoice.engine`; this module never imports it.
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 import socket
@@ -51,9 +52,15 @@ DEFAULT_IDLE_TIMEOUT = 900.0
 # enough that the worker exits promptly, large enough to be invisible.
 _POLL_INTERVAL = 0.2
 # Generous read timeout for the request line of a single connection.
-_CONN_TIMEOUT = 30.0
+_CONN_TIMEOUT = 5.0
+_SEND_TIMEOUT = 1.0
+_BUSY_TIMEOUT = 0.1
+_MAX_CONNECTIONS = 16
+_MAX_OPERATIONS = 2
+_MAX_HISTORY = 4096
+_MAX_REQUEST_ID = 256
 # Upper bound for one request (base64-free, but be forgiving).
-_MAX_REQUEST_BYTES = 64 * 1024 * 1024
+_MAX_REQUEST_BYTES = 64 * 1024
 # A cancel that arrives before its request is honoured for this long only, so
 # that a stale cancel can never cancel an unrelated later request.
 _CANCEL_GRACE = 5.0
@@ -391,6 +398,8 @@ class _WorkerState:
         self._holding = 0
         #: Only one transcription at a time; the daemon drives a single one.
         self.serial = threading.Lock()
+        self.operations = threading.BoundedSemaphore(_MAX_OPERATIONS)
+        self.connections = threading.BoundedSemaphore(_MAX_CONNECTIONS)
         self.last_activity = clock()
 
     def touch(self) -> None:
@@ -416,13 +425,18 @@ class _WorkerState:
 
     def _expire(self) -> None:
         deadline = self._clock() - self._grace
-        for key in [k for k, seen in self._early.items() if seen < deadline]:
-            self._early.pop(key, None)
+        for history in (self._early, self._finished):
+            for key in [k for k, seen in history.items() if seen < deadline]:
+                history.pop(key, None)
+            while len(history) > _MAX_HISTORY:
+                history.pop(next(iter(history)))
 
     def begin(self, request_id: str) -> threading.Event:
         event = threading.Event()
         with self._lock:
             self._expire()
+            if request_id in self._active:
+                raise ValueError("request_id is already active")
             if self._early.pop(request_id, None) is not None:
                 event.set()
             self._active[request_id] = event
@@ -430,6 +444,7 @@ class _WorkerState:
 
     def request_status(self, request_id: str) -> str:
         with self._lock:
+            self._expire()
             if request_id in self._running:
                 return "running"
             if request_id in self._active:
@@ -451,7 +466,7 @@ class _WorkerState:
             self._running.discard(request_id)
             self._finished[request_id] = self._clock()
             # A bounded completion history distinguishes unseen from completed IDs.
-            if len(self._finished) > 256:
+            if len(self._finished) > _MAX_HISTORY:
                 self._finished.pop(next(iter(self._finished)))
             self._expire()
 
@@ -463,7 +478,9 @@ class _WorkerState:
                 event.set()
                 return True
             self._expire()
+            self._early.pop(request_id, None)
             self._early[request_id] = self._clock()
+            self._expire()
             return False
 
 
@@ -522,11 +539,18 @@ def _bind(path: Path) -> socket.socket | None:
 def _read_request(conn: socket.socket) -> bytes | None:
     """Read one newline-terminated request, or ``None`` on an empty stream."""
     data = bytearray()
+    deadline = time.monotonic() + _CONN_TIMEOUT
     while True:
-        chunk = conn.recv(65536)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("request read timed out")
+        conn.settimeout(remaining)
+        chunk = conn.recv(min(65536, _MAX_REQUEST_BYTES + 1 - len(data)))
         if not chunk:
             return bytes(data) if data else None
         data.extend(chunk)
+        if len(data) > _MAX_REQUEST_BYTES:
+            raise ValueError("request is too large")
         if b"\n" in chunk:
             line, _, _ = bytes(data).partition(b"\n")
             return line
@@ -535,11 +559,14 @@ def _read_request(conn: socket.socket) -> bytes | None:
 
 
 def _send(conn: socket.socket, reply: dict[str, Any]) -> None:
+    conn.settimeout(_BUSY_TIMEOUT if reply.get("busy") else _SEND_TIMEOUT)
     conn.sendall((json.dumps(reply, ensure_ascii=False) + "\n").encode("utf-8"))
 
 
 def _dispatch(payload: Any, cache: ModelCache, config: WorkerConfig, state: _WorkerState) -> dict[str, Any]:
     command = str(payload.get("cmd") or "").strip() if isinstance(payload, dict) else ""
+    if isinstance(payload, dict) and len(str(payload.get("request_id") or "")) > _MAX_REQUEST_ID:
+        return {"ok": False, "error": "request_id is too long"}
     if command == "request-status":
         request_id = str(payload.get("request_id") or "")
         return {"ok": True, "pid": os.getpid(), "request_id": request_id, "warm_recovery": True,
@@ -550,22 +577,34 @@ def _dispatch(payload: Any, cache: ModelCache, config: WorkerConfig, state: _Wor
         # whether a warm-up that takes minutes is finished, and a ping that waited
         # for the model would answer exactly when it is not needed.
         return handle_request(payload, cache, config)
-    if command == "warm" and not payload.get("request_id"):
-        # Legacy bare warm remains compatible. Addressed requests below share
-        # cancellable queue ownership with transcription.
-        # Under the same lock as a transcription: loading weights into RAM while
-        # something is being decoded would double the memory for nothing. Counted as
-        # work, so the idle timer does not call this worker unused mid-load.
-        with state.serial, state.hold():
-            return handle_request(payload, cache, config)
     if command not in {"transcribe", "warm"}:
         return handle_request(payload, cache, config)
     request_id = str(payload.get("request_id") or "")
-    event = state.begin(request_id)
+    if not state.operations.acquire(blocking=False):
+        return {"ok": False, "busy": True, "request_id": request_id,
+                "error": "Worker operation limit reached"}
+    event = None
     acquired = False
     try:
+        try:
+            event = state.begin(request_id)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        maximum = 900.0 if command == "warm" else 90.0
+        requested_timeout = payload.get("queue_timeout_sec", maximum)
+        try:
+            timeout = float(requested_timeout)
+        except (ValueError, TypeError, OverflowError):
+            timeout = maximum
+        if not math.isfinite(timeout) or timeout <= 0:
+            timeout = maximum
+        deadline = time.monotonic() + min(timeout, maximum)
         while not event.is_set():
-            if state.serial.acquire(timeout=_POLL_INTERVAL):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return {"ok": False, "busy": True, "request_id": request_id,
+                        "error": "Worker queue timed out"}
+            if state.serial.acquire(timeout=min(_POLL_INTERVAL, remaining)):
                 acquired = True
                 break
         if event.is_set():
@@ -581,10 +620,12 @@ def _dispatch(payload: Any, cache: ModelCache, config: WorkerConfig, state: _Wor
     finally:
         if acquired:
             state.serial.release()
-        state.finish(request_id)
+        if event is not None:
+            state.finish(request_id)
+        state.operations.release()
 
 
-def _serve_connection(conn: socket.socket, cache: ModelCache, config: WorkerConfig, state: _WorkerState) -> None:
+def _serve_connection(conn: socket.socket, cache: ModelCache, config: WorkerConfig, state: _WorkerState, connection_slot: bool = False) -> None:
     try:
         conn.settimeout(_CONN_TIMEOUT)
         raw = _read_request(conn)
@@ -594,6 +635,9 @@ def _serve_connection(conn: socket.socket, cache: ModelCache, config: WorkerConf
             payload = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, ValueError):
             _send(conn, {"ok": False, "error": "Malformed request"})
+            return
+        if isinstance(payload, dict) and len(str(payload.get("request_id") or "")) > _MAX_REQUEST_ID:
+            _send(conn, {"ok": False, "error": "request_id is too long"})
             return
         if isinstance(payload, dict) and str(payload.get("cmd") or "").strip() == "cancel":
             request_id = str(payload.get("request_id") or "")
@@ -611,6 +655,8 @@ def _serve_connection(conn: socket.socket, cache: ModelCache, config: WorkerConf
             conn.close()
         except OSError:
             pass
+        if connection_slot:
+            state.connections.release()
 
 
 def run_server(
@@ -647,11 +693,23 @@ def run_server(
             except OSError:
                 break
             state.touch()
-            threading.Thread(
-                target=_serve_connection,
-                args=(conn, cache, config, state),
-                daemon=True,
-            ).start()
+            if not state.connections.acquire(blocking=False):
+                try:
+                    _send(conn, {"ok": False, "busy": True, "error": "Worker connection limit reached"})
+                except OSError:
+                    pass
+                finally:
+                    conn.close()
+                continue
+            try:
+                threading.Thread(
+                    target=_serve_connection,
+                    args=(conn, cache, config, state, True),
+                    daemon=True,
+                ).start()
+            except Exception:
+                conn.close()
+                state.connections.release()
     finally:
         try:
             listener.close()
