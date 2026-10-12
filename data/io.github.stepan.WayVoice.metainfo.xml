@@ -35,6 +35,9 @@
   <supports><control>pointing</control><control>keyboard</control></supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.7.2" date="2026-10-12">
+      <description><p>Improve concurrent settings saves, Unicode dictionary matching, recording cancellation and worker resource limits. Preserve malformed configuration files, retain package transaction ownership, and report partial model deletion accurately.</p></description>
+    </release>
     <release version="0.7.1" date="2026-10-11">
       <description><p>Microphone selection, a short level check without audio storage, and optional recording sounds. A local personal dictionary adds whole-phrase text replacements with a draft preview and an enable switch.</p></description>
     </release>

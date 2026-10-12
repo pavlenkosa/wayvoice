@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.2 — 2026-10-12
+
+- Merge concurrent settings changes under an interprocess lock, report conflicting fields, and preserve malformed configuration files and unsaved drafts.
+- Retain package transaction ownership after the initiating client exits.
+- Correct Unicode dictionary boundaries and matching, isolate recording timers, and bound daemon requests.
+- Limit worker connections, queued operations, request sizes and cancellation caches; keep control commands responsive under load.
+- Report partial model deletion accurately and separate runtime process, transport and model preparation ownership.
+- Add isolated source acceptance tooling without retaining dictation text in reports.
+- Document the GitHub release trust boundary for update checksums.
+
 ## 0.7.1 — 2026-10-11
 
 - Add a local personal dictionary with whole-phrase text replacements, a draft preview and an enable switch.
