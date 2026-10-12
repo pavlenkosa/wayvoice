@@ -460,7 +460,7 @@ def _sidecars(blob: Path) -> list[Path]:
     return found
 
 
-def _prune_repository(path: Path, needed: set[Path]) -> None:
+def _prune_repository(path: Path, needed: set[Path]) -> list[str]:
     """Take a repository directory apart, keeping what others still need.
 
     Used when the model has to disappear but some of its blobs turned out to be shared:
@@ -479,13 +479,14 @@ def _prune_repository(path: Path, needed: set[Path]) -> None:
     matched, and the branch that exists to protect another model's files deleted the
     very files it was asked to keep.
     """
+    errors = []
     for name in ("snapshots", "refs", "trees"):
         target = path / name
         if target.exists():
             try:
                 shutil.rmtree(target)
-            except OSError:
-                pass
+            except OSError as exc:
+                errors.append(str(exc))
     blobs = path / "blobs"
     if blobs.is_dir():
         # Bottom-up, so a directory can be removed once it is empty and nothing kept is
@@ -497,28 +498,33 @@ def _prune_repository(path: Path, needed: set[Path]) -> None:
                 base_path = Path(os.path.realpath(victim))
                 if base_path in needed:
                     continue
-                for doomed in (victim, *_sidecars(base_path)):
+                sidecars = _sidecars(base_path) if _is_inside(base_path, path) else ()
+                for doomed in (victim, *sidecars):
                     try:
                         doomed.unlink()
-                    except OSError:
+                    except FileNotFoundError:
                         continue
+                    except OSError as exc:
+                        errors.append(str(exc))
             for name in dirs:
                 victim = here / name
                 if victim.is_symlink():
                     # A link to a directory is never one of the kept blobs.
                     try:
                         victim.unlink()
-                    except OSError:
-                        pass
+                    except OSError as exc:
+                        errors.append(str(exc))
             if here != blobs:
                 try:
                     here.rmdir()
-                except OSError:
-                    pass
+                except OSError as exc:
+                    if not any(_is_inside(blob, here) for blob in needed):
+                        errors.append(str(exc))
         try:
             blobs.rmdir()
-        except OSError:
-            pass
+        except OSError as exc:
+            if not needed:
+                errors.append(str(exc))
     try:
         # Whatever is left apart from the blob directory is not part of a usable cache
         # entry any more. ``blobs`` is skipped on purpose: it still holds the shared
@@ -531,9 +537,11 @@ def _prune_repository(path: Path, needed: set[Path]) -> None:
                 shutil.rmtree(entry)
             else:
                 entry.unlink()
-        path.rmdir()
-    except OSError:
-        pass
+        if not needed:
+            path.rmdir()
+    except OSError as exc:
+        errors.append(str(exc))
+    return errors
 
 
 def _is_inside(path: Path, root: Path) -> bool:
@@ -674,8 +682,8 @@ def delete(
         if _is_inside(blob, path):
             freed[blob] = size
     for blob in exclusive:
-        if _is_inside(blob, path):
-            continue  # already counted, it dies with the directory
+        if not _is_inside(blob, hub) or _is_inside(blob, path):
+            continue  # outside our cache, or already counted with the directory
         try:
             freed[blob] = blob.stat().st_size
         except OSError:
@@ -695,21 +703,21 @@ def delete(
         "removed_blobs": 0,
         "kept_blobs": len(own & others),
     }
+    errors = []
     # Before the directory goes: make every blob another model needs survive it.
     if shared_inside:
         # The model goes, but not the whole directory: the blobs in it are still
         # somebody else's model files. Removing them would break that model, and
         # moving them to the shared store would leave the blob store growing with
         # content nobody points at.
-        _prune_repository(path, needed=shared_inside)
+        errors.extend(_prune_repository(path, needed=shared_inside))
         result["removed_dir"] = not path.exists()
     else:
         try:
             shutil.rmtree(path)
             result["removed_dir"] = True
         except OSError as exc:
-            raise RefusedError("store.delete_failed", str(exc)) from exc
-    result["freed_bytes"] += sum(freed.values())
+            errors.append(str(exc))
 
     # What is left to unlink is only what lived outside the model directory:
     # the shared blob store, and the sidecars of a shared blob.
@@ -719,13 +727,31 @@ def delete(
         for sidecar in _sidecars(blob):
             try:
                 sidecar.unlink()
-            except OSError:
+            except FileNotFoundError:
                 pass
+            except OSError as exc:
+                errors.append(str(exc))
         try:
             blob.unlink()
-        except OSError:
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            errors.append(str(exc))
             continue
         result["removed_blobs"] += 1
+    # Measure outcomes, not promises: prune/unlink may have partially failed.
+    for candidate, size in freed.items():
+        try:
+            candidate.stat()
+        except FileNotFoundError:
+            result["freed_bytes"] += size
+        except OSError as exc:
+            errors.append(str(exc))
+        else:
+            errors.append(f"Not removed: {candidate}")
+    if errors:
+        result.update(ok=False, error_key="store.delete_failed", detail="\n".join(dict.fromkeys(errors)))
+
     return result
 
 
