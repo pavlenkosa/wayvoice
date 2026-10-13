@@ -2,30 +2,23 @@ name: Release
 
 on:
   push:
-    # A tag publishes that tag. A push to main publishes when - and only when -
-    # the version in the tree changed, so "bump the version, commit, push" is the
-    # whole procedure and there is no second ref to remember.
-    tags:
-      - 'v*'
-    branches:
-      - 'main'
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version to publish, e.g. 0.5.0'
-        required: true
-        type: string
+    tags: ['v*']
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: release-${{ github.ref }}-${{ inputs.version || github.ref_name }}
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  release:
-    name: Build & publish GitHub Release
+  build:
+    name: Validate & build release
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      sha: ${{ steps.version.outputs.tag_sha }}
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
 
@@ -40,109 +33,11 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Decide what to release
+      - name: Validate tag and release notes
         id: version
-        shell: bash
-        env:
-          MANUAL_VERSION: ${{ inputs.version }}
-        run: |
-          set -euo pipefail
-
-          # The version is read out of the tree rather than out of the ref, so a
-          # push to main and a push of the tag cannot disagree about what is
-          # being released.
-          version_at() {
-            git show "$1:app/src/wayvoice/__init__.py" |
-              sed -n 's/^__version__ = "\(.*\)"$/\1/p'
-          }
-
-          FROM_TAG=false
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            VERSION="${MANUAL_VERSION#v}"
-          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            VERSION="${GITHUB_REF_NAME#v}"
-            FROM_TAG=true
-          else
-            VERSION="$(version_at HEAD)"
-          fi
-
-          if [ -z "$VERSION" ]; then
-            echo "No version to release: run this from a tag, or fill in the version input." >&2
-            exit 1
-          fi
-          PROJECT_VERSION="$(python scripts/check-version.py "$VERSION")"
-          if [ "$PROJECT_VERSION" != "$VERSION" ]; then
-            echo "The tree says $PROJECT_VERSION, the ref says $VERSION." >&2
-            exit 1
-          fi
-          TAG="v$VERSION"
-
-          # "Is there anything to release?" comes before any check about where a
-          # tag points, and it needs two questions, not one. The order matters:
-          # main keeps receiving commits after a release, and the tag of the
-          # version just published points at the commit before them, so asking
-          # about that first would turn every later commit into a failed run -
-          # how a workflow that should be quiet most of the time ends up
-          # permanently red.
-          git fetch --force --tags
-          RELEASED=false
-          git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null && RELEASED=true
-
-          if ! $FROM_TAG && [[ "${GITHUB_EVENT_NAME}" != "workflow_dispatch" ]]; then
-            PREVIOUS="$(version_at HEAD^ 2>/dev/null || true)"
-            if [ "$PREVIOUS" = "$VERSION" ] && $RELEASED; then
-              echo "Version is still $VERSION and $TAG exists: nothing to release."
-              echo "release=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            # Both cases below are a release that has not happened yet: the
-            # version moved, or it moved earlier and the tag never made it to
-            # the remote. Publishing is idempotent - a version whose tag exists is
-            # not published twice - so recovering from a forgotten tag is the
-            # same code path as an ordinary bump.
-            if [ "$PREVIOUS" = "$VERSION" ]; then
-              echo "$TAG does not exist although the tree is at $VERSION: publishing it now."
-            else
-              echo "Version ${PREVIOUS:-none} -> $VERSION"
-            fi
-          fi
-
-          # From here on something is being released, so the tag has to agree.
-          TAG_SHA=""
-          if git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
-            TAG_SHA="$(git rev-list -n 1 "$TAG")"
-            if [ "$TAG_SHA" != "$GITHUB_SHA" ]; then
-              echo "Tag $TAG points at ${TAG_SHA:0:7}, this run is at ${GITHUB_SHA:0:7}." >&2
-              echo "A version already released from another commit is not this" >&2
-              echo "commit's to publish. Cut a new version; do not move the tag." >&2
-              exit 1
-            fi
-          elif $FROM_TAG; then
-            echo "Running from $TAG, but that tag is not in the checkout." >&2
-            exit 1
-          fi
-
-          # An explicit output rather than an expression at the place of use: a
-          # boolean interpolated into YAML arrives as the string "false", and how
-          # the publishing action reads that is not something to leave to chance.
-          # 0.6.0 was published as a prerelease although its version has no dash.
-          if [[ "$VERSION" == *-* ]]; then
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
-          fi
-          {
-            echo "release=true"
-            echo "version=$VERSION"
-            echo "tag=$TAG"
-            echo "tag_sha=$TAG_SHA"
-          } >> "$GITHUB_OUTPUT"
-
-          echo "Releasing $VERSION as $TAG from ${GITHUB_SHA:0:7}"
-
+        run: python3 scripts/check-release.py
 
       - name: Install validation tools
-        if: steps.version.outputs.release == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -150,17 +45,14 @@ jobs:
             python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 xvfb xauth dbus-x11
 
       - name: Python syntax
-        if: steps.version.outputs.release == 'true'
         run: python -m compileall -q app/src tests scripts/check-version.py
 
       - name: Unit tests
-        if: steps.version.outputs.release == 'true'
         env:
           PYTHONPATH: app/src
         run: python -m unittest discover -s tests -t . -v
 
       - name: GTK UI tests
-        if: steps.version.outputs.release == 'true'
         env:
           PYTHONPATH: app/src
           GDK_BACKEND: x11
@@ -169,7 +61,6 @@ jobs:
           xvfb-run -a dbus-run-session -- /usr/bin/python3 -m unittest discover -s tests -t . -p 'test_ui*.py' -v
 
       - name: Shellcheck
-        if: steps.version.outputs.release == 'true'
         run: |
           shellcheck \
             scripts/wayvoice \
@@ -187,23 +78,19 @@ jobs:
             packaging/DEBIAN/prerm
 
       - name: Validate desktop metadata
-        if: steps.version.outputs.release == 'true'
         run: |
           desktop-file-validate data/io.github.stepan.WayVoice.desktop
           xmllint --noout data/io.github.stepan.WayVoice.metainfo.xml
           xmllint --noout packaging/io.github.stepan.WayVoice.manage-deps.policy
 
       - name: Build Debian package
-        if: steps.version.outputs.release == 'true'
         run: ./scripts/build-deb.sh
 
       - name: Build and inspect Fedora RPM
-        if: steps.version.outputs.release == 'true'
         run: |
           ./scripts/build-rpm-container.sh
 
       - name: Verify Debian package
-        if: steps.version.outputs.release == 'true'
         shell: bash
         run: |
           DEB="$(find dist -maxdepth 1 -name '*.deb' -print -quit)"
@@ -218,7 +105,6 @@ jobs:
           dpkg-deb --contents "$DEB" > /dev/null
 
       - name: Build and inspect Flatpak bundle
-        if: steps.version.outputs.release == 'true'
         run: |
           sudo apt-get install -y --no-install-recommends flatpak flatpak-builder ostree
           flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
@@ -226,9 +112,9 @@ jobs:
           python3 scripts/build-flatpak.py
 
       - name: Create source archive and checksums
-        if: steps.version.outputs.release == 'true'
         shell: bash
         run: |
+          cp "${{ steps.version.outputs.notes }}" dist/RELEASE_NOTES.md
           VERSION="${{ steps.version.outputs.version }}"
           git archive \
             --format=zip \
@@ -242,7 +128,6 @@ jobs:
           )
 
       - name: Upload release artifact
-        if: steps.version.outputs.release == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: wayvoice-${{ steps.version.outputs.version }}-release
@@ -255,28 +140,55 @@ jobs:
             dist/wayvoice-${{ steps.version.outputs.version }}-x86_64.flatpak.sha256
             dist/*-source.zip
             dist/SHA256SUMS
+            dist/RELEASE_NOTES.md
           if-no-files-found: error
           retention-days: 30
 
-      - name: Publish GitHub Release
-        if: steps.version.outputs.release == 'true'
-        uses: softprops/action-gh-release@v2
+  publish:
+    name: Approve & publish release
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          # The tag does not exist yet when the release came from a push to main,
-          # and this action creates it. commitish says which commit it must
-          # point at, rather than leaving it to the default branch's head.
-          commitish: ${{ github.sha }}
-          name: WayVoice ${{ steps.version.outputs.version }}
-          generate_release_notes: true
-          prerelease: ${{ steps.version.outputs.prerelease }}
-          files: |
-            dist/*.deb
-            dist/*.deb.sha256
-            dist/*.rpm
-            dist/*.rpm.sha256
-            dist/wayvoice-${{ steps.version.outputs.version }}-x86_64.flatpak
-            dist/wayvoice-${{ steps.version.outputs.version }}-x86_64.flatpak.sha256
-            dist/*-source.zip
-            dist/SHA256SUMS
-          fail_on_unmatched_files: true
+          ref: ${{ needs.build.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: wayvoice-${{ needs.build.outputs.version }}-release
+          path: dist
+      - name: Publish only the validated existing tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.build.outputs.tag }}
+          EXPECTED_SHA: ${{ needs.build.outputs.sha }}
+          PRERELEASE: ${{ needs.build.outputs.prerelease }}
+          APPROVAL_CONFIGURED: ${{ vars.RELEASE_ENVIRONMENT_READY }}
+        run: |
+          set -euo pipefail
+          test "$APPROVAL_CONFIGURED" = true || { echo "Configure the release environment reviewers and RELEASE_ENVIRONMENT_READY first." >&2; exit 1; }
+          REMOTE_SHA="$(git ls-remote origin "refs/tags/$TAG" "refs/tags/$TAG^{}" | awk '/\^\{\}$/ {peeled=$1} {raw=$1} END {print peeled ? peeled : raw}')"
+          test "$REMOTE_SHA" = "$EXPECTED_SHA"
+          test "$(git rev-parse "refs/tags/$TAG^{commit}")" = "$EXPECTED_SHA"
+          cd dist
+          sha256sum --check SHA256SUMS
+          flags=(--latest=false)
+          if [ "$PRERELEASE" = true ]; then
+            flags+=(--prerelease)
+          else
+            flags=(--latest)
+          fi
+          # Creation fails if this release already exists; never overwrite assets.
+          # Draft first supports immutable releases: attach everything before publishing.
+          gh release create "$TAG" --verify-tag --draft "${flags[@]}" \
+            --title "WayVoice ${TAG#v}" --notes-file RELEASE_NOTES.md \
+            *.deb *.deb.sha256 *.rpm *.rpm.sha256 *.flatpak *.flatpak.sha256 \
+            *-source.zip SHA256SUMS
+          gh release edit "$TAG" --draft=false "${flags[@]}"
