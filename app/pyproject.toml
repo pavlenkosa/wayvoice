@@ -12,7 +12,7 @@ authors = [{name = "WayVoice contributors"}]
 keywords = ["wayland", "gnome", "speech-to-text", "whisper", "dictation", "gtk4"]
 classifiers = [
   "Development Status :: 3 - Alpha",
-  "Environment :: X11 Applications :: GTK",
+  "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3",
   "Topic :: Multimedia :: Sound/Audio :: Speech",
 ]

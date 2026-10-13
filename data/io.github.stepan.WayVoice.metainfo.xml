@@ -19,15 +19,15 @@
   <screenshots>
     <screenshot type="default">
       <caption>Dictation status and the latest recognized text</caption>
-      <image>https://raw.githubusercontent.com/pavlenkosa/wayvoice/v0.6.9/data/screenshots/home-en.png</image>
+      <image>https://raw.githubusercontent.com/pavlenkosa/wayvoice/e2c90c192419be8b723568db3479dade1b884fad/data/screenshots/home-en.png</image>
     </screenshot>
     <screenshot>
       <caption>Recognition and model settings</caption>
-      <image>https://raw.githubusercontent.com/pavlenkosa/wayvoice/v0.6.9/data/screenshots/settings-en.png</image>
+      <image>https://raw.githubusercontent.com/pavlenkosa/wayvoice/e2c90c192419be8b723568db3479dade1b884fad/data/screenshots/settings-en.png</image>
     </screenshot>
     <screenshot>
       <caption>First-run language and model setup</caption>
-      <image>https://raw.githubusercontent.com/pavlenkosa/wayvoice/v0.6.9/data/screenshots/setup-en.png</image>
+      <image>https://raw.githubusercontent.com/pavlenkosa/wayvoice/e2c90c192419be8b723568db3479dade1b884fad/data/screenshots/setup-en.png</image>
     </screenshot>
   </screenshots>
   <launchable type="desktop-id">io.github.stepan.WayVoice.desktop</launchable>

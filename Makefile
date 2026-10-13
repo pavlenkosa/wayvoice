@@ -4,6 +4,7 @@ version-check:
 	python3 scripts/check-version.py
 
 lint: version-check
+	python3 scripts/check-public-docs.py
 	python3 -m compileall -q app/src tests scripts/check-version.py
 	set -e; for f in \
 	  scripts/wayvoice scripts/wayvoice-daemon scripts/wayvoice-settings \
