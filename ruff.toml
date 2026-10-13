@@ -1,0 +1,6 @@
+target-version = "py311"
+extend-exclude = ["build", "build-dir", "dist", ".flatpak-builder", "third_party"]
+
+[lint]
+# Start with correctness errors; broaden rules in focused follow-up changes.
+select = ["F63", "F7", "F82"]

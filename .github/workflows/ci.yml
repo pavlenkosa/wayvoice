@@ -108,12 +108,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # The Flatpak build itself stays a manual, networked validation (see
-      # docs/PROJECT_TASKS.md P1.2); this job pins the manifest's structure so a
-      # regression that loses the wayvoice module, the wl-clipboard pin, the
-      # launch command or a permission the app cannot work without fails CI
-      # instead of shipping unnoticed. The same script backs the local release
-      # gate, so local truth and CI truth are one file.
+      # Bundle builds run in the tag-only Release workflow.
+      # This fast check also backs the local release gate.
       - name: Check manifest structure
         run: python3 scripts/check-flatpak-manifest.py
 
@@ -134,3 +130,33 @@ jobs:
         run: |
           xvfb-run -a dbus-run-session -- /usr/bin/python3 -c 'import gi; gi.require_version("Gtk", "4.0"); gi.require_version("Adw", "1"); from gi.repository import Gtk, Adw; assert Gtk.init_check(); Adw.init()'
           xvfb-run -a dbus-run-session -- /usr/bin/python3 -m unittest discover -s tests -t . -p 'test_ui*.py' -v
+
+  quality:
+    name: Static analysis & coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install pinned development tools
+        run: python -m pip install --requirement requirements-dev.txt
+      - name: Check Python correctness
+        run: python -m ruff check app/src tests scripts
+      - name: Check public documentation
+        run: python scripts/check-public-docs.py
+      - name: Measure critical-module branch coverage
+        env:
+          PYTHONPATH: app/src
+        run: |
+          python -m coverage run -m unittest discover -s tests -t . -q
+          python -m coverage report
+          python -m coverage xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: critical-coverage-${{ github.sha }}
+          path: coverage.xml
+          if-no-files-found: error
+          retention-days: 14
