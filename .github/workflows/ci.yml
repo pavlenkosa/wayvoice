@@ -108,7 +108,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Bundle builds run in the tag-only Release workflow.
+      # Bundle builds run for develop testing artifacts and tagged releases.
       # This fast check also backs the local release gate.
       - name: Check manifest structure
         run: python3 scripts/check-flatpak-manifest.py
@@ -158,5 +158,43 @@ jobs:
         with:
           name: critical-coverage-${{ github.sha }}
           path: coverage.xml
+          if-no-files-found: error
+          retention-days: 14
+
+  testing-artifacts:
+    name: Develop testing packages
+    if: github.ref == 'refs/heads/develop' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    needs: [test-and-build, gtk-tests, quality, flatpak-manifest]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Download verified native packages
+        uses: actions/download-artifact@v4
+        with:
+          name: wayvoice-native-${{ github.sha }}
+          path: dist
+      - name: Install Flatpak build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder ostree
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user --noninteractive flathub org.gnome.Platform//50 org.gnome.Sdk//50
+      - name: Build and inspect Flatpak from the clean snapshot
+        run: python3 scripts/build-flatpak.py
+      - name: Label testing artifacts and generate provenance
+        env:
+          BUILD_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 scripts/stage-testing-artifacts.py --run-url "$BUILD_RUN_URL"
+          cd build/testing-artifacts
+          sha256sum --check SHA256SUMS
+      - name: Upload testing packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: wayvoice-testing-${{ github.sha }}-${{ github.run_attempt }}
+          path: build/testing-artifacts/*
           if-no-files-found: error
           retention-days: 14

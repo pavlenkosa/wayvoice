@@ -27,3 +27,9 @@ Or build the RPM in a Fedora container with `./scripts/build-rpm-container.sh`. 
 Keep pull requests focused. Add user-facing strings to all interface catalogues and preserve their format parameters. For larger changes, open an issue first. See [CONTRIBUTING.md](../CONTRIBUTING.md) and [SECURITY.md](../SECURITY.md).
 
 Development happens in `develop`; open focused `feature/*` or `fix/*` pull requests. `main` holds integrated, checked code. A version change alone never publishes a release. See [release process](../docs/releasing.md).
+
+## Testing builds from develop
+
+Successful pushes to `develop` (or a manual CI run on `develop`) produce a `wayvoice-testing-COMMIT-ATTEMPT` artifact in GitHub Actions. It contains DEB, RPM and inspected x86_64 Flatpak packages, individual checksums, `SHA256SUMS` and `BUILD_INFO.json` with the source commit and workflow URL. Download it from the successful CI run's **Artifacts** section; artifacts expire after 14 days. All normal test, GTK, quality and manifest jobs must pass before the testing bundle is built.
+
+Package filenames include `testing` and the short commit SHA. The installed version, application ID and Flatpak branch remain unchanged: installing a testing build replaces the same application and uses its settings. These are development snapshots, not stable releases or an isolated test session. They are not published to GitHub Releases or distributed by the native updater. Verify the extracted files with `sha256sum --check SHA256SUMS` before installation.
