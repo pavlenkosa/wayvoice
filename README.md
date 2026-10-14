@@ -18,7 +18,7 @@ Real English interface shown with an isolated demo state, without personal dicta
 
 ## Install
 
-Download the matching package and verify it against the release `SHA256SUMS`.
+Open [GitHub Releases](https://github.com/pavlenkosa/wayvoice/releases), choose a release and download a package listed in its assets. Verify it against that release's `SHA256SUMS`. Alpha releases are marked **Pre-release** and are installed manually; the native updater follows stable releases only.
 
 ```bash
 # Debian / Ubuntu
@@ -28,9 +28,9 @@ sudo apt install ./wayvoice_*_amd64.deb
 sudo dnf install ./wayvoice-*-1.fc44.x86_64.rpm
 ```
 
-Open **WayVoice**, explicitly prepare a model, and configure your shortcut. Missing models are never downloaded by pressing the dictation shortcut.
+Open **WayVoice**, explicitly prepare a model, and configure your shortcut. Initial runtime/model preparation needs a network connection; recognition with prepared local models works offline. Missing models are never downloaded by pressing the dictation shortcut.
 
-Experimental x86_64 Flatpak bundles are built for GitHub Releases; installed sandbox dictation still needs testing. WayVoice is not on Flathub. See [installation and manual updates](docs/installation.md), including the separate GNOME Platform 50 dependency.
+The release workflow builds experimental x86_64 Flatpak bundles. Use one when it is listed in the chosen release's assets; installed sandbox dictation still needs testing. WayVoice is not on Flathub. See [installation and manual updates](docs/installation.md), including the separate GNOME Platform 50 dependency.
 
 ## Features
 

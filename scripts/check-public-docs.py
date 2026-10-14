@@ -12,7 +12,9 @@ PUBLIC_DOCS = {f'docs/{name}.md' for name in (
 
 
 def check(root=ROOT):
-    tracked = subprocess.check_output(['git', '-C', str(root), 'ls-files'], text=True).splitlines()
+    root = root.resolve()
+    tracked = set(subprocess.check_output(
+        ['git', '-C', str(root), 'ls-files', '-z'], text=True).split('\0')) - {''}
     errors = []
     private_names = {'AGENTS.md', 'ACCEPTANCE.md', 'ACCEPTANCE_CURRENT.md', 'PRODUCT_TASKS.md', 'PROJECT_TASKS.md'}
     for name in tracked:
@@ -33,6 +35,8 @@ def check(root=ROOT):
             path = (document.parent / unquote(url.path)).resolve()
             if not path.is_relative_to(root.resolve()) or not path.exists():
                 errors.append(f'{document.relative_to(root)}: broken local link {target}')
+            elif path.relative_to(root).as_posix() not in tracked:
+                errors.append(f'{document.relative_to(root)}: local link target is not tracked: {target}')
     return errors
 
 

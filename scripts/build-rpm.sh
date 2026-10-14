@@ -17,7 +17,11 @@ tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owne
     --exclude=__pycache__ --exclude='*.pyc' \
     --transform="s,^,wayvoice-$VERSION/," \
     -czf "$TOP/SOURCES/wayvoice-$VERSION.tar.gz" -C "$ROOT" \
-    app scripts systemd data packaging third_party README.md CHANGELOG.md LICENSE
+    app scripts systemd data packaging third_party README.md CHANGELOG.md LICENSE \
+    CONTRIBUTING.md SUPPORT.md SECURITY.md \
+    docs/installation.md docs/getting-started.md docs/desktop-support.md \
+    docs/shortcuts-and-paste.md docs/engines-and-models.md docs/troubleshooting.md \
+    docs/architecture.md docs/development.md docs/releasing.md releases/TEMPLATE.md
 rpmbuild -bb --define "_topdir $TOP" --define "wayvoice_version $RPM_VERSION" --define "source_version $VERSION" \
     --define "use_source_date_epoch_as_buildtime 1" --define "clamp_mtime_to_source_date_epoch 1" \
     "$ROOT/packaging/wayvoice.spec"

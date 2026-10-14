@@ -69,7 +69,7 @@ cp "$ROOT/data/io.github.stepan.WayVoice.desktop" "$PKG/usr/share/applications/"
 cp "$ROOT/data/io.github.stepan.WayVoice.metainfo.xml" "$PKG/usr/share/metainfo/"
 cp "$ROOT/data/icons/hicolor/scalable/apps/io.github.stepan.WayVoice.svg" "$PKG/usr/share/icons/hicolor/scalable/apps/"
 cp "$ROOT/data/icons/hicolor/symbolic/apps/io.github.stepan.WayVoice-symbolic.svg" "$PKG/usr/share/icons/hicolor/symbolic/apps/"
-cp "$ROOT/README.md" "$ROOT/CHANGELOG.md" "$ROOT/LICENSE" "$PKG/usr/share/doc/wayvoice/"
+python3 "$ROOT/scripts/package-readme.py" "$PKG/usr/share/doc/wayvoice/"
 # Debian policy 12.5: the machine-readable copyright file belongs in the package,
 # and the licence of every bundled program has to be stated in it - which it is,
 # including ydotool's.

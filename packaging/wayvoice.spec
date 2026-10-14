@@ -58,6 +58,7 @@ for kind in scalable symbolic; do
     mkdir -p %{buildroot}%{_datadir}/icons/hicolor/$kind/apps
     install -m 0644 data/icons/hicolor/$kind/apps/*.svg %{buildroot}%{_datadir}/icons/hicolor/$kind/apps/
 done
+python3 scripts/package-readme.py %{buildroot}%{_docdir}/%{name}
 
 %post
 %systemd_user_post wayvoice.service wayvoice-setup.service wayvoice-ydotool.service
@@ -75,7 +76,7 @@ udevadm control --reload-rules >/dev/null 2>&1 || :
 
 %files
 %license LICENSE
-%doc README.md CHANGELOG.md
+%doc %{_docdir}/%{name}
 %{_bindir}/wayvoice*
 %{_bindir}/setup-user
 /usr/lib/wayvoice/
