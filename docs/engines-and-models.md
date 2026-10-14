@@ -10,7 +10,7 @@
 
 **Parakeet v3 (experimental CPU)** runs `parakeet-tdt-0.6b-v3` locally through the official NeMo-Speech.cpp CLI, once per dictation. It is not kept warm. The default engine remains Faster-Whisper.
 
-Select Parakeet in Settings and click **Download CPU runtime and model (~690 MiB)** to prepare the pinned runtime and Q8_0 weights explicitly. Leave its path fields empty to use the defaults. Saving settings and pressing the recording shortcut never download anything. Custom executable/model paths are advanced overrides and are not replaced by preparation.
+Select Parakeet in Settings and click **Download CPU runtime and model (~690 MiB)** to prepare the pinned runtime and Q8_0 weights explicitly. Leave its path fields empty to use the defaults. Saving settings and pressing the recording shortcut never download anything. Custom executable/model paths are advanced overrides and are not replaced by preparation. Parakeet preparation currently shows a busy state without download progress or a cancel control; closing the window waits for preparation to finish or fail. Recognition itself supports cancellation and timeout.
 
 For preparation from a source checkout:
 
