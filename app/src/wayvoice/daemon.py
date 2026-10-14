@@ -2,6 +2,7 @@ from __future__ import annotations
 from .audio_feedback import play_cue
 
 import contextlib
+import copy
 import fcntl
 import json
 import os
@@ -140,6 +141,8 @@ class WayVoiceDaemon:
         self._pending_asr_cleanup: set[Path] = set()
         self._model_maintenance = None
         self._record_delivery_mode = None
+        self._record_config: dict[str, Any] | None = None
+        self._record_cancel_requested = False
         self._record_timer: threading.Timer | None = None
         self._record_started = 0.0
         self._record_generation = 0
@@ -226,6 +229,8 @@ class WayVoiceDaemon:
                 return None
             self._cancel_record_timer()
             self._record_started = 0.0
+            self._record_config = None
+            self._record_delivery_mode = None
             self.last_error = error
             reset_notification_id()
             return error
@@ -334,6 +339,29 @@ class WayVoiceDaemon:
             except Exception:
                 pass
 
+    def _retry_recording_finish(self, generation: int, cancel: bool) -> None:
+        # A cancelled timer can already be waiting on this lock. Keep identity
+        # checking and the transition atomic so it cannot finish a later take.
+        with self._lock:
+            if (generation != self._record_generation or self._shutdown.is_set()
+                    or not self.recorder.recording):
+                return
+            if cancel or getattr(self, "_record_cancel_requested", False):
+                self.cancel()
+            else:
+                self.stop_recording(expected_generation=generation)
+
+    def _schedule_recording_retry(self, *, cancel: bool) -> None:
+        """Retain a live take after failed signalling, without a retry busy loop."""
+        if self._shutdown.is_set():
+            return
+        self._cancel_record_timer()
+        self._record_timer = threading.Timer(
+            1.0, self._retry_recording_finish,
+            args=(self._record_generation, cancel))
+        self._record_timer.daemon = True
+        self._record_timer.start()
+
     def _auto_stop_recording(self, generation=None) -> None:
         with self._lock:
             if generation is None:
@@ -344,7 +372,7 @@ class WayVoiceDaemon:
                 return
             if not self.recorder.recording:
                 return
-            cfg = load_config()
+            cfg = getattr(self, "_record_config", None) or load_config()
             try:
                 seconds = _recording_limit(cfg)
             except ValueError:
@@ -400,7 +428,7 @@ class WayVoiceDaemon:
             # until the next keypress - which then transcribed minutes of room noise.
             # This validation must happen before any engine/model readiness check, so
             # a malformed config is reported even when the engine is not prepared.
-            cfg = load_config()
+            cfg = copy.deepcopy(load_config())
             try:
                 max_seconds = _recording_limit(cfg)
             except ValueError as exc:
@@ -442,6 +470,8 @@ class WayVoiceDaemon:
                     self.recorder.start(target=cfg["microphone"])
                 else:
                     self.recorder.start()
+                self._record_config = cfg
+                self._record_cancel_requested = False
                 self._record_delivery_mode = delivery_mode
                 self._record_started = time.monotonic()
                 self._record_generation += 1
@@ -461,13 +491,26 @@ class WayVoiceDaemon:
                 # Startup owns the take until both recorder and timer are ready.
                 # Roll back even if failure follows opening the microphone.
                 self._cancel_record_timer()
-                self._record_delivery_mode = None
-                self._record_started = 0.0
                 error = str(exc)
                 try:
                     self.recorder.cancel()
                 except Exception as cleanup_exc:
                     error += f" Could not clean up recording: {cleanup_exc}"
+                if self.recorder.recording:
+                    # A failed rollback still owns a microphone. Preserve its
+                    # configuration and elapsed time, but never recognize this
+                    # failed take if an older stop callback or the user retries.
+                    self._record_config = cfg
+                    self._record_cancel_requested = True
+                    self._record_delivery_mode = delivery_mode
+                    if not self._record_started:
+                        self._record_started = time.monotonic()
+                    self._record_generation += 1
+                    self._schedule_recording_retry(cancel=True)
+                else:
+                    self._record_delivery_mode = None
+                    self._record_config = None
+                    self._record_started = 0.0
                 self.last_error = error
                 # The notification cannot raise (see notify.notify) and must not be the
                 # last thing in the handler either: an exception here would escape
@@ -480,14 +523,22 @@ class WayVoiceDaemon:
             self._reconcile_recorder()
             cfg = load_config()
             if self.recorder.recording:
+                self._record_cancel_requested = True
                 self._cancel_record_timer()
                 try:
                     self.recorder.cancel()
                 except Exception as exc:
+                    if not self.recorder.recording:
+                        self._record_config = None
+                        self._record_delivery_mode = None
+                        self._record_started = 0.0
+                    else:
+                        self._schedule_recording_retry(cancel=True)
                     self.last_error = str(exc)
                     return {"ok": False, "error": str(exc)}
                 self._record_started = 0.0
                 self._record_delivery_mode = None
+                self._record_config = None
                 play_cue("cancel", cfg.get("audio_feedback", False))
                 notify(tr("daemon.recording_cancelled", cfg.get("ui_language")), enabled=cfg.get("notify", True))
                 reset_notification_id()
@@ -520,17 +571,28 @@ class WayVoiceDaemon:
                     "ok": False,
                     "error": tr("daemon.not_recording", self._language()),
                 }
+            # Cancellation is terminal for this take, including an older stop
+            # timer that was already waiting when cancellation signalling failed.
+            if getattr(self, "_record_cancel_requested", False):
+                return self.cancel()
             self._cancel_record_timer()
             try:
                 wav = self.recorder.stop_to_wav()
             except Exception as exc:
                 self.last_error = str(exc)
-                self._record_started = 0.0
                 if not self.recorder.recording:
+                    self._record_started = 0.0
                     self._record_delivery_mode = None
+                    self._record_config = None
+                else:
+                    if delivery_mode is not None:
+                        self._record_delivery_mode = delivery_mode
+                    self._schedule_recording_retry(cancel=False)
                 return {"ok": False, "error": str(exc)}
             self._record_started = 0.0
-            play_cue("stop", load_config().get("audio_feedback", False))
+            take_config = getattr(self, "_record_config", None)
+            self._record_config = None
+            play_cue("stop", (take_config if take_config is not None else load_config()).get("audio_feedback", False))
             take_delivery_mode = delivery_mode or getattr(self, "_record_delivery_mode", None)
             self._record_delivery_mode = None
             self.busy = True
@@ -544,7 +606,7 @@ class WayVoiceDaemon:
                     self._busy_started = 0.0
                     self._remove_finished_wav(wav)
                     return {"ok": False, "error": "Daemon is shutting down."}
-                thread = threading.Thread(target=self._transcribe_worker, args=(wav,), kwargs={"delivery_mode": take_delivery_mode}, daemon=True)
+                thread = threading.Thread(target=self._transcribe_worker, args=(wav,), kwargs={"delivery_mode": take_delivery_mode, "config": take_config}, daemon=True)
                 self._transcribe_thread = thread
                 self._transcribe_wav = wav
             thread.start()
@@ -590,10 +652,12 @@ class WayVoiceDaemon:
             return self.cancel()
         return self.start_recording(delivery_mode=delivery_mode)
 
-    def _transcribe_worker(self, wav: Path, delivery_mode=None) -> None:
+    def _transcribe_worker(self, wav: Path, delivery_mode=None, *, config=None) -> None:
         cfg = {}
         try:
-            cfg = load_config()
+            # The take owns its settings from successful capture through delivery.
+            # Direct callers without a take retain the legacy config-loading API.
+            cfg = config if config is not None else copy.deepcopy(load_config())
             if self._transcribe_cancel.is_set():
                 raise TranscriptionCancelled("Transcription cancelled")
             notify(tr("daemon.transcribing", cfg.get("ui_language")), enabled=cfg.get("notify", True))
@@ -1071,6 +1135,7 @@ class WayVoiceDaemon:
             except Exception as exc:
                 print(f"WayVoice: could not close shortcut session: {exc}", file=sys.stderr)
         self._record_delivery_mode = None
+        self._record_config = None
         deadline = time.monotonic() + JOB_DRAIN_TIMEOUT
         self._shutdown_deadline = deadline
         self._cancel_record_timer()
