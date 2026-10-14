@@ -158,24 +158,29 @@ def _config_lock():
             fcntl.flock(handle, fcntl.LOCK_UN)
 
 
-def update_config(changes: dict[str, Any], expected: dict[str, Any]) -> dict[str, Any]:
+def update_config(changes: dict[str, Any], expected: dict[str, Any], *, guards: dict[str, Any] | None = None, deadline: float | None = None) -> dict[str, Any]:
     """Merge a patch against current disk state, rejecting same-field conflicts.
 
     Missing optional keys compare as None. The caller supplies expected values for
     every changed key; unchanged fields always come from the latest disk snapshot.
+    Optional guards compare dependent unchanged fields under the same lock.
+    An optional monotonic deadline prevents a delayed request from committing late.
     """
     if changes.keys() - expected.keys():
         raise ValueError("Expected values are required for every changed setting")
     with _config_lock():
         current = load_config(strict=True)
+        guarded = [key for key, value in (guards or {}).items() if current.get(key) != value]
         conflicts = [key for key, value in changes.items()
                      if current.get(key) != expected[key] and current.get(key) != value]
-        if conflicts:
-            raise ConfigConflictError(conflicts)
+        if conflicts or guarded:
+            raise ConfigConflictError(set(conflicts + guarded))
         invalid = [key for key, value in changes.items() if not _valid_setting(key, value)]
         if invalid:
             raise ValueError("Invalid setting values: " + ", ".join(invalid))
         merged = dict(current, **changes)
+        if deadline is not None and time.monotonic() >= deadline:
+            raise TimeoutError("Settings update expired before commit")
         _write_config(merged)
         return merged
 

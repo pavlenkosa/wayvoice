@@ -132,6 +132,41 @@ class SettingsController:
         self._expected_config = dict(self.ctx.state.cfg)
         self._config_conflict = False
 
+    def sync_effective_selection(self, cfg):
+        """Update clean selection fields, preserving all unsaved Settings edits."""
+        baseline = self._baseline_draft
+        if baseline is None or self._saving or self._mutations:
+            return
+        current = self._draft_values()
+        group = ('engine', 'model', 'custom_model', 'language')
+        self.ctx.state.cfg = dict(cfg)
+        if cfg.get('engine') not in engine_ids():
+            return
+        if any(current.get(key) != baseline.get(key) for key in group):
+            return
+        if all(current.get(key) == cfg.get(key) for key in ('engine', 'model', 'language')):
+            return
+        from ...models import preset_index
+        settings = self.ctx.settings
+        settings.engine.handler_block_by_func(self._on_engine_selected)
+        settings.model.handler_block_by_func(self.ctx.models._on_model_selected)
+        try:
+            settings.engine.set_selected(engine_ids().index(cfg['engine']))
+            settings.model.set_selected(preset_index(str(cfg['model'])))
+            if preset_index(str(cfg['model'])) == preset_index('__custom__'):
+                settings.custom_model.set_text(str(cfg['model']))
+            self._update_engine_visibility()
+            self.ctx.models._sync_model_ui()
+            settings.language.select_code(languages.normalize(cfg.get('language')))
+        finally:
+            settings.model.handler_unblock_by_func(self.ctx.models._on_model_selected)
+            settings.engine.handler_unblock_by_func(self._on_engine_selected)
+        updated = self._draft_values()
+        for key in group:
+            baseline[key] = updated[key]
+            self._expected_config[key] = cfg.get(key)
+        self._refresh_save_state()
+
     def has_unsaved_changes(self):
         return self._baseline_draft is not None and self._draft_values() != self._baseline_draft
 

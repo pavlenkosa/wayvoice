@@ -41,3 +41,4 @@ class UiContext:
     shortcut: Any = None
     updates: Any = None
     audio: Any = None
+    selection: Any = None

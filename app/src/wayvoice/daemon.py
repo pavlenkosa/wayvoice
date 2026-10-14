@@ -748,6 +748,13 @@ class WayVoiceDaemon:
             return {"ok": False, "state": "shutting_down", "error": "Daemon is shutting down."}
         raw = command.strip()
         name, _, target_json = raw.partition(" ")
+        if name.lower() == "select-recognition":
+            from .selection import select_prepared
+            try:
+                payload = json.loads(target_json)
+            except ValueError as exc:
+                return {"ok": False, "error": str(exc)}
+            return select_prepared(self, payload)
         if name.lower() == "check-microphone":
             from .audio_devices import probe_level
             try:

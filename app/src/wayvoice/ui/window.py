@@ -18,6 +18,7 @@ from .controllers.shortcut import ShortcutController
 from .controllers.status import StatusController
 from .controllers.updates import UpdatesController
 from .controllers.audio import AudioController
+from .controllers.selection import SelectionController
 from .dialogs.update import show_update
 from .dialogs.about import show_about
 from .dialogs.help import show_help
@@ -47,6 +48,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         ctx.profiles = ProfilesController(ctx)
         ctx.updates = UpdatesController(ctx)
         ctx.audio = AudioController(ctx)
+        ctx.selection = SelectionController(ctx)
         self.home = HomePage(ctx)
         self.settings = SettingsPage(ctx)
         self._install_css()

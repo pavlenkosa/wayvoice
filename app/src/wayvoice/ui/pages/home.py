@@ -90,6 +90,10 @@ class HomePage:
         hero.append(self.shortcut_manual)
         outer.append(hero)
 
+        selection_group = Adw.PreferencesGroup(title=self.ctx.state.t("settings.recognition"))
+        self.ctx.selection.attach(selection_group)
+        outer.append(selection_group)
+
         setup_group = Adw.PreferencesGroup()
         self.setup_expander = Adw.ExpanderRow(title=self.ctx.state.t("setup.title"),
                                              subtitle=self.ctx.state.t("setup.description"))

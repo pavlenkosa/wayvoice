@@ -90,3 +90,11 @@ wayvoice model             # Show model status
 wayvoice model --download  # Prepare the saved model
 wayvoice model --cancel    # Cancel its download
 ```
+
+## Quick recognition selection
+
+While the daemon is idle, Home offers prepared local engine/model choices and a recognition language. Select the combination and click **Save**. The list does not download models; use **Configure** to prepare a missing model in Settings. Custom paths, device and decoding options remain in Settings.
+
+Model preparation, recording, recognition and application updates prevent switching. Saving starts an asynchronous offline warm-up when enabled; Preparing, Ready and warm-up errors are shown separately. Use the refresh button to reload effective choices after a conflict, or retry/select another prepared model after a warm-up error. Unsaved Settings drafts are preserved.
+
+Each recording keeps a detached snapshot of its starting settings through recognition and text delivery. Later settings changes apply to the next recording.

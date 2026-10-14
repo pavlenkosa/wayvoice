@@ -36,7 +36,7 @@ The release workflow builds experimental x86_64 Flatpak bundles. Use one when it
 
 - Local Faster-Whisper and whisper.cpp recognition; optional warm recognizer.
 - Wayland clipboard delivery and optional automatic paste. If insertion is unavailable, text stays in the clipboard.
-- Explicit model preparation with progress, cancellation and storage controls.
+- Explicit model preparation with progress, cancellation and storage controls; quick prepared model/language selection on Home.
 - Microphone selection, optional recording sounds, personal text replacements and a compact status indicator.
 - Ten offline interface languages: English, Russian, Spanish, Portuguese, French, German, Simplified Chinese, Japanese, Arabic and Hindi.
 - Automatic speech-language detection or fixed language with compatible models. See [all 100 recognition language choices and model limitations](docs/engines-and-models.md#supported-languages).
