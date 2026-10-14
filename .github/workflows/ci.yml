@@ -179,7 +179,9 @@ jobs:
       - name: Install Flatpak build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder ostree
+          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder ostree elfutils
+          command -v eu-strip
+          command -v eu-elfcompress
           flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
           flatpak install --user --noninteractive flathub org.gnome.Platform//50 org.gnome.Sdk//50
       - name: Build and inspect Flatpak from the clean snapshot
