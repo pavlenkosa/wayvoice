@@ -35,17 +35,34 @@ class UpdateUITests(unittest.TestCase):
         self.window._update_dialog = self.update
         self.addCleanup(self.update.dialog.destroy)
 
+    def _settled_size(self):
+        deadline = time.monotonic() + .25
+        while time.monotonic() < deadline:
+            while GLib.MainContext.default().pending():
+                GLib.MainContext.default().iteration(False)
+            time.sleep(.005)
+        size = (self.update.dialog.get_width(), self.update.dialog.get_height())
+        self.assertGreaterEqual(size[0], 420)
+        self.assertGreaterEqual(size[1], 320)
+        return size
+
+    def test_update_content_minimum_excludes_window_css_padding(self):
+        # Non-composited X11 solid-csd adds padding to the window. A window
+        # size request includes it; the content must still be at least 420x320.
+        provider = Gtk.CssProvider()
+        provider.load_from_data(b"window.wayvoice-update-sizing-test { padding: 5px; }")
+        display = self.update.dialog.get_display()
+        Gtk.StyleContext.add_provider_for_display(display, provider, Gtk.STYLE_PROVIDER_PRIORITY_USER)
+        self.addCleanup(Gtk.StyleContext.remove_provider_for_display, display, provider)
+        self.update.dialog.add_css_class('wayvoice-update-sizing-test')
+        self.window.present()
+        initial = self._settled_size()
+        self.update._checked({'available': True, 'version': '99.0.0'})
+        self.update._supported(('deb', 'amd64'))
+        self.assertEqual(self._settled_size(), initial)
+
     def test_update_geometry_remains_stable_across_normal_stages(self):
-        def settled_size():
-            deadline = time.monotonic() + .25
-            while time.monotonic() < deadline:
-                while GLib.MainContext.default().pending():
-                    GLib.MainContext.default().iteration(False)
-                time.sleep(.005)
-            size = (self.update.dialog.get_width(), self.update.dialog.get_height())
-            self.assertGreaterEqual(size[0], 420)
-            self.assertGreaterEqual(size[1], 320)
-            return size
+        settled_size = self._settled_size
 
         self.window.present()
         for language in ('en', 'ru'):
