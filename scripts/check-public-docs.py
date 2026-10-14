@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Check public Markdown links and keep local engineering documents out of Git."""
 from pathlib import Path
+import json
 import re
 import subprocess
 from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parent.parent
-PUBLIC_DOCS = {f'docs/{name}.md' for name in (
-    'installation', 'getting-started', 'desktop-support', 'shortcuts-and-paste',
-    'engines-and-models', 'troubleshooting', 'architecture', 'development', 'releasing')}
+PUBLIC_DOCS = {name for name in json.loads(
+    (ROOT / 'packaging/public-docs.json').read_text()) if name.startswith('docs/')}
 
 
 def check(root=ROOT):

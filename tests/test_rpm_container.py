@@ -74,6 +74,8 @@ class RpmArtifactTests(unittest.TestCase):
                 destination = base / name
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(ROOT / name, destination)
+            shutil.copyfile(ROOT / 'scripts/package-readme.py', base / 'scripts/package-readme.py')
+            shutil.copyfile(ROOT / 'packaging/public-docs.json', base / 'packaging/public-docs.json')
             shutil.copy2(ROOT / 'scripts/build-rpm.sh', base / 'scripts/build-rpm.sh')
             (base / 'scripts/check-version.py').write_text("print('1.2.3')\n")
             stale = base / 'build/rpm/RPMS/x86_64/wayvoice-1.2.3-1.fc43.x86_64.rpm'

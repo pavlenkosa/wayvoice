@@ -1,19 +1,12 @@
 #!/usr/bin/env python3
 """Copy the public documentation and its local assets without internal notes."""
 import argparse
+import json
 from pathlib import Path
 import shutil
 
-PUBLIC_FILES = (
-    'README.md', 'CHANGELOG.md', 'LICENSE', 'CONTRIBUTING.md', 'SUPPORT.md', 'SECURITY.md',
-    'docs/installation.md', 'docs/getting-started.md', 'docs/desktop-support.md',
-    'docs/shortcuts-and-paste.md', 'docs/engines-and-models.md', 'docs/troubleshooting.md',
-    'docs/architecture.md', 'docs/development.md', 'docs/releasing.md',
-    'releases/TEMPLATE.md', 'third_party/ydotool/README.wayvoice.md',
-    'data/screenshots/home-en.png', 'data/screenshots/settings-en.png',
-    'data/screenshots/setup-en.png',
-    'data/icons/hicolor/scalable/apps/io.github.stepan.WayVoice.svg',
-)
+PUBLIC_FILES = tuple(json.loads(
+    (Path(__file__).resolve().parent.parent / 'packaging/public-docs.json').read_text()))
 
 
 def copy_public_docs(root, destination):
@@ -33,10 +26,16 @@ def copy_public_docs(root, destination):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('destination', type=Path)
+    parser.add_argument('destination', type=Path, nargs='?')
+    parser.add_argument('--source-files', action='store_true', help='List public files outside the source directories already archived by RPM')
     parser.add_argument('--source', type=Path, default=Path(__file__).resolve().parent.parent)
     args = parser.parse_args()
-    copy_public_docs(args.source, args.destination)
+    if args.source_files:
+        print('\n'.join(name for name in PUBLIC_FILES if Path(name).parts[0] not in {'data', 'third_party'}))
+    elif args.destination is None:
+        parser.error('destination is required unless --source-files is used')
+    else:
+        copy_public_docs(args.source, args.destination)
 
 
 if __name__ == '__main__':
