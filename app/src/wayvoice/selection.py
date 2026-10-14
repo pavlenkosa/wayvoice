@@ -32,6 +32,10 @@ def prepared_choices(cfg):
     if engine_status(cpp).get('state') == 'ready':
         choices.append({'engine': 'whisper-cpp', 'model': str(cfg.get('model', 'small')),
                         'label': 'whisper.cpp', 'forced_language': None})
+    parakeet = dict(cfg, engine="parakeet")
+    if engine_status(parakeet).get("state") == "ready":
+        choices.append({"engine": "parakeet", "model": str(cfg.get("model", "small")),
+                        "label": "Parakeet v3 · experimental CPU", "forced_language": "auto"})
     return choices
 
 
@@ -66,7 +70,7 @@ def select_prepared(daemon, payload):
                 raise ValueError(f'This model requires language: {forced}')
             if time.monotonic() >= expires:
                 raise ValueError('Selection expired. Try again.')
-            dependencies = ('whisper_cpp_binary', 'whisper_cpp_model', 'engine_worker', 'device')
+            dependencies = ('whisper_cpp_binary', 'whisper_cpp_model', 'parakeet_binary', 'parakeet_model', 'engine_worker', 'device')
             guards = {key: cfg.get(key) for key in dependencies}
             guards.update({key: expected[key] for key in FIELDS if key not in changes})
             cfg = update_config(changes, {key: expected[key] for key in changes}, guards=guards, deadline=expires)

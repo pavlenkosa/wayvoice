@@ -3,7 +3,7 @@ import json
 import time
 from gi.repository import Gtk
 from ... import languages
-from ...models import forced_language, display_name
+from ...models import display_name
 from ...selection import FIELDS, prepared_choices
 from ...cli import request
 from ..widgets.language_picker import LanguagePicker, language_choices
@@ -25,7 +25,7 @@ class SelectionController:
         self._painting = False
 
     def snapshot(self, cfg):
-        key = tuple(str(cfg.get(k)) for k in ('engine', 'model', 'whisper_cpp_binary', 'whisper_cpp_model'))
+        key = tuple(str(cfg.get(k)) for k in ('engine', 'model', 'whisper_cpp_binary', 'whisper_cpp_model', 'parakeet_binary', 'parakeet_model'))
         if key != self._cache_key or time.monotonic() - self._cache_at >= 5:
             self._cache = prepared_choices(cfg)
             self._cache_key, self._cache_at = key, time.monotonic()
@@ -126,7 +126,7 @@ class SelectionController:
         if option.get('unavailable'):
             return
         wanted = {'engine': option['engine'], 'model': option['model'],
-                  'language': forced_language(option['model']) if option['engine'] == 'faster-whisper' else None}
+                  'language': option.get('forced_language')}
         wanted['language'] = wanted['language'] or self.language.selected_code()
         expected = self._draft_expected if self._dirty else self.effective
         changes = {k: v for k, v in wanted.items() if expected.get(k) != v}

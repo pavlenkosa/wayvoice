@@ -44,7 +44,7 @@ class OwnedJobTests(unittest.TestCase):
         ctx.tasks = TaskRunner(glib)
         self.addCleanup(ctx.tasks.close)
         # Populate the actual save inputs without GTK widget construction.
-        for name in ('custom_model','cpp_binary','cpp_model','custom_command'):
+        for name in ('custom_model','cpp_binary','cpp_model','parakeet_binary','parakeet_model','custom_command'):
             row = mock.Mock()
             row.get_text.return_value = ''
             setattr(ctx.settings, name, row)

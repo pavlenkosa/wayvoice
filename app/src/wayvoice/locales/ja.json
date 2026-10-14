@@ -454,5 +454,8 @@
   "vocab.empty": "まだプレビューはありません。",
   "vocab.invalid": "保存する前に辞書のルールを確認してください。",
   "vocab.limit": "置換は最大100件、合計16,384文字までです。",
-  "vocab.off": "置換はオフです。プレビューには現在の下書き設定を使用します。"
+  "vocab.off": "置換はオフです。プレビューには現在の下書き設定を使用します。",
+  "settings.parakeet_binary": "nemo-speech v0.2.0 のパス（CPU）",
+  "settings.parakeet_model": "Parakeet v3 GGUF のパス（言語自動検出）",
+  "settings.parakeet_prepare": "CPU ランタイムとモデルをダウンロード（約 690 MiB）"
 }

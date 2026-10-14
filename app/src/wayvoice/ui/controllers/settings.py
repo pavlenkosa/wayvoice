@@ -95,7 +95,8 @@ class SettingsController:
     def _draft_values(self):
         model_id = self.ctx.models._selected_model_id()
         forced = forced_language(model_id) if self._selected_engine_uses_models() else None
-        language = languages.normalize(forced or self.ctx.settings.language.selected_code())
+        engine = self._selected_engine_object()
+        language = "auto" if engine and engine.auto_language_only else languages.normalize(forced or self.ctx.settings.language.selected_code())
         new_ui_setting = UI_LANGUAGE_IDS[self.ctx.settings.ui_language.get_selected()]
         return {
             "engine": self._selected_engine(),
@@ -118,6 +119,8 @@ class SettingsController:
             "auto_check_updates": self.ctx.settings.auto_check_updates.get_active(),
             "shortcut": self.ctx.state.shortcut_binding,
             "shortcut_mode": ("toggle", "hold")[self.ctx.settings.shortcut_mode.get_selected()],
+            "parakeet_binary": self.ctx.settings.parakeet_binary.get_text().strip(),
+            "parakeet_model": self.ctx.settings.parakeet_model.get_text().strip(),
             "whisper_cpp_binary": self.ctx.settings.cpp_binary.get_text().strip(),
             "whisper_cpp_model": self.ctx.settings.cpp_model.get_text().strip(),
             "whisper_cpp_gpu": self.ctx.settings.cpp_gpu.get_active(),
@@ -289,7 +292,7 @@ class SettingsController:
         their settings are the only thing that can make them ready.
         """
         engine = engine_from_config(cfg)
-        if engine is None or not engine.needs_setup:
+        if engine is None or not engine.needs_setup or not engine.automatic_setup:
             return
         if engine_status(cfg).get("state") in {"missing", "error"}:
             request_engine_setup(engine)
@@ -299,8 +302,11 @@ class SettingsController:
             return
         self._setup_running = True
         engine_id = self._selected_engine()
+        pending = self._pending_engine_config() if engine_id == "parakeet" else {}
 
         def work():
+            if engine_id == "parakeet" and (pending.get("parakeet_binary") or pending.get("parakeet_model")):
+                raise ValueError("Preparation uses the default paths. Clear custom Parakeet paths first, or prepare those files manually.")
             cfg = load_config()
             cfg["engine"] = engine_id
             return request_engine_setup(engine_from_config(cfg))
@@ -377,6 +383,6 @@ class SettingsController:
             self.ctx.settings.engine_spinner.stop()
             self.ctx.settings.engine_spinner.set_visible(False)
             self.ctx.settings.engine_setup_btn.set_visible(bool(engine and engine.needs_setup))
-            self.ctx.settings.engine_setup_btn.set_sensitive(True)
-            self.ctx.settings.engine_setup_btn.set_label(self.ctx.state.t("settings.repair") if state == "error" else self.ctx.state.t("settings.prepare"))
+            self.ctx.settings.engine_setup_btn.set_sensitive(not self._setup_running)
+            self.ctx.settings.engine_setup_btn.set_label(self.ctx.state.t("settings.parakeet_prepare") if engine and engine.id == "parakeet" else self.ctx.state.t("settings.repair") if state == "error" else self.ctx.state.t("settings.prepare"))
         return GLib.SOURCE_CONTINUE

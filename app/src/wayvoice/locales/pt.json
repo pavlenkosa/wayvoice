@@ -454,5 +454,8 @@
   "vocab.empty": "Ainda não há prévia.",
   "vocab.invalid": "Verifique as regras do dicionário antes de salvar.",
   "vocab.limit": "Máximo de 100 substituições e 16.384 caracteres.",
-  "vocab.off": "As substituições estão desativadas. A prévia usa as configurações do rascunho atual."
+  "vocab.off": "As substituições estão desativadas. A prévia usa as configurações do rascunho atual.",
+  "settings.parakeet_binary": "Caminho para nemo-speech v0.2.0 (CPU)",
+  "settings.parakeet_model": "Caminho para Parakeet v3 GGUF (deteção automática do idioma)",
+  "settings.parakeet_prepare": "Transferir runtime CPU e modelo (~690 MiB)"
 }

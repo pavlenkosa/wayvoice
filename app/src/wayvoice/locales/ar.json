@@ -454,5 +454,8 @@
   "vocab.empty": "لا توجد معاينة بعد.",
   "vocab.invalid": "تحقّق من قواعد القاموس قبل الحفظ.",
   "vocab.limit": "بحد أقصى 100 استبدال و16,384 حرفًا.",
-  "vocab.off": "الاستبدالات معطّلة. تستخدم المعاينة إعدادات المسودة الحالية."
+  "vocab.off": "الاستبدالات معطّلة. تستخدم المعاينة إعدادات المسودة الحالية.",
+  "settings.parakeet_binary": "مسار nemo-speech v0.2.0 ‏(CPU)",
+  "settings.parakeet_model": "مسار Parakeet v3 GGUF (اكتشاف اللغة تلقائيًا)",
+  "settings.parakeet_prepare": "تنزيل بيئة CPU والنموذج (~690 MiB)"
 }

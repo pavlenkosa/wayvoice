@@ -127,3 +127,17 @@ class QuickSelectionUITests(unittest.TestCase):
             work()
         payload = json.loads(request.call_args.args[0].partition(' ')[2])
         self.assertEqual(payload['expected']['language'], 'ru')
+
+    def test_parakeet_language_is_auto_in_home_and_settings(self):
+        from wayvoice.engine import engine_ids
+        cfg = dict(self.cfg, engine='parakeet', language='auto')
+        option = dict(engine='parakeet', model=cfg['model'], label='Parakeet', forced_language='auto')
+        self.quick.paint(dict(self.reply, _prepared_choices=[option]), cfg)
+        self.assertEqual(self.quick.language.selected_code(), 'auto')
+        self.assertFalse(self.quick.language._control().get_sensitive())
+        self.ctx.settings.engine.set_selected(engine_ids().index('parakeet'))
+        self.assertEqual(self.ctx.preferences._draft_values()['language'], 'auto')
+        self.assertFalse(self.ctx.settings.language._control().get_sensitive())
+        self.assertFalse(self.ctx.settings.vad.get_visible())
+        self.assertFalse(self.ctx.settings.device.get_visible())
+        self.assertTrue(self.ctx.settings.parakeet_model.get_visible())

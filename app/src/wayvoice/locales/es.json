@@ -454,5 +454,8 @@
   "vocab.empty": "Aún no hay vista previa.",
   "vocab.invalid": "Revisa las reglas del diccionario antes de guardar.",
   "vocab.limit": "Máximo de 100 sustituciones y 16.384 caracteres.",
-  "vocab.off": "Las sustituciones están desactivadas. La vista previa usa los ajustes del borrador actual."
+  "vocab.off": "Las sustituciones están desactivadas. La vista previa usa los ajustes del borrador actual.",
+  "settings.parakeet_binary": "Ruta a nemo-speech v0.2.0 (CPU)",
+  "settings.parakeet_model": "Ruta a Parakeet v3 GGUF (detección automática del idioma)",
+  "settings.parakeet_prepare": "Descargar runtime CPU y modelo (~690 MiB)"
 }

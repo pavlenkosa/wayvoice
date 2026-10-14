@@ -454,5 +454,8 @@
   "vocab.empty": "Noch keine Vorschau.",
   "vocab.invalid": "Prüfen Sie die Wörterbuchregeln vor dem Speichern.",
   "vocab.limit": "Maximal 100 Ersetzungen und 16.384 Zeichen.",
-  "vocab.off": "Ersetzungen sind ausgeschaltet. Die Vorschau verwendet die aktuellen Entwurfseinstellungen."
+  "vocab.off": "Ersetzungen sind ausgeschaltet. Die Vorschau verwendet die aktuellen Entwurfseinstellungen.",
+  "settings.parakeet_binary": "Pfad zu nemo-speech v0.2.0 (CPU)",
+  "settings.parakeet_model": "Pfad zu Parakeet v3 GGUF (automatische Spracherkennung)",
+  "settings.parakeet_prepare": "CPU-Laufzeit und Modell herunterladen (~690 MiB)"
 }

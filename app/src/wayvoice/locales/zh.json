@@ -454,5 +454,8 @@
   "vocab.empty": "尚无预览。",
   "vocab.invalid": "保存前请检查词典规则。",
   "vocab.limit": "最多 100 条替换规则，共 16,384 个字符。",
-  "vocab.off": "文本替换已关闭。预览使用当前草稿设置。"
+  "vocab.off": "文本替换已关闭。预览使用当前草稿设置。",
+  "settings.parakeet_binary": "nemo-speech v0.2.0 路径（CPU）",
+  "settings.parakeet_model": "Parakeet v3 GGUF 路径（自动检测语言）",
+  "settings.parakeet_prepare": "下载 CPU 运行时和模型（约 690 MiB）"
 }

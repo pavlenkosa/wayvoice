@@ -196,7 +196,7 @@ class WayVoiceDaemon:
         An engine that needs no preparation (whisper.cpp, an external command) is skipped:
         asking anyway would prepare a runtime nothing will use.
         """
-        if status.get("state") in {"missing", "error"}:
+        if engine is not None and engine.automatic_setup and status.get("state") in {"missing", "error"}:
             request_engine_setup(engine)
 
     # ------------------------------------------------------------------
@@ -921,6 +921,8 @@ class WayVoiceDaemon:
                         "daemon.unknown_engine", self._language(), engine=engine_id
                     ),
                 }
+            if engine is not None and not engine.automatic_setup:
+                return {"ok": False, "error": "Prepare Parakeet explicitly in Settings or with python -m wayvoice.parakeet_setup."}
             if request_engine_setup(engine):
                 return {"ok": True}
             # Nothing was started, so say why instead of replying "ok" to a

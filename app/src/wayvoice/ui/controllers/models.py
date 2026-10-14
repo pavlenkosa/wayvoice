@@ -167,7 +167,11 @@ class ModelsController:
         self.ctx.settings.model_state_row.set_visible(uses_models)
         self.ctx.settings.model_disk_row.set_visible(uses_models)
         forced = preset.get("language")
-        if uses_models and forced:
+        engine = self.ctx.preferences._selected_engine_object()
+        if engine and engine.auto_language_only:
+            self.ctx.settings.language.select_code("auto")
+            self.ctx.settings.language.set_sensitive(False)
+        elif uses_models and forced:
             # The model decides the language; show which one, but do not let it
             # be edited into something the model was not trained for.
             self.ctx.settings.language.select_code(str(forced))

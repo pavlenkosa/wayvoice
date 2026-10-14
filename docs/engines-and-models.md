@@ -8,6 +8,20 @@
 
 **whisper.cpp** uses your local `whisper-cli` binary and a compatible model file.
 
+**Parakeet v3 (experimental CPU)** runs `parakeet-tdt-0.6b-v3` locally through the official NeMo-Speech.cpp CLI, once per dictation. It is not kept warm. The default engine remains Faster-Whisper.
+
+Select Parakeet in Settings and click **Download CPU runtime and model (~690 MiB)** to prepare the pinned runtime and Q8_0 weights explicitly. Leave its path fields empty to use the defaults. Saving settings and pressing the recording shortcut never download anything. Custom executable/model paths are advanced overrides and are not replaced by preparation.
+
+For preparation from a source checkout:
+
+```bash
+PYTHONPATH=app/src python3 -m wayvoice.parakeet_setup
+```
+
+Preparation verifies SHA256 and preserves existing files on failure. Downloads trust NVIDIA's GitHub release and Hugging Face model repository; SHA256 checks integrity against the pinned artifacts. Runtime: [NeMo-Speech.cpp v0.2.0](https://github.com/NVIDIA/NeMo-Speech.cpp/releases/tag/v0.2.0), Apache-2.0 plus bundled third-party notices. Weights: [Parakeet TDT 0.6B v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3), CC-BY-4.0, revision `541d1f99c6b0c3cd0b11a95167540bb8edefd82b`. Default files live under `$XDG_DATA_HOME/wayvoice/parakeet` (normally `~/.local/share/wayvoice/parakeet`). Flatpak uses its private data directory and bundled CPU runtime.
+
+Language detection is automatic; this integration does not force a language or use Whisper's beam, VAD, device or worker settings. Supported model languages: Bulgarian, Croatian, Czech, Danish, Dutch, English, Estonian, Finnish, French, German, Greek, Hungarian, Italian, Latvian, Lithuanian, Maltese, Polish, Portuguese, Romanian, Russian, Slovak, Slovenian, Spanish, Swedish and Ukrainian. User RU/EN quality and latency comparison remains pending; no speed or accuracy advantage is claimed.
+
 **External command** passes the recording to another program and reads its standard output as text. For example:
 
 ```text
@@ -31,4 +45,4 @@ Afrikaans (`af`), Albanian (`sq`), Amharic (`am`), Arabic (`ar`), Armenian (`hy`
 
 The interface language and recognition language are separate settings.
 
-Parakeet is not integrated in this version. No streaming or cloud transcription is implied by this page.
+No streaming or cloud transcription is implied by this page.

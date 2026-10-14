@@ -33,6 +33,8 @@ DEFAULTS: dict[str, Any] = {
     "auto_check_updates": False,
     "shortcut": "F8",
     "shortcut_mode": "toggle",
+    "parakeet_binary": "",
+    "parakeet_model": "",
     "whisper_cpp_binary": "",
     "whisper_cpp_model": "",
     "whisper_cpp_gpu": True,

@@ -454,5 +454,8 @@
   "vocab.empty": "Aucun aperçu pour le moment.",
   "vocab.invalid": "Vérifiez les règles du dictionnaire avant d’enregistrer.",
   "vocab.limit": "100 remplacements et 16 384 caractères au maximum.",
-  "vocab.off": "Les remplacements sont désactivés. L’aperçu utilise les réglages du brouillon actuel."
+  "vocab.off": "Les remplacements sont désactivés. L’aperçu utilise les réglages du brouillon actuel.",
+  "settings.parakeet_binary": "Chemin vers nemo-speech v0.2.0 (CPU)",
+  "settings.parakeet_model": "Chemin vers Parakeet v3 GGUF (détection automatique de la langue)",
+  "settings.parakeet_prepare": "Télécharger le runtime CPU et le modèle (~690 Mio)"
 }

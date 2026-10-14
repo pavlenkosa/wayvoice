@@ -94,9 +94,8 @@ def _registered(engine: Engine):
 
 class RegistryShapeTests(unittest.TestCase):
     def test_every_shipped_engine_is_registered(self):
-        # The three engines engine.py can actually run. A fourth one added later must be
-        # added here on purpose, not by accident.
-        self.assertEqual(engine_ids(), ["faster-whisper", "whisper-cpp", "custom"])
+        # Shipped engines are added here explicitly as their integration lands.
+        self.assertEqual(engine_ids(), ["faster-whisper", "whisper-cpp", "custom", "parakeet"])
 
     def test_ids_and_labels_are_unique(self):
         ids = engine_ids()
