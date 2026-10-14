@@ -37,6 +37,9 @@ def validate_tree(output, version):
     runtime = files / 'lib/wayvoice/runtime'
     if not (runtime / '.engine-v1-ready').is_file():
         raise ValueError('Bundled recognition runtime is not ready')
+    parakeet = files / 'lib/wayvoice/parakeet/bin/nemo-speech'
+    if not os.access(parakeet, os.X_OK):
+        raise ValueError('Missing bundled Parakeet CPU runtime')
     forbidden = {'.git', '.env', 'AGENTS.md', 'PRODUCT_TASKS.md', 'ACCEPTANCE.md',
                  'ACCEPTANCE_CURRENT.md', 'MANUAL_ACCEPTANCE_GUIDE_LOCAL.md'}
     for path in files.rglob('*'):

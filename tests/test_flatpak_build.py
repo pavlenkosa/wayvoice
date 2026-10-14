@@ -29,6 +29,16 @@ class ArtifactTests(unittest.TestCase):
             path.touch()
             path.chmod(0o755)
 
+        parakeet = self.files / 'lib/wayvoice/parakeet/bin/nemo-speech'
+        parakeet.parent.mkdir(parents=True)
+        parakeet.touch()
+        parakeet.chmod(0o755)
+
+    def test_missing_parakeet_runtime_rejected(self):
+        (self.files / 'lib/wayvoice/parakeet/bin/nemo-speech').unlink()
+        with self.assertRaisesRegex(ValueError, 'Parakeet'):
+            build.validate_tree(self.output, '1.2.3')
+
     def test_valid_tree(self):
         build.validate_tree(self.output, '1.2.3')
 

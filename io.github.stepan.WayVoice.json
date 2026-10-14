@@ -48,6 +48,25 @@
       ]
     },
     {
+      "name": "parakeet-cpu-runtime",
+      "buildsystem": "simple",
+      "only-arches": [
+        "x86_64"
+      ],
+      "build-commands": [
+        "mkdir -p /app/lib/wayvoice/parakeet",
+        "cp -a bin lib share /app/lib/wayvoice/parakeet/",
+        "/app/lib/wayvoice/parakeet/bin/nemo-speech --version"
+      ],
+      "sources": [
+        {
+          "type": "archive",
+          "url": "https://github.com/NVIDIA/NeMo-Speech.cpp/releases/download/v0.2.0/nemo-speech-0.2.0-linux-x86_64-cpu.tar.gz",
+          "sha256": "f396057150f1b774935c7414fd32ebc04195a795a34120d78d8c9ecefa1b7507"
+        }
+      ]
+    },
+    {
       "name": "wayvoice",
       "buildsystem": "simple",
       "sources": [
