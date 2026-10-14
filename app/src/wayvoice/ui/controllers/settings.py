@@ -182,10 +182,8 @@ class SettingsController:
                         problems.append(msg)
             except Exception as exc:
                 problems.append(str(exc))
-            try:
-                self._prepare_selected_engine(cfg)
-            except Exception as exc:
-                problems.append(str(exc))
+            # Saving preferences is not permission to download a runtime.
+            # Runtime preparation belongs to the explicit Prepare action.
             # Persistence succeeded. Optional integration/setup errors must not
             # leave the UI claiming the old draft is still unsaved.
             return cfg, not problems, "\n".join(problems)
