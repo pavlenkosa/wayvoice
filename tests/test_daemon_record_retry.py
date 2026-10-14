@@ -143,3 +143,19 @@ class RecorderRetryTests(unittest.TestCase):
         self.assertTrue(self.daemon._record_cancel_requested)
         self.assertEqual(timer.call_args.kwargs["args"],
                          (self.daemon._record_generation, True))
+
+    def test_timer_exhaustion_falls_back_to_existing_command_loop(self):
+        self.daemon.start_recording()
+        self.recorder.cancel.side_effect = RuntimeError('signal denied')
+        with mock.patch.object(daemon_mod.threading, 'Timer') as timer:
+            timer.return_value.start.side_effect = RuntimeError('no threads')
+            self.assertFalse(self.daemon.cancel()['ok'])
+        due, generation, cancel = self.daemon._record_retry_due
+        self.assertTrue(cancel)
+        self.assertEqual(generation, self.daemon._record_generation)
+        self.recorder.cancel.side_effect = lambda: setattr(self.recorder, 'recording', False)
+        with mock.patch.object(daemon_mod.time, 'monotonic', return_value=due+1), mock.patch.object(self.daemon, '_transcribe_worker') as asr:
+            self.daemon._retry_recording_fallback()
+        self.assertFalse(self.recorder.recording)
+        self.assertIsNone(self.daemon._record_retry_due)
+        asr.assert_not_called()

@@ -144,6 +144,7 @@ class WayVoiceDaemon:
         self._record_config: dict[str, Any] | None = None
         self._record_cancel_requested = False
         self._record_timer: threading.Timer | None = None
+        self._record_retry_due = None
         self._record_started = 0.0
         self._record_generation = 0
         self._busy_started = 0.0
@@ -333,6 +334,7 @@ class WayVoiceDaemon:
     def _cancel_record_timer(self) -> None:
         timer = self._record_timer
         self._record_timer = None
+        self._record_retry_due = None
         if timer is not None:
             try:
                 timer.cancel()
@@ -356,11 +358,26 @@ class WayVoiceDaemon:
         if self._shutdown.is_set():
             return
         self._cancel_record_timer()
-        self._record_timer = threading.Timer(
-            1.0, self._retry_recording_finish,
-            args=(self._record_generation, cancel))
-        self._record_timer.daemon = True
-        self._record_timer.start()
+        try:
+            self._record_timer = threading.Timer(
+                1.0, self._retry_recording_finish,
+                args=(self._record_generation, cancel))
+            self._record_timer.daemon = True
+            self._record_timer.start()
+        except Exception:
+            # Thread exhaustion must not strand a live microphone or turn a
+            # failed start into an unhandled command error. The existing command
+            # loop can retry without allocating another thread.
+            self._cancel_record_timer()
+            self._record_retry_due = (time.monotonic() + 1.0, self._record_generation, cancel)
+
+    def _retry_recording_fallback(self) -> None:
+        with self._lock:
+            pending = getattr(self, "_record_retry_due", None)
+            if pending is None or time.monotonic() < pending[0]:
+                return
+            self._record_retry_due = None
+            self._retry_recording_finish(pending[1], pending[2])
 
     def _auto_stop_recording(self, generation=None) -> None:
         with self._lock:
@@ -936,6 +953,10 @@ class WayVoiceDaemon:
         hang until it timed out.
         """
         while True:
+            try:
+                self._retry_recording_fallback()
+            except Exception as exc:
+                self.last_error = f"Recording cleanup retry failed: {exc}"
             try:
                 self._drain_ptt()
             except Exception as exc:

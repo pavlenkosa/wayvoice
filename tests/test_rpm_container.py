@@ -68,6 +68,12 @@ class RpmArtifactTests(unittest.TestCase):
                 (base / name).mkdir()
             for name in ('README.md', 'CHANGELOG.md', 'LICENSE'):
                 (base / name).write_text('fixture')
+            # The source archive now includes the public documentation bundle.
+            import runpy
+            for name in runpy.run_path(str(ROOT / 'scripts/package-readme.py'))['PUBLIC_FILES']:
+                destination = base / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(ROOT / name, destination)
             shutil.copy2(ROOT / 'scripts/build-rpm.sh', base / 'scripts/build-rpm.sh')
             (base / 'scripts/check-version.py').write_text("print('1.2.3')\n")
             stale = base / 'build/rpm/RPMS/x86_64/wayvoice-1.2.3-1.fc43.x86_64.rpm'
