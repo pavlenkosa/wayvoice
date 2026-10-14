@@ -89,7 +89,8 @@ class OwnedJobTests(unittest.TestCase):
             release.set()
             self.assertTrue(glib.ready.wait(2))
             glib.drain()
-            prepare.assert_called_once()
+            # Saving settings is not consent to install a recognition runtime.
+            prepare.assert_not_called()
         saved = load_config()
         self.assertEqual(saved['model'],'small')
         self.assertEqual(saved['language'],'ru')
