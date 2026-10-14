@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Build and inspect an x86_64 release bundle without installing it."""
+import argparse
 import configparser
 import hashlib
 import os
@@ -16,6 +17,40 @@ REF = f'app/{APP_ID}/x86_64/stable'
 
 def run(*args, **kwargs):
     return subprocess.run(args, check=True, text=True, **kwargs)
+
+
+def check_host_tools():
+    for tool in ('git', 'tar', 'flatpak', 'flatpak-builder', 'ostree',
+                 'eu-strip', 'eu-elfcompress', 'appstreamcli'):
+        if shutil.which(tool) is None:
+            raise RuntimeError(f'Missing Flatpak build tool: {tool}')
+
+
+def compose_metadata(prefix, work):
+    """Exercise the host SVG decoder and print complete AppStream diagnostics."""
+    run('appstreamcli', 'compose', '--no-net', '--no-color', '--prefix=/',
+        f'--components={APP_ID},{APP_ID}.desktop', '--origin=wayvoice-preflight',
+        f'--result-root={work / "output"}', f'--hints-dir={work / "hints"}',
+        '--print-report=full', str(prefix))
+
+
+def check_host(root):
+    check_host_tools()
+    with tempfile.TemporaryDirectory(prefix='wayvoice-flatpak-host-') as directory:
+        work = Path(directory)
+        prefix = work / 'input'
+        for relative in (f'applications/{APP_ID}.desktop', f'metainfo/{APP_ID}.metainfo.xml',
+                         f'icons/hicolor/scalable/apps/{APP_ID}.svg'):
+            origin = root / 'data' / relative
+            if relative.startswith(('applications/', 'metainfo/')):
+                origin = root / 'data' / Path(relative).name
+            target = prefix / 'share' / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(origin, target)
+        compose_metadata(prefix, work)
+        if not list((work / 'output').rglob(f'{APP_ID}.png')):
+            raise RuntimeError('AppStream did not render the application icon')
+    print('Flatpak host tools and SVG/AppStream composition OK', flush=True)
 
 
 def validate_tree(output, version):
@@ -108,8 +143,17 @@ def main(root=None):
     run('git', '-C', str(root), 'archive', '--format=tar', f'--output={archive}', 'HEAD')
     run('tar', '-xf', str(archive), '-C', str(source))
     output, repo = work / 'output', work / 'repo'
-    run('flatpak-builder', '--arch=x86_64', '--default-branch=stable',
-        f'--state-dir={work / "state"}', str(output), str(source / f'{APP_ID}.json'), cwd=source)
+    check_host(source)
+    try:
+        run('flatpak-builder', '--arch=x86_64', '--default-branch=stable',
+            f'--state-dir={work / "state"}', str(output), str(source / f'{APP_ID}.json'), cwd=source)
+    except subprocess.CalledProcessError:
+        if (output / 'files/share/metainfo' / f'{APP_ID}.metainfo.xml').is_file():
+            try:
+                compose_metadata(output / 'files', work / 'appstream-diagnostics')
+            except (OSError, subprocess.CalledProcessError):
+                pass  # Full report is already printed; preserve the builder failure.
+        raise
     validate_tree(output, version)
     # Execute only an import probe in the build sandbox: no app, microphone or model download.
     run('flatpak', 'build', '--unshare=network', str(output),
@@ -133,4 +177,9 @@ def main(root=None):
 
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--check-host', action='store_true', help='Check host tools and SVG/AppStream support without building')
+    if parser.parse_args().check_host:
+        check_host(Path(__file__).resolve().parent.parent)
+    else:
+        main()

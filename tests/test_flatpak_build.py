@@ -148,3 +148,36 @@ class BuildSafetyTests(unittest.TestCase):
         for line in lock.splitlines():
             if line and not line.startswith('#'):
                 self.assertRegex(line, r'^\S+==\S+ --hash=sha256:[a-f0-9]{64}$')
+
+
+class HostPreflightTests(unittest.TestCase):
+    def test_missing_host_tool_fails_before_work_or_build(self):
+        from unittest import mock
+        with mock.patch.object(build.shutil, 'which', side_effect=lambda tool: None if tool == 'eu-strip' else '/bin/' + tool), mock.patch.object(build, 'run') as run:
+            with self.assertRaisesRegex(RuntimeError, 'eu-strip'):
+                build.check_host(Path('/not-used'))
+            run.assert_not_called()
+
+    def test_compose_failure_propagates_and_cleans_temporary_assets(self):
+        import subprocess
+        from unittest import mock
+        root = Path(__file__).resolve().parents[1]
+        seen = []
+        def fail(*args, **kwargs):
+            prefix = Path(args[-1])
+            self.assertTrue((prefix / f'share/icons/hicolor/scalable/apps/{build.APP_ID}.svg').is_file())
+            self.assertIn('--no-net', args)
+            self.assertIn('--print-report=full', args)
+            seen.append(prefix)
+            raise subprocess.CalledProcessError(1, args)
+        with mock.patch.object(build, 'check_host_tools'), mock.patch.object(build, 'run', side_effect=fail):
+            with self.assertRaises(subprocess.CalledProcessError):
+                build.check_host(root)
+        self.assertFalse(seen[0].exists())
+
+    def test_success_without_rendered_icon_is_not_accepted(self):
+        from unittest import mock
+        root = Path(__file__).resolve().parents[1]
+        with mock.patch.object(build, 'check_host_tools'), mock.patch.object(build, 'run'):
+            with self.assertRaisesRegex(RuntimeError, 'did not render'):
+                build.check_host(root)
