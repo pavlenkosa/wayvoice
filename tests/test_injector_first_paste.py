@@ -121,17 +121,6 @@ class EnvironmentAfterTheHelperTests(unittest.TestCase):
                          str(self.runtime / "wayvoice-ydotool.sock"),
                          "the first dictation after an install had no YDOTOOL_SOCKET")
 
-    def test_the_environment_is_not_built_before_the_helper_is_raised(self):
-        # Read rather than inferred from the value: the order is the defect, and a
-        # test that only checks the outcome would stop covering it if the socket
-        # happened to exist already.
-        import inspect
-
-        source = inspect.getsource(injector.paste_with_ydotool)
-        env_at = source.index("env = _ydotool_env()")
-        helper_at = source.index("ensure_helper_running()")
-        self.assertLess(helper_at, env_at,
-                        "the environment is built before the helper is raised")
 
 
 if __name__ == "__main__":

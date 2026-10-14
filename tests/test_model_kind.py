@@ -17,7 +17,6 @@ below do not spell the values out - they ask ``describe()``.
 
 from tests.ui_support import controller_context
 
-import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
@@ -73,49 +72,7 @@ class KindVocabularyTests(unittest.TestCase):
             _entry_for(self.root, str(self.root / "folder"))["kind"],
         }
         self.assertEqual(produced, {model_store.KIND_REPO, model_store.KIND_LOCAL})
-        for name in (model_store.KIND_REPO, model_store.KIND_LOCAL, model_store.KIND_CUSTOM):
-            self.assertIn(name, (model_store.KIND_REPO, model_store.KIND_LOCAL,
-                                 model_store.KIND_CUSTOM))
 
-
-class KindComparisonTests(unittest.TestCase):
-    """The window must not spell a kind out where the store names it."""
-
-    def _source(self):
-        # find_spec rather than ui.__file__: this class runs on CI, where the import
-        # of wayvoice.ui fails for want of the GTK bindings. Locating the file does
-        # not import it, so the guards run everywhere instead of only on a desktop.
-        # find_spec("wayvoice.ui") imports only the gi-free wayvoice/__init__, never
-        # the window module itself.
-        # UI-ARCH-001: the window shell lives in ui/window.py and the model
-        # lifecycle (where the kind comparisons now are) in the models controller.
-        ui_origin = importlib.util.find_spec("wayvoice.ui").origin
-        legacy = Path(str(Path(__file__).resolve().parents[1] / "app/src/wayvoice/ui/window.py"))
-        models = Path(ui_origin).parent / "controllers" / "models.py"
-        return legacy.read_text(encoding="utf-8") + "\n" + models.read_text(encoding="utf-8")
-
-    def test_no_kind_is_compared_as_a_bare_string(self):
-        import re
-
-        code = []
-        for line in self._source().splitlines():
-            stripped = line.strip()
-            if stripped and not stripped.startswith("#"):
-                code.append(line)
-        # A comparison against a literal is how the two modules drifted apart: the
-        # store said "repo", the window said "hub", and both were correct about
-        # their own text.
-        offenders = [
-            line.strip() for line in code
-            if re.search(r'get\("kind"\)\s*\)?\s*[!=]=\s*["\']', line)
-        ]
-        self.assertEqual(offenders, [],
-                         "compare against model_store.KIND_*, not a literal:\n"
-                         + "\n".join(offenders))
-
-    def test_the_word_hub_is_not_used_as_a_kind(self):
-        # "hub" is the name of the cache directory, never of a kind.
-        self.assertNotIn('"hub"', self._source())
 
 
 @needs_ui

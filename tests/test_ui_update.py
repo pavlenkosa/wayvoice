@@ -26,7 +26,7 @@ class UpdateUITests(unittest.TestCase):
         cls.app.register(None)
 
     def setUp(self):
-        with mock.patch('wayvoice.ui.window.TaskRunner') as runner, \
+        with mock.patch('wayvoice.ui.window.TaskRunner'), \
              mock.patch('wayvoice.ui.window.load_config', return_value={'ui_language': 'en'}):
             self.window = WayVoiceWindow(self.app)
         self.addCleanup(self.window.destroy)

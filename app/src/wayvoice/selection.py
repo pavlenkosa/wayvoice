@@ -20,7 +20,6 @@ def prepared_choices(cfg):
         if current not in models:
             models.append(current)
         for model in models:
-            candidate = dict(faster, model=model)
             try:
                 model_store.inference_dir(model)
             except (OSError, RuntimeError, ValueError):
