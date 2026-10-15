@@ -23,6 +23,16 @@ class ArtifactTests(unittest.TestCase):
         for name in ('AppRun','usr/bin/python3.12','usr/bin/wayvoice','usr/bin/wayvoice-settings','usr/bin/wl-copy','usr/bin/pw-record','usr/lib/wayvoice/parakeet/bin/nemo-speech'):
             path=self.output/name; path.parent.mkdir(parents=True,exist_ok=True); path.touch(); path.chmod(0o755)
 
+        for name in ('usr/share/common-licenses/LGPL-2.1', 'usr/share/doc/wayvoice/third-party/type2-runtime/LICENSE'):
+            path = self.output / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('license')
+
+    def test_missing_license_rejected(self):
+        (self.output / 'usr/share/common-licenses/LGPL-2.1').unlink()
+        with self.assertRaisesRegex(ValueError, 'Missing license'):
+            build.validate_tree(self.output, '1.2.3')
+
     def test_valid_tree(self):
         build.validate_tree(self.output,'1.2.3','a'*40)
 

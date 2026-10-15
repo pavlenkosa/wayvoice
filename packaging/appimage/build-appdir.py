@@ -126,6 +126,9 @@ def main():
     for relative in ('scalable/apps/io.github.stepan.WayVoice.svg', 'symbolic/apps/io.github.stepan.WayVoice-symbolic.svg'):
         shutil.copy2(source / 'data/icons/hicolor' / relative, prefix / 'share/icons/hicolor' / relative)
     run('glib-compile-schemas', str(prefix / 'share/glib-2.0/schemas'))
+    # Debian package copyright notices refer to these shared license texts.
+    shutil.copytree('/usr/share/common-licenses', prefix / 'share/common-licenses',
+                    dirs_exist_ok=True)
     docs = prefix / 'share/doc/wayvoice'
     run('python3', str(source / 'scripts/package-readme.py'), str(docs))
     shutil.copytree(source / 'packaging/appimage/licenses', docs / 'third-party')

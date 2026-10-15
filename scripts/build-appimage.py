@@ -64,6 +64,10 @@ def validate_tree(appdir, version, commit=None):
             raise ValueError(f'Missing executable: {relative}')
     if not (appdir / 'usr/lib/wayvoice/runtime/.engine-v1-ready').is_file():
         raise ValueError('Bundled recognition runtime is not ready')
+    for relative in ('usr/share/common-licenses/LGPL-2.1',
+                     'usr/share/doc/wayvoice/third-party/type2-runtime/LICENSE'):
+        if not (appdir / relative).is_file():
+            raise ValueError(f'Missing license: {relative}')
     for path in appdir.rglob('*'):
         if path.is_symlink() and not path.resolve().is_relative_to(appdir.resolve()):
             raise ValueError(f'External symlink in AppImage: {path.relative_to(appdir)}')
