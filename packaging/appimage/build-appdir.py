@@ -12,7 +12,7 @@ import tarfile
 import urllib.request
 
 ROOTS = ('python3', 'python3-gi', 'python3-gi-cairo', 'python3-cairo',
-         'gir1.2-gtk-4.0', 'gir1.2-adw-1', 'libglib2.0-bin', 'libglib2.0-data',
+         'gir1.2-gtk-4.0', 'gir1.2-adw-1', 'gir1.2-freedesktop', 'libglib2.0-bin', 'libglib2.0-data',
          'libgdk-pixbuf2.0-bin', 'librsvg2-common', 'fonts-dejavu-core',
          'pipewire-bin', 'libpipewire-0.3-modules', 'libspa-0.2-modules',
          'wl-clipboard', 'libnotify-bin', 'ca-certificates')
