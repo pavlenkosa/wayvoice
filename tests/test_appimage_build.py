@@ -75,6 +75,18 @@ class BuildSafetyTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
 
+    def test_both_container_images_receive_host_uid_and_gid(self):
+        from unittest import mock
+        for dockerfile in ('Dockerfile', 'Dockerfile.smoke'):
+            with mock.patch.object(build.os, 'getuid', return_value=1001), \
+                    mock.patch.object(build.os, 'getgid', return_value=1002), \
+                    mock.patch.object(build, 'run') as run:
+                build.build_container_image(self.root, 'test-image', dockerfile)
+            args = run.call_args.args
+            self.assertIn('BUILD_UID=1001', args)
+            self.assertIn('BUILD_GID=1002', args)
+            self.assertIn(str(self.root / 'packaging/appimage' / dockerfile), args)
+
     def test_dirty_tree_refused_before_any_build(self):
         from unittest import mock
         import subprocess

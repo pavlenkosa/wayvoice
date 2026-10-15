@@ -15,6 +15,12 @@ def run(*args, **kwargs):
     return subprocess.run(args, check=True, text=True, **kwargs)
 
 
+def build_container_image(source, image, dockerfile):
+    run('docker', 'build', '--build-arg', f'BUILD_UID={os.getuid()}',
+        '--build-arg', f'BUILD_GID={os.getgid()}', '-t', image,
+        '-f', str(source / 'packaging/appimage' / dockerfile), str(source))
+
+
 def publish_bundle(bundle, destination):
     """Expose only a complete artifact, refusing to replace existing files."""
     checksum = destination.with_name(destination.name + '.sha256')
@@ -106,7 +112,7 @@ def main(root=None):
     output.mkdir()
     print(f'AppImage workspace: {work}', flush=True)
     image = 'wayvoice-appimage-builder:0.8.0'
-    run('docker', 'build', '-t', image, '-f', str(source / 'packaging/appimage/Dockerfile'), str(source))
+    build_container_image(source, image, 'Dockerfile')
     run('docker', 'run', '--rm', '--init', '--user', f'{os.getuid()}:{os.getgid()}',
         '-e', 'HOME=/tmp/wayvoice-builder', '-v', f'{source}:/source:ro', '-v', f'{output}:/work',
         image, 'python3', '/source/packaging/appimage/build-appdir.py', '--source', '/source',
@@ -114,7 +120,7 @@ def main(root=None):
     actual = output / 'extracted with spaces/squashfs-root'
     validate_tree(actual, version, commit)
     smoke_image = 'wayvoice-appimage-smoke:0.8.0'
-    run('docker', 'build', '-t', smoke_image, '-f', str(source / 'packaging/appimage/Dockerfile.smoke'), str(source))
+    build_container_image(source, smoke_image, 'Dockerfile.smoke')
     run('docker', 'run', '--rm', '--init', '--network=none', '--user', f'{os.getuid()}:{os.getgid()}',
         '-e', 'HOME=/tmp/wayvoice-smoke', '-e', 'GTK_A11Y=none', '-e', 'GDK_BACKEND=x11',
         '-v', f'{actual}:/portable copy with spaces:ro', smoke_image,

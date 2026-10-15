@@ -6,4 +6,11 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     pipewire-bin libpipewire-0.3-modules libspa-0.2-modules wl-clipboard libnotify-bin \
     patchelf file git ca-certificates squashfs-tools xvfb xauth dbus-x11 \
     && rm -rf /var/lib/apt/lists/*
+# Docker --user does not create an NSS identity. D-Bus requires getpwuid()
+# to succeed for the host UID (GitHub runners commonly use 1001).
+ARG BUILD_UID=1000
+ARG BUILD_GID=1000
+RUN (getent group "$BUILD_GID" >/dev/null || groupadd --gid "$BUILD_GID" wayvoice-build) \
+    && (getent passwd "$BUILD_UID" >/dev/null || useradd --uid "$BUILD_UID" --gid "$BUILD_GID" \
+        --home-dir /tmp/wayvoice-user --no-create-home wayvoice-build)
 WORKDIR /work
