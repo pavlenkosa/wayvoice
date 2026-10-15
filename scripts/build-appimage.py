@@ -53,8 +53,12 @@ def validate_tree(appdir, version, commit=None):
         raise ValueError('AppImage source identity mismatch')
     forbidden = {'.git', '.env', 'AGENTS.md', 'PRODUCT_TASKS.md', 'ACCEPTANCE.md', 'ACCEPTANCE_CURRENT.md'}
     for path in appdir.rglob('*'):
-        if path.name in forbidden or path.suffix in ('.pem', '.key'):
-            # CA public certificates use .crt; private key formats never ship.
+        public_pem = (path.suffix == '.pem' and path.is_file() and
+                      re.fullmatch(rb'(?:\s*-----BEGIN CERTIFICATE-----\s+[A-Za-z0-9+/=\s]+-----END CERTIFICATE-----\s*)+',
+                                   path.read_bytes()) is not None)
+        if path.name in forbidden or path.suffix == '.key' or (path.suffix == '.pem' and not public_pem):
+            # PEM is also the standard CA bundle format; permit certificates only.
+
             raise ValueError(f'Private/build file in AppImage: {path.relative_to(appdir)}')
     if info.get('architecture') != 'x86_64':
         raise ValueError('AppImage architecture mismatch')

@@ -50,6 +50,17 @@ class ArtifactTests(unittest.TestCase):
         os.chmod(self.output/'usr/bin/wl-copy',0o644)
         with self.assertRaisesRegex(ValueError,'Missing executable'): build.validate_tree(self.output,'1.2.3')
 
+    def test_public_pem_allowed_but_private_or_mixed_pem_rejected(self):
+        pem = self.output / 'cert.pem'
+        certificate = b'-----BEGIN CERTIFICATE-----\nYWJj\n-----END CERTIFICATE-----\n'
+        pem.write_bytes(certificate)
+        build.validate_tree(self.output, '1.2.3')
+        for content in (b'-----BEGIN PRIVATE KEY-----\nYWJj\n-----END PRIVATE KEY-----',
+                        certificate + b'-----BEGIN PRIVATE KEY-----\nYWJj\n-----END PRIVATE KEY-----'):
+            pem.write_bytes(content)
+            with self.assertRaisesRegex(ValueError, 'Private'):
+                build.validate_tree(self.output, '1.2.3')
+
     def test_private_files_and_external_links_rejected(self):
         private=self.output/'AGENTS.md'; private.touch()
         with self.assertRaisesRegex(ValueError,'Private'): build.validate_tree(self.output,'1.2.3')
