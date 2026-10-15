@@ -128,6 +128,7 @@ def main():
     run('glib-compile-schemas', str(prefix / 'share/glib-2.0/schemas'))
     docs = prefix / 'share/doc/wayvoice'
     run('python3', str(source / 'scripts/package-readme.py'), str(docs))
+    shutil.copytree(source / 'packaging/appimage/licenses', docs / 'third-party')
     (prefix / 'share/wayvoice').mkdir(parents=True, exist_ok=True)
     shutil.copy2('/etc/ssl/certs/ca-certificates.crt', prefix / 'share/wayvoice/ca-certificates.crt')
     shutil.copy2(source / 'packaging/appimage/AppRun', appdir / 'AppRun')
