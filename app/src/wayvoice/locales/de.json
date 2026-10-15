@@ -407,7 +407,7 @@
   "model.subtitle.ele-sage/whisper-large-v3-turbo-fr-quebecois-ct2": "Québec-Französisch · Community",
   "model.subtitle.LocalAI-io/whisper-large-v3-it-yodas-only-ct2-int8": "Für Italienisch nachtrainiert · Community",
   "model.subtitle.__custom__": "Hugging-Face-Repository-ID oder lokaler Pfad",
-  "update.external": "Diese Installation über die Paketverwaltung oder Flatpak aktualisieren. Die Aktualisierung in der App erfordert ein installiertes DEB- oder RPM-Paket.",
+  "update.external": "Diese Installation manuell aktualisieren. Für AppImage WayVoice beenden und die Datei ersetzen. Die Aktualisierung in der App erfordert ein installiertes DEB- oder RPM-Paket.",
   "update.busy": "Bitte warten, bis der aktuelle Vorgang abgeschlossen ist.",
   "update.interrupted": "Die Aktualisierung endete ohne Abschlussbestätigung.",
   "update.restart_failed": "Das Paket wurde installiert, aber der Dienstneustart ist fehlgeschlagen.",

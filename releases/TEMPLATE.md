@@ -12,7 +12,7 @@ TODO: State tested desktop/session and package combinations. Mark pending checks
 
 ## Downloads
 
-TODO: List the actual DEB, RPM and experimental Flatpak assets and the SHA256SUMS integrity check. State architecture and runtime dependencies.
+TODO: List the actual DEB, RPM and experimental AppImage assets and the SHA256SUMS integrity check. State architecture and runtime dependencies.
 
 ## Known limitations
 

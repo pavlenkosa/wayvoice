@@ -1,4 +1,4 @@
-.PHONY: version-check lint test deb rpm clean
+.PHONY: version-check lint test deb rpm appimage clean
 
 version-check:
 	python3 scripts/check-version.py
@@ -10,7 +10,7 @@ lint: version-check
 	  scripts/wayvoice scripts/wayvoice-daemon scripts/wayvoice-settings \
 	  scripts/wayvoice-engine-setup scripts/wayvoice-ydotoold scripts/setup-user \
 	  scripts/build-deb.sh scripts/build-rpm.sh scripts/build-rpm-container.sh scripts/build-ydotool.sh \
-	  packaging/DEBIAN/postinst packaging/DEBIAN/postrm packaging/DEBIAN/prerm; do \
+	  packaging/DEBIAN/postinst packaging/DEBIAN/postrm packaging/DEBIAN/prerm packaging/appimage/AppRun; do \
 	    if [ -f "$$f" ]; then bash -n "$$f"; else echo "skip (absent): $$f"; fi; \
 	  done
 
@@ -22,6 +22,9 @@ deb: version-check
 
 rpm: version-check
 	./scripts/build-rpm.sh
+
+appimage: version-check
+	python3 scripts/build-appimage.py
 
 clean:
 	rm -rf build dist

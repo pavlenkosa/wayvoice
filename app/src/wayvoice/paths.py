@@ -106,3 +106,9 @@ def python_executable() -> str:
     if found:
         return found
     return sys.executable
+
+
+def appimage_path() -> str | None:
+    """Persistent image path supplied by our AppRun, never a temporary mount."""
+    value = os.environ.get("WAYVOICE_APPIMAGE", "")
+    return str(Path(value).absolute()) if value else None

@@ -407,7 +407,7 @@
   "model.subtitle.ele-sage/whisper-large-v3-turbo-fr-quebecois-ct2": "ケベックのフランス語 · コミュニティ製",
   "model.subtitle.LocalAI-io/whisper-large-v3-it-yodas-only-ct2-int8": "イタリア語向けに調整 · コミュニティ製",
   "model.subtitle.__custom__": "Hugging Face のリポジトリ ID またはローカルパス",
-  "update.external": "パッケージマネージャーまたは Flatpak で更新してください。アプリ内更新にはインストール済みの DEB または RPM が必要です。",
+  "update.external": "このインストールは手動で更新してください。AppImage は WayVoice を終了してファイルを置き換えます。アプリ内更新にはインストール済みの DEB または RPM が必要です。",
   "update.busy": "現在の操作が完了するまでお待ちください。",
   "update.interrupted": "完了を確認できないまま更新が終了しました。",
   "update.restart_failed": "パッケージはインストールされましたが、サービスの再起動に失敗しました。",

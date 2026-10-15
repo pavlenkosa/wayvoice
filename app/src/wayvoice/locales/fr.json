@@ -407,7 +407,7 @@
   "model.subtitle.ele-sage/whisper-large-v3-turbo-fr-quebecois-ct2": "Français québécois · communauté",
   "model.subtitle.LocalAI-io/whisper-large-v3-it-yodas-only-ct2-int8": "Affiné pour l’italien · communauté",
   "model.subtitle.__custom__": "Identifiant de dépôt Hugging Face ou chemin local",
-  "update.external": "Mettez à jour cette installation avec le gestionnaire de paquets ou Flatpak. La mise à jour intégrée nécessite un DEB ou RPM installé.",
+  "update.external": "Mettez cette installation à jour manuellement. Pour AppImage, quittez WayVoice et remplacez le fichier. La mise à jour intégrée nécessite un DEB ou RPM installé.",
   "update.busy": "Attendez la fin de l’opération en cours.",
   "update.interrupted": "La mise à jour s’est arrêtée sans confirmation du résultat.",
   "update.restart_failed": "Le paquet est installé, mais le redémarrage des services a échoué.",

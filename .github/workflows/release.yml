@@ -110,13 +110,8 @@ jobs:
           dpkg-deb --info "$DEB"
           dpkg-deb --contents "$DEB" > /dev/null
 
-      - name: Build and inspect Flatpak bundle
-        run: |
-          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder ostree elfutils librsvg2-common git python3
-          python3 scripts/build-flatpak.py --check-host
-          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-          flatpak install --user --noninteractive flathub org.gnome.Platform//50 org.gnome.Sdk//50
-          python3 scripts/build-flatpak.py
+      - name: Build and inspect AppImage
+        run: python3 scripts/build-appimage.py
 
       - name: Create source archive and checksums
         shell: bash
@@ -131,7 +126,7 @@ jobs:
 
           (
             cd dist
-            sha256sum *.deb *.rpm wayvoice-${VERSION}-x86_64.flatpak wayvoice-${VERSION}-source.zip > SHA256SUMS
+            sha256sum *.deb *.rpm wayvoice-${VERSION}-x86_64.AppImage wayvoice-${VERSION}-source.zip > SHA256SUMS
           )
 
       - name: Upload release artifact
@@ -143,8 +138,8 @@ jobs:
             dist/*.deb.sha256
             dist/*.rpm
             dist/*.rpm.sha256
-            dist/wayvoice-${{ steps.version.outputs.version }}-x86_64.flatpak
-            dist/wayvoice-${{ steps.version.outputs.version }}-x86_64.flatpak.sha256
+            dist/wayvoice-${{ steps.version.outputs.version }}-x86_64.AppImage
+            dist/wayvoice-${{ steps.version.outputs.version }}-x86_64.AppImage.sha256
             dist/*-source.zip
             dist/SHA256SUMS
             dist/RELEASE_NOTES.md
@@ -196,6 +191,6 @@ jobs:
           # Draft first supports immutable releases: attach everything before publishing.
           gh release create "$TAG" --verify-tag --draft "${flags[@]}" \
             --title "WayVoice ${TAG#v}" --notes-file RELEASE_NOTES.md \
-            *.deb *.deb.sha256 *.rpm *.rpm.sha256 *.flatpak *.flatpak.sha256 \
+            *.deb *.deb.sha256 *.rpm *.rpm.sha256 *.AppImage *.AppImage.sha256 \
             *-source.zip SHA256SUMS
           gh release edit "$TAG" --draft=false "${flags[@]}"

@@ -30,7 +30,7 @@ sudo dnf install ./wayvoice-*-1.fc44.x86_64.rpm
 
 Open **WayVoice**, explicitly prepare a model, and configure your shortcut. Initial runtime/model preparation needs a network connection; recognition with prepared local models works offline. Missing models are never downloaded by pressing the dictation shortcut.
 
-The release workflow builds experimental x86_64 Flatpak bundles. Use one when it is listed in the chosen release's assets; installed sandbox dictation still needs testing. WayVoice is not on Flathub. See [installation and manual updates](docs/installation.md), including the separate GNOME Platform 50 dependency.
+Version 0.8.0 replaces the experimental Flatpak build with an x86_64 AppImage containing Python, GTK/libadwaita and recognition runtimes. It targets Linux with glibc 2.39 or newer. See [portable installation and manual updates](docs/installation.md#appimage); live desktop acceptance remains open.
 
 ## Features
 
@@ -51,7 +51,7 @@ The release workflow builds experimental x86_64 Flatpak bundles. Use one when it
 | GNOME / Wayland | Primary tested desktop |
 | KDE Plasma / Wayland | Shortcut integration implemented; complete installed dictation/paste acceptance pending |
 | wlroots | Community testing needed |
-| Flatpak | Bundle build verified; installed sandbox acceptance pending |
+| AppImage | x86_64, glibc ≥ 2.39; portable desktop acceptance pending |
 
 Automatic paste depends on permissions and optional `ydotool`; manual clipboard paste remains available. GNOME shortcuts toggle recording; portal hold-to-talk currently targets KDE. [Desktop compatibility](docs/desktop-support.md) · [Shortcuts and paste](docs/shortcuts-and-paste.md)
 

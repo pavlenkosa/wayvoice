@@ -20,7 +20,7 @@ def stage(source, output, version, commit, run_url=''):
     if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?', version):
         raise ValueError('Invalid project version')
     packages = []
-    for extension in ('deb', 'rpm', 'flatpak'):
+    for extension in ('deb', 'rpm', 'AppImage'):
         matches = list(source.glob(f'*.{extension}'))
         if len(matches) != 1:
             raise ValueError(f'Expected exactly one {extension} artifact')

@@ -111,6 +111,9 @@ def _output(args: list[str]) -> str:
 
 
 def package_system() -> tuple[str, str]:
+    from .paths import appimage_path
+    if appimage_path():
+        raise ValueError("Update AppImage manually by replacing its file after quitting WayVoice.")
     if os.environ.get('FLATPAK_ID') or Path('/.flatpak-info').exists():
         raise ValueError('Use flatpak update for a Flatpak installation.')
     source = str(Path(__file__).resolve())

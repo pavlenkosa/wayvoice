@@ -4,7 +4,7 @@
 
 WayVoice is Linux-first, with GTK 4/libadwaita and PipeWire capture. GNOME/Wayland is the primary tested desktop. KDE Plasma shortcut integration exists, but complete installed dictation/paste acceptance remains open. wlroots desktops are not validated.
 
-Native DEB/RPM installations support systemd user services and direct-process fallback when no user manager answers. Flatpak uses direct processes. Fedora 44 package lifecycle has been checked in a disposable container; this does not verify a live Fedora desktop. Other RPM distributions are unvalidated.
+Native DEB/RPM installations support systemd user services and direct-process fallback when no user manager answers. AppImage always uses separate portable processes, even on a host with systemd. It shares the usual WayVoice configuration/socket; quit a native instance before switching. Fedora 44 package lifecycle has been checked in a disposable container; this does not verify a live Fedora desktop. Other RPM distributions are unvalidated.
 
 Xvfb/X11 GTK tests check widgets and callbacks. They do not verify Wayland focus, desktop shortcuts, physical microphone capture, clipboard lifetime, virtual keyboard permissions or insertion into another application.
 

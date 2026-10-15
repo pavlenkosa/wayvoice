@@ -1,4 +1,4 @@
-# Explicit Faster-Whisper runtime dependency set, shared by native and Flatpak.
+# Explicit Faster-Whisper runtime dependency set, shared by native and AppImage.
 # NumPy 2.4.6 retains Python 3.11 compatibility. Update and verify as a set.
 anyio==4.15.1
 av==18.1.0

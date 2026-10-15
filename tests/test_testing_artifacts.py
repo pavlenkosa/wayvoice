@@ -19,7 +19,7 @@ class TestingArtifactsTests(unittest.TestCase):
         self.source.mkdir()
         self.output = self.root / 'testing'
         self.commit = 'a' * 40
-        for extension in ('deb', 'rpm', 'flatpak'):
+        for extension in ('deb', 'rpm', 'AppImage'):
             path = self.source / f'wayvoice-1.2.3.{extension}'
             path.write_bytes(extension.encode())
             path.with_name(path.name + '.sha256').write_text(f'{artifacts.sha256(path)}  {path.name}\n')

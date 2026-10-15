@@ -1115,3 +1115,6 @@ def tr(key: str, language: str | None = None, **kwargs: Any) -> str:
         except Exception:
             return value
     return value
+
+_RU["update.external"] = "Обновите эту установку вручную. Для AppImage завершите WayVoice и замените файл. Обновление в приложении доступно только для установленного DEB или RPM."
+_EN["update.external"] = "Update this installation manually. For AppImage, quit WayVoice and replace the file. In-app installation requires an installed DEB or RPM."

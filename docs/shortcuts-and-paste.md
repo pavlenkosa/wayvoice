@@ -10,7 +10,7 @@
 | KDE Plasma | Click **Configure in KDE** to assign the action through the GlobalShortcuts portal. If unavailable, bind `wayvoice toggle` in Plasma's shortcut settings. |
 | Other Wayland desktops | Bind the command shown in WayVoice Settings using the desktop or compositor's shortcut configuration. |
 
-For Flatpak, use the command shown by the app rather than the native command above. Remove an old manual binding before assigning the same key through the KDE portal.
+For AppImage, use the persistent AppImage path followed by `toggle`, as shown by the app; moving the file requires updating the binding. Remove an old manual binding before assigning the same key through the KDE portal.
 
 Automatic paste requires `ydotool` and access to `/dev/uinput`. Native packages include a fallback helper and prefer a system-installed copy when available. If the helper cannot be used, recognized text still reaches the clipboard. Choose **Ctrl+Shift+V** for terminals such as Konsole; ordinary editors generally use **Ctrl+V**.
 

@@ -93,7 +93,7 @@ class UpdateUITests(unittest.TestCase):
         self.update._checked({'available': True, 'version': '99.0.0'})
         self.assertFalse(self.update.install_button.get_visible())
         self.update._unsupported(ValueError('source checkout'))
-        self.assertIn('Flatpak', self.update.dialog.get_body())
+        self.assertIn('AppImage', self.update.dialog.get_body())
 
     def test_busy_blocks_close_and_failure_restores_controls(self):
         self.update._start()

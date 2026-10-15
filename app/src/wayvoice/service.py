@@ -30,7 +30,7 @@ from pathlib import Path
 from threading import RLock
 
 from .config import load_config
-from .paths import app_src_dir, python_executable
+from .paths import app_src_dir, python_executable, appimage_path
 from .shortcut import apply_shortcut
 
 # Sign of a running user manager: ``/run/systemd/user`` on older systemd, the
@@ -87,6 +87,8 @@ def systemd_available() -> bool:
     the daemon's lifetime, and a second, unmanaged daemon would be worse than the
     failure.
     """
+    if appimage_path():
+        return False
     if shutil.which("systemctl") is None:
         return False
     return os.path.isdir(SYSTEMD_USER_RUNTIME) or _user_manager_socket().exists()
@@ -124,7 +126,11 @@ def _child_env() -> dict[str, str]:
 
 def _spawn(module: str) -> None:
     """Run ``python -m <module>`` detached, with output in the service log."""
-    args = [python_executable(), "-m", module]
+    image = appimage_path()
+    modes = {DAEMON_MODULE: "--daemon", ENGINE_SETUP_MODULE: "--engine-setup"}
+    # Each detached component owns its own AppImage runtime/mount. It must not
+    # borrow the UI mount, which disappears when the UI exits.
+    args = [image, modes[module]] if image else [python_executable(), "-m", module]
     log = None
     try:
         path = service_log_path()

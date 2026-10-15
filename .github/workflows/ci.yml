@@ -99,8 +99,8 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  flatpak-manifest:
-    name: Flatpak manifest assertions
+  appimage-recipe:
+    name: AppImage recipe assertions
     runs-on: ubuntu-24.04
     timeout-minutes: 5
 
@@ -108,10 +108,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Bundle builds run for develop testing artifacts and tagged releases.
-      # This fast check also backs the local release gate.
-      - name: Check manifest structure
-        run: python3 scripts/check-flatpak-manifest.py
+      - name: Check portable recipe and dependency pins
+        run: |
+          python3 scripts/check-appimage.py
+          shellcheck packaging/appimage/AppRun
 
   gtk-tests:
     name: GTK UI tests
@@ -164,7 +164,7 @@ jobs:
   testing-artifacts:
     name: Develop testing packages
     if: github.ref == 'refs/heads/develop' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    needs: [test-and-build, gtk-tests, quality, flatpak-manifest]
+    needs: [test-and-build, gtk-tests, quality, appimage-recipe]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -176,15 +176,8 @@ jobs:
         with:
           name: wayvoice-native-${{ github.sha }}
           path: dist
-      - name: Install Flatpak build tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder ostree elfutils librsvg2-common git python3
-          python3 scripts/build-flatpak.py --check-host
-          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-          flatpak install --user --noninteractive flathub org.gnome.Platform//50 org.gnome.Sdk//50
-      - name: Build and inspect Flatpak from the clean snapshot
-        run: python3 scripts/build-flatpak.py
+      - name: Build and inspect AppImage from the clean snapshot
+        run: python3 scripts/build-appimage.py
       - name: Label testing artifacts and generate provenance
         env:
           BUILD_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

@@ -24,25 +24,24 @@ sudo dnf install ./wayvoice-*-1.fc44.x86_64.rpm
 
 Installation, upgrade and removal have been checked in a disposable Fedora 44 container. A live Fedora desktop, microphone permissions and automatic paste still need verification. Other RPM distributions are not validated.
 
-### Flatpak
+### AppImage
 
-Experimental `wayvoice-VERSION-x86_64.flatpak` bundles are built for GitHub Releases. WayVoice is not currently published on Flathub. Installed sandbox dictation still requires user acceptance testing.
-
-The bundle contains WayVoice and its Faster-Whisper runtime, but GNOME Platform 50 is a separate dependency. With Flatpak and the Flathub remote configured:
+The experimental x86_64 `wayvoice-VERSION-x86_64.AppImage` targets Linux with glibc 2.39 or newer (Ubuntu 24.04 baseline). It includes Python 3.12, GTK 4/libadwaita, PipeWire recording tools, wl-clipboard, Faster-Whisper dependencies and the Parakeet CPU runtime. Model weights are downloaded only through explicit preparation; ordinary dictation stays offline.
 
 ```bash
-flatpak install --user flathub org.gnome.Platform//50
-flatpak install --user ./wayvoice-VERSION-x86_64.flatpak
-flatpak run io.github.stepan.WayVoice
+chmod +x wayvoice-VERSION-x86_64.AppImage
+./wayvoice-VERSION-x86_64.AppImage
 ```
 
-Replace `VERSION` with the downloaded release version. Verify the bundle against the release `SHA256SUMS` before installation. Models are prepared explicitly in Settings; ordinary dictation does not download them.
+Verify the file using the release `SHA256SUMS` first. If FUSE mounting is unavailable, use `./wayvoice-VERSION-x86_64.AppImage --appimage-extract-and-run`. No package installation or privileged host setup is performed. Automatic paste still requires suitable host permissions/tools; clipboard fallback remains available.
 
-Update manually by downloading and installing the newer bundle with the same `flatpak install --user ./...flatpak` command. These bundles do not configure a WayVoice update remote, and the native package updater is unavailable in Flatpak.
+Keep the file at a stable path. A shortcut command is `"/absolute/path/WayVoice.AppImage" toggle`; update the shortcut if you move the file. Quit any already-running WayVoice before switching between native and portable builds: they share normal configuration, model cache and daemon socket. This is portable packaging, not a sandbox or isolated test session.
 
-To build without installing the application, use `python3 scripts/build-flatpak.py` from a clean tracked checkout with GNOME SDK/Platform 50, `flatpak-builder` and `ostree` available. The script retains a unique workspace under `build/`, inspects the exported bundle, and writes it with a checksum under `dist/`.
+Update manually: finish dictation, quit WayVoice and its daemon (`./wayvoice-VERSION-x86_64.AppImage quit`), then replace the executable with the newer verified file. The DEB/RPM updater never installs packages from an AppImage. Portable daemon/setup processes launch the image separately so closing the interface does not remove their runtime files. Live GNOME/Wayland and FUSE lifecycle acceptance remains open.
 
-Flatpak builds use direct background processes instead of systemd user services. Configure the shortcut in your desktop and paste manually from the clipboard; native shortcut registration and the bundled paste helper are not supported in the sandbox.
+Build without installing the application with `python3 scripts/build-appimage.py` from a clean committed checkout. Docker builds a Ubuntu 24.04 toolchain in an isolated container, constructs an explicit AppDir, checks runtime imports/resources, packs with pinned official AppImage tools, extracts the actual artifact to a relocated path and inspects it. Output and checksum appear under `dist/`; unique verification workspaces remain under `build/`.
+
+Flatpak is no longer produced from 0.8.0. Existing older installations retain their Flatpak-specific safety guards; migration is manual.
 
 ## Updating
 
@@ -62,6 +61,6 @@ wayvoice update --install
 
 The updater downloads a matching DEB or RPM from the latest stable GitHub release, checks its SHA-256 and package metadata, and opens the system package manager with administrator authorization. If that release has no package for your architecture, it reports an error. Finish dictation and model preparation first. New recordings are blocked during installation; the services restart and the daemon's version is checked afterwards. Starting with 0.6.11, updates run inside the app and restart the interface automatically. Updating from 0.6.10 still opens a terminal and requires reopening Settings once.
 
-The updater requires a compatible running daemon. Older installations need a manual package upgrade first. It does not update source checkouts or Flatpak installations, and it does not automatically roll back failed package transactions. Release checksums verify integrity against the published release; they are not independent package signatures. The update trust boundary includes the project’s GitHub account, repository access, release workflow and published assets, as well as HTTPS delivery. An attacker who can replace both the package and its release checksum can pass this integrity check. Package name, version and architecture checks prevent mismatched installations; they do not authenticate the publisher independently.
+The updater requires a compatible running daemon. Older installations need a manual package upgrade first. It does not update source checkouts, AppImage or legacy Flatpak installations, and it does not automatically roll back failed package transactions. Release checksums verify integrity against the published release; they are not independent package signatures. The update trust boundary includes the project’s GitHub account, repository access, release workflow and published assets, as well as HTTPS delivery. An attacker who can replace both the package and its release checksum can pass this integrity check. Package name, version and architecture checks prevent mismatched installations; they do not authenticate the publisher independently.
 
 Alpha/beta GitHub releases are installed manually. The native updater follows the stable release feed; it does not install prereleases.

@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 
 from .i18n import tr
-from .paths import command_path
+from .paths import command_path, appimage_path
 
 SCHEMA = "org.gnome.settings-daemon.plugins.media-keys"
 BASE = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings"
@@ -52,6 +52,8 @@ def label_for(binding: str, language: str | None = None) -> str:
 
 def manual_command() -> str:
     """A command the desktop can launch outside the application sandbox."""
+    if appimage_path():
+        return shlex.join([appimage_path(), "toggle"])
     if os.environ.get("FLATPAK_ID") or Path("/.flatpak-info").is_file():
         return shlex.join(["flatpak", "run", "--command=wayvoice",
                            "io.github.stepan.WayVoice", "toggle"])

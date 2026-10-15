@@ -20,6 +20,7 @@ Build native packages with:
 ```bash
 make deb  # Debian packaging tools and a C compiler required
 make rpm  # Fedora with rpm-build and systemd-rpm-macros
+make appimage  # Clean committed tree and Docker required
 ```
 
 Or build the RPM in a Fedora container with `./scripts/build-rpm-container.sh`. Build output goes to `dist/`; the scripts do not install packages or start host services.
@@ -30,6 +31,6 @@ Development happens in `develop`; open focused `feature/*` or `fix/*` pull reque
 
 ## Testing builds from develop
 
-Successful pushes to `develop` (or a manual CI run on `develop`) produce a `wayvoice-testing-COMMIT-ATTEMPT` artifact in GitHub Actions. It contains DEB, RPM and inspected x86_64 Flatpak packages, individual checksums, `SHA256SUMS` and `BUILD_INFO.json` with the source commit and workflow URL. Download it from the successful CI run's **Artifacts** section; artifacts expire after 14 days. All normal test, GTK, quality and manifest jobs must pass before the testing bundle is built.
+Successful pushes to `develop` (or a manual CI run on `develop`) produce a `wayvoice-testing-COMMIT-ATTEMPT` artifact in GitHub Actions. It contains DEB, RPM and inspected x86_64 AppImage packages, individual checksums, `SHA256SUMS` and `BUILD_INFO.json` with the source commit and workflow URL. Download it from the successful CI run's **Artifacts** section; artifacts expire after 14 days. All normal test, GTK, quality and manifest jobs must pass before the testing bundle is built.
 
-Package filenames include `testing` and the short commit SHA. The installed version, application ID and Flatpak branch remain unchanged: installing a testing build replaces the same application and uses its settings. These are development snapshots, not stable releases or an isolated test session. They are not published to GitHub Releases or distributed by the native updater. Verify the extracted files with `sha256sum --check SHA256SUMS` before installation.
+Package filenames include `testing` and the short commit SHA. The installed version and application identity remain unchanged: installing a testing build replaces the same application and uses its settings. These are development snapshots, not stable releases or an isolated test session. They are not published to GitHub Releases or distributed by the native updater. Verify the extracted files with `sha256sum --check SHA256SUMS` before installation.
