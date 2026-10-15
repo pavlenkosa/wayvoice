@@ -35,6 +35,9 @@
   <supports><control>pointing</control><control>keyboard</control></supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.8.3" date="2026-10-16">
+      <description><p>Include the 0.8.0 feature set and fix AppImage builds on CI runners with a non-default user ID. Align release metadata with the next unused version after mismatched 0.8.1 and 0.8.2 tags.</p></description>
+    </release>
     <release version="0.8.0" date="2026-10-15">
       <description><p>Add experimental CPU Parakeet recognition and quick selection of prepared models and languages. Keep each dictation on its starting settings. Replace the experimental Flatpak build with a portable x86_64 AppImage; DEB and RPM remain available.</p></description>
     </release>
