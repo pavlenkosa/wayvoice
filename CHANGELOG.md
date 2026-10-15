@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.3 — 2026-10-16
+
+- Include the features listed under 0.8.0 and fix AppImage CI builds by provisioning the runner UID/GID in both container images; retain nonroot execution.
+- Align application, package metadata and release notes with a fresh version. Tags 0.8.1 and 0.8.2 referenced code still versioned 0.8.0 and failed release validation; those tags remain unchanged.
+
 ## 0.8.0 — 2026-10-15
 
 - Add experimental CPU Parakeet TDT 0.6B v3 through a pinned NeMo-Speech.cpp runtime, explicit verified preparation and automatic detection across 25 model languages.
