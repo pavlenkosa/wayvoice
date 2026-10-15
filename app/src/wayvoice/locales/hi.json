@@ -407,7 +407,7 @@
   "model.subtitle.ele-sage/whisper-large-v3-turbo-fr-quebecois-ct2": "क्यूबेक फ़्रेंच · समुदाय",
   "model.subtitle.LocalAI-io/whisper-large-v3-it-yodas-only-ct2-int8": "इतालवी के लिए अनुकूलित · समुदाय",
   "model.subtitle.__custom__": "Hugging Face रिपॉज़िटरी ID या स्थानीय पथ",
-  "update.external": "इस स्थापना को पैकेज प्रबंधक या Flatpak से अपडेट करें। ऐप में अपडेट के लिए स्थापित DEB या RPM आवश्यक है।",
+  "update.external": "इस स्थापना को मैन्युअल रूप से अपडेट करें। AppImage के लिए WayVoice बंद करें और फ़ाइल बदलें। ऐप में अपडेट के लिए स्थापित DEB या RPM आवश्यक है।",
   "update.busy": "वर्तमान कार्य पूरा होने तक प्रतीक्षा करें।",
   "update.interrupted": "अपडेट पूरा होने की पुष्टि के बिना समाप्त हुआ।",
   "update.restart_failed": "पैकेज स्थापित हुआ, लेकिन सेवाएँ पुनः प्रारंभ नहीं हुईं।",
@@ -454,5 +454,8 @@
   "vocab.empty": "अभी कोई पूर्वावलोकन नहीं है।",
   "vocab.invalid": "सहेजने से पहले शब्दकोश के नियम जाँचें।",
   "vocab.limit": "अधिकतम 100 नियम और 16,384 अक्षर।",
-  "vocab.off": "टेक्स्ट बदलने के नियम बंद हैं। पूर्वावलोकन में मौजूदा ड्राफ़्ट सेटिंग इस्तेमाल होती हैं।"
+  "vocab.off": "टेक्स्ट बदलने के नियम बंद हैं। पूर्वावलोकन में मौजूदा ड्राफ़्ट सेटिंग इस्तेमाल होती हैं।",
+  "settings.parakeet_binary": "nemo-speech v0.2.0 का पथ (CPU)",
+  "settings.parakeet_model": "Parakeet v3 GGUF का पथ (भाषा की स्वचालित पहचान)",
+  "settings.parakeet_prepare": "CPU रनटाइम और मॉडल डाउनलोड करें (~690 MiB)"
 }

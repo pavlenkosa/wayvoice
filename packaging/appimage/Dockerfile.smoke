@@ -1,0 +1,4 @@
+FROM ubuntu:24.04
+# No host GTK, libadwaita, GI or Python: these must come from the artifact.
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xvfb xauth dbus-x11 \
+    && rm -rf /var/lib/apt/lists/*

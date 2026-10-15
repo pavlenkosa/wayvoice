@@ -182,6 +182,15 @@ class SettingsPage:
         self.worker.set_active(bool(self.ctx.state.cfg.get("engine_worker", True)))
         engine_group.add(self.worker)
 
+        self.parakeet_binary = Adw.EntryRow(title=self.ctx.state.t("settings.parakeet_binary"))
+        self.parakeet_binary.set_direction(Gtk.TextDirection.LTR)
+        self.parakeet_binary.set_text(str(self.ctx.state.cfg.get("parakeet_binary", "")))
+        engine_group.add(self.parakeet_binary)
+        self.parakeet_model = Adw.EntryRow(title=self.ctx.state.t("settings.parakeet_model"))
+        self.parakeet_model.set_direction(Gtk.TextDirection.LTR)
+        self.parakeet_model.set_text(str(self.ctx.state.cfg.get("parakeet_model", "")))
+        engine_group.add(self.parakeet_model)
+
         self.cpp_binary = Adw.EntryRow(title=self.ctx.state.t("settings.cpp_binary"))
         self.cpp_binary.set_direction(Gtk.TextDirection.LTR)
         self.cpp_binary.set_text(str(self.ctx.state.cfg.get("whisper_cpp_binary", "")))
@@ -209,6 +218,8 @@ class SettingsPage:
             ("device", self.device),
             ("vad_filter", self.vad),
             ("engine_worker", self.worker),
+            ("parakeet_binary", self.parakeet_binary),
+            ("parakeet_model", self.parakeet_model),
             ("whisper_cpp_binary", self.cpp_binary),
             ("whisper_cpp_model", self.cpp_model),
             ("whisper_cpp_gpu", self.cpp_gpu),

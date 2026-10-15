@@ -1,6 +1,6 @@
 """Value tables behind the settings page dropdowns.
 
-Shared by the legacy page builders and the engine-settings controller: the
+Shared by the Settings page builders and the engine-settings controller: the
 dropdowns are filled from these lists and ``_save`` maps the selected index
 back onto the stored value, so both sides must read one source of truth.
 """

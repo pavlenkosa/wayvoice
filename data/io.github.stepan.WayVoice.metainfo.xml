@@ -19,15 +19,15 @@
   <screenshots>
     <screenshot type="default">
       <caption>Dictation status and the latest recognized text</caption>
-      <image>https://raw.githubusercontent.com/pavlenkosa/wayvoice/v0.6.9/data/screenshots/home-en.png</image>
+      <image>https://raw.githubusercontent.com/pavlenkosa/wayvoice/e2c90c192419be8b723568db3479dade1b884fad/data/screenshots/home-en.png</image>
     </screenshot>
     <screenshot>
       <caption>Recognition and model settings</caption>
-      <image>https://raw.githubusercontent.com/pavlenkosa/wayvoice/v0.6.9/data/screenshots/settings-en.png</image>
+      <image>https://raw.githubusercontent.com/pavlenkosa/wayvoice/e2c90c192419be8b723568db3479dade1b884fad/data/screenshots/settings-en.png</image>
     </screenshot>
     <screenshot>
       <caption>First-run language and model setup</caption>
-      <image>https://raw.githubusercontent.com/pavlenkosa/wayvoice/v0.6.9/data/screenshots/setup-en.png</image>
+      <image>https://raw.githubusercontent.com/pavlenkosa/wayvoice/e2c90c192419be8b723568db3479dade1b884fad/data/screenshots/setup-en.png</image>
     </screenshot>
   </screenshots>
   <launchable type="desktop-id">io.github.stepan.WayVoice.desktop</launchable>
@@ -35,6 +35,9 @@
   <supports><control>pointing</control><control>keyboard</control></supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.8.0" date="2026-10-15">
+      <description><p>Add experimental CPU Parakeet recognition and quick selection of prepared models and languages. Keep each dictation on its starting settings. Replace the experimental Flatpak build with a portable x86_64 AppImage; DEB and RPM remain available.</p></description>
+    </release>
     <release version="0.7.3" date="2026-10-12">
       <description><p>Include the reliability improvements from 0.7.2 and correct the update metadata regression test on build hosts without package authorization tools.</p></description>
     </release>

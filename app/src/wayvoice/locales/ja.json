@@ -407,7 +407,7 @@
   "model.subtitle.ele-sage/whisper-large-v3-turbo-fr-quebecois-ct2": "ケベックのフランス語 · コミュニティ製",
   "model.subtitle.LocalAI-io/whisper-large-v3-it-yodas-only-ct2-int8": "イタリア語向けに調整 · コミュニティ製",
   "model.subtitle.__custom__": "Hugging Face のリポジトリ ID またはローカルパス",
-  "update.external": "パッケージマネージャーまたは Flatpak で更新してください。アプリ内更新にはインストール済みの DEB または RPM が必要です。",
+  "update.external": "このインストールは手動で更新してください。AppImage は WayVoice を終了してファイルを置き換えます。アプリ内更新にはインストール済みの DEB または RPM が必要です。",
   "update.busy": "現在の操作が完了するまでお待ちください。",
   "update.interrupted": "完了を確認できないまま更新が終了しました。",
   "update.restart_failed": "パッケージはインストールされましたが、サービスの再起動に失敗しました。",
@@ -454,5 +454,8 @@
   "vocab.empty": "まだプレビューはありません。",
   "vocab.invalid": "保存する前に辞書のルールを確認してください。",
   "vocab.limit": "置換は最大100件、合計16,384文字までです。",
-  "vocab.off": "置換はオフです。プレビューには現在の下書き設定を使用します。"
+  "vocab.off": "置換はオフです。プレビューには現在の下書き設定を使用します。",
+  "settings.parakeet_binary": "nemo-speech v0.2.0 のパス（CPU）",
+  "settings.parakeet_model": "Parakeet v3 GGUF のパス（言語自動検出）",
+  "settings.parakeet_prepare": "CPU ランタイムとモデルをダウンロード（約 690 MiB）"
 }

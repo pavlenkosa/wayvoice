@@ -85,8 +85,6 @@ class RecorderTests(unittest.TestCase):
         )
 
     def _patch_popen(self, proc):
-        real = audio.subprocess.Popen
-
         def factory(cmd, **kwargs):
             self.cmd = cmd
             self.kwargs = kwargs

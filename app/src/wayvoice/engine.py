@@ -13,13 +13,14 @@ from threading import Event
 from typing import Any, Callable
 
 from . import languages
+from .parakeet_setup import prepare as prepare_parakeet
 from .config import number
 from . import service
 from .models import forced_language
 from .paths import script_path
 from .postprocess import normalize
 
-from .runtime import processes, worker_client, model_preparation, locations
+from .runtime import processes, worker_client, model_preparation, locations, parakeet
 from .runtime.errors import (
     TranscriptionCancelled,
     TranscriptionTimeout,
@@ -221,6 +222,8 @@ def _language(cfg: dict[str, Any]) -> str:
     """
     model = str(cfg.get("model", "small"))
     engine = engine_from_config(cfg)
+    if engine and engine.auto_language_only:
+        return "auto"
     forced = forced_language(model) if engine and engine.uses_models else None
     return languages.normalize(forced or cfg.get("language"))
 
@@ -413,6 +416,8 @@ class Engine:
     uses_models: bool
     needs_setup: bool
     settings: tuple[str, ...]
+    automatic_setup: bool = True
+    auto_language_only: bool = False
     setup: Callable[[], None] | None = None
     #: Whether the engine's weights are usable right now. ``None`` for an engine
     #: whose weights live outside the hub cache - a local folder, or an external
@@ -476,6 +481,19 @@ _register(Engine(
     settings=("custom_command",),
 ))
 
+
+_register(Engine(
+    id="parakeet",
+    label="Parakeet v3 (experimental CPU)",
+    transcribe=parakeet.transcribe,
+    status=parakeet.status,
+    uses_models=False,
+    needs_setup=True,
+    setup=prepare_parakeet,
+    automatic_setup=False,
+    settings=("parakeet_binary", "parakeet_model"),
+    auto_language_only=True,
+))
 
 def engine_ids() -> list[str]:
     """Engine ids in registration order -- the order of the settings list."""

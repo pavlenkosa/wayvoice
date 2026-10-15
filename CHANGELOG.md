@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.0 — 2026-10-15
+
+- Add experimental CPU Parakeet TDT 0.6B v3 through a pinned NeMo-Speech.cpp runtime, explicit verified preparation and automatic detection across 25 model languages.
+- Select prepared recognition engines/models and languages on Home with idle-only transactional updates and preserved Settings drafts.
+- Keep recording, recognition, processing and delivery on a per-take configuration snapshot; recover cleanup after recording-stop and timer failures.
+- Replace Flatpak build/release artifacts with an x86_64 AppImage containing Python, GTK/libadwaita, Wayland/PipeWire helpers and local recognition runtimes. Portable service processes own their runtime separately; native package updates are disabled for AppImage.
+- Stabilize update-dialog usable geometry across CSD themes and scales, and retain actual package/artifact inspection and checksums.
+- Consolidate public documentation packaging, remove confirmed dead state and redundant source checks, and add testing-labelled develop artifacts.
+
+
 ## 0.7.3 — 2026-10-12
 
 - Include the reliability changes listed under 0.7.2; its publication was blocked by a host-dependent test failure.

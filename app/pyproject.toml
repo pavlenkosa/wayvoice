@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wayvoice"
-version = "0.7.3"
+version = "0.8.0"
 description = "Local voice input for Linux"
 requires-python = ">=3.11"
 license = "AGPL-3.0-or-later"
@@ -12,7 +12,7 @@ authors = [{name = "WayVoice contributors"}]
 keywords = ["wayland", "gnome", "speech-to-text", "whisper", "dictation", "gtk4"]
 classifiers = [
   "Development Status :: 3 - Alpha",
-  "Environment :: X11 Applications :: GTK",
+  "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3",
   "Topic :: Multimedia :: Sound/Audio :: Speech",
 ]

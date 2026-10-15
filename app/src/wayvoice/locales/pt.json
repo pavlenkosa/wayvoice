@@ -407,7 +407,7 @@
   "model.subtitle.ele-sage/whisper-large-v3-turbo-fr-quebecois-ct2": "Francês do Quebec · comunidade",
   "model.subtitle.LocalAI-io/whisper-large-v3-it-yodas-only-ct2-int8": "Ajustado para italiano · comunidade",
   "model.subtitle.__custom__": "ID de repositório Hugging Face ou caminho local",
-  "update.external": "Atualize esta instalação pelo gestor de pacotes ou Flatpak. A atualização na aplicação requer um DEB ou RPM instalado.",
+  "update.external": "Atualize esta instalação manualmente. Para AppImage, encerre o WayVoice e substitua o ficheiro. A atualização na aplicação requer um DEB ou RPM instalado.",
   "update.busy": "Aguarde a conclusão da operação atual.",
   "update.interrupted": "A atualização terminou sem confirmar o resultado.",
   "update.restart_failed": "O pacote foi instalado, mas os serviços não reiniciaram.",
@@ -454,5 +454,8 @@
   "vocab.empty": "Ainda não há prévia.",
   "vocab.invalid": "Verifique as regras do dicionário antes de salvar.",
   "vocab.limit": "Máximo de 100 substituições e 16.384 caracteres.",
-  "vocab.off": "As substituições estão desativadas. A prévia usa as configurações do rascunho atual."
+  "vocab.off": "As substituições estão desativadas. A prévia usa as configurações do rascunho atual.",
+  "settings.parakeet_binary": "Caminho para nemo-speech v0.2.0 (CPU)",
+  "settings.parakeet_model": "Caminho para Parakeet v3 GGUF (deteção automática do idioma)",
+  "settings.parakeet_prepare": "Transferir runtime CPU e modelo (~690 MiB)"
 }

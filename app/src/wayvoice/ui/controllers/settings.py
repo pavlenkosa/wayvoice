@@ -95,7 +95,8 @@ class SettingsController:
     def _draft_values(self):
         model_id = self.ctx.models._selected_model_id()
         forced = forced_language(model_id) if self._selected_engine_uses_models() else None
-        language = languages.normalize(forced or self.ctx.settings.language.selected_code())
+        engine = self._selected_engine_object()
+        language = "auto" if engine and engine.auto_language_only else languages.normalize(forced or self.ctx.settings.language.selected_code())
         new_ui_setting = UI_LANGUAGE_IDS[self.ctx.settings.ui_language.get_selected()]
         return {
             "engine": self._selected_engine(),
@@ -118,6 +119,8 @@ class SettingsController:
             "auto_check_updates": self.ctx.settings.auto_check_updates.get_active(),
             "shortcut": self.ctx.state.shortcut_binding,
             "shortcut_mode": ("toggle", "hold")[self.ctx.settings.shortcut_mode.get_selected()],
+            "parakeet_binary": self.ctx.settings.parakeet_binary.get_text().strip(),
+            "parakeet_model": self.ctx.settings.parakeet_model.get_text().strip(),
             "whisper_cpp_binary": self.ctx.settings.cpp_binary.get_text().strip(),
             "whisper_cpp_model": self.ctx.settings.cpp_model.get_text().strip(),
             "whisper_cpp_gpu": self.ctx.settings.cpp_gpu.get_active(),
@@ -132,10 +135,45 @@ class SettingsController:
         self._expected_config = dict(self.ctx.state.cfg)
         self._config_conflict = False
 
+    def sync_effective_selection(self, cfg):
+        """Update clean selection fields, preserving all unsaved Settings edits."""
+        baseline = self._baseline_draft
+        if baseline is None or self._saving or self._mutations:
+            return
+        current = self._draft_values()
+        group = ('engine', 'model', 'custom_model', 'language')
+        self.ctx.state.cfg = dict(cfg)
+        if cfg.get('engine') not in engine_ids():
+            return
+        if any(current.get(key) != baseline.get(key) for key in group):
+            return
+        if all(current.get(key) == cfg.get(key) for key in ('engine', 'model', 'language')):
+            return
+        from ...models import preset_index
+        settings = self.ctx.settings
+        settings.engine.handler_block_by_func(self._on_engine_selected)
+        settings.model.handler_block_by_func(self.ctx.models._on_model_selected)
+        try:
+            settings.engine.set_selected(engine_ids().index(cfg['engine']))
+            settings.model.set_selected(preset_index(str(cfg['model'])))
+            if preset_index(str(cfg['model'])) == preset_index('__custom__'):
+                settings.custom_model.set_text(str(cfg['model']))
+            self._update_engine_visibility()
+            self.ctx.models._sync_model_ui()
+            settings.language.select_code(languages.normalize(cfg.get('language')))
+        finally:
+            settings.model.handler_unblock_by_func(self.ctx.models._on_model_selected)
+            settings.engine.handler_unblock_by_func(self._on_engine_selected)
+        updated = self._draft_values()
+        for key in group:
+            baseline[key] = updated[key]
+            self._expected_config[key] = cfg.get(key)
+        self._refresh_save_state()
+
     def has_unsaved_changes(self):
         return self._baseline_draft is not None and self._draft_values() != self._baseline_draft
 
-    def confirm_leaving(self, proceed):
+    def confirm_leaving(self, proceed, *, parent=None):
         if self._leave_dialog_open or self._leave_after_save:
             return
         from ..dialogs.confirmations import unsaved_confirmation
@@ -150,7 +188,7 @@ class SettingsController:
                 if not self._save():
                     self._leave_after_save = None
 
-        unsaved_confirmation(self.ctx.window, self.ctx.state.t, response)
+        unsaved_confirmation(parent if parent is not None else self.ctx.window, self.ctx.state.t, response)
 
     def _save(self, *_args):
         if self._saving or self._config_conflict:
@@ -182,10 +220,8 @@ class SettingsController:
                         problems.append(msg)
             except Exception as exc:
                 problems.append(str(exc))
-            try:
-                self._prepare_selected_engine(cfg)
-            except Exception as exc:
-                problems.append(str(exc))
+            # Saving preferences is not permission to download a runtime.
+            # Runtime preparation belongs to the explicit Prepare action.
             # Persistence succeeded. Optional integration/setup errors must not
             # leave the UI claiming the old draft is still unsaved.
             return cfg, not problems, "\n".join(problems)
@@ -256,7 +292,7 @@ class SettingsController:
         their settings are the only thing that can make them ready.
         """
         engine = engine_from_config(cfg)
-        if engine is None or not engine.needs_setup:
+        if engine is None or not engine.needs_setup or not engine.automatic_setup:
             return
         if engine_status(cfg).get("state") in {"missing", "error"}:
             request_engine_setup(engine)
@@ -266,8 +302,11 @@ class SettingsController:
             return
         self._setup_running = True
         engine_id = self._selected_engine()
+        pending = self._pending_engine_config() if engine_id == "parakeet" else {}
 
         def work():
+            if engine_id == "parakeet" and (pending.get("parakeet_binary") or pending.get("parakeet_model")):
+                raise ValueError("Preparation uses the default paths. Clear custom Parakeet paths first, or prepare those files manually.")
             cfg = load_config()
             cfg["engine"] = engine_id
             return request_engine_setup(engine_from_config(cfg))
@@ -344,6 +383,6 @@ class SettingsController:
             self.ctx.settings.engine_spinner.stop()
             self.ctx.settings.engine_spinner.set_visible(False)
             self.ctx.settings.engine_setup_btn.set_visible(bool(engine and engine.needs_setup))
-            self.ctx.settings.engine_setup_btn.set_sensitive(True)
-            self.ctx.settings.engine_setup_btn.set_label(self.ctx.state.t("settings.repair") if state == "error" else self.ctx.state.t("settings.prepare"))
+            self.ctx.settings.engine_setup_btn.set_sensitive(not self._setup_running)
+            self.ctx.settings.engine_setup_btn.set_label(self.ctx.state.t("settings.parakeet_prepare") if engine and engine.id == "parakeet" else self.ctx.state.t("settings.repair") if state == "error" else self.ctx.state.t("settings.prepare"))
         return GLib.SOURCE_CONTINUE

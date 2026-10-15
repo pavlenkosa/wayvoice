@@ -116,6 +116,36 @@ class SaveGuardTests(unittest.TestCase):
                     apply.assert_not_called()
                     prepare.assert_not_called()
 
+    def test_save_does_not_prepare_missing_runtime_without_explicit_request(self):
+        for changes in ({'notify': False}, {'engine': 'faster-whisper'}):
+            with self.subTest(changes=changes):
+                ctx = self._window()
+                controller = ctx.preferences
+                baseline = {'engine': 'whisper-cpp', 'notify': True,
+                            'shortcut': 'F8', 'ui_language': 'en'}
+                # Both an unrelated change with an already selected engine and
+                # selecting the engine itself must leave preparation explicit.
+                if 'engine' not in changes:
+                    baseline['engine'] = 'faster-whisper'
+                draft = dict(baseline, **changes)
+                controller._baseline_draft = dict(baseline)
+                controller._expected_config = dict(baseline)
+                with (mock.patch.object(controller, '_selected_engine_uses_models', return_value=False),
+                      mock.patch.object(ctx.models, '_selected_model_preset', return_value={}),
+                      mock.patch.object(controller, '_draft_values', return_value=draft),
+                      mock.patch.object(controller, '_queue_mutation') as queue,
+                      mock.patch('wayvoice.ui.controllers.settings.update_config', return_value=draft) as update,
+                      mock.patch('wayvoice.ui.controllers.settings.manual_shortcut_required', return_value=True),
+                      mock.patch('wayvoice.ui.controllers.settings.engine_status', return_value={'state': 'missing'}),
+                      mock.patch('wayvoice.ui.controllers.settings.request_engine_setup') as prepare):
+                    self.assertTrue(controller._save())
+                    cfg, ok, message = queue.call_args.args[0]()
+                update.assert_called_once_with(changes, {key: baseline[key] for key in changes})
+                prepare.assert_not_called()
+                self.assertEqual(cfg, draft)
+                self.assertTrue(ok)
+                self.assertEqual(message, '')
+
     def test_an_empty_custom_model_path_is_refused(self):
         window = self._window()
         window.settings.custom_model = FakeEntry("   ")
@@ -301,9 +331,11 @@ class ExitPolicyTests(unittest.TestCase):
     def test_prepare_engine_does_not_save_draft(self):
         ctx = controller_context()
         ctx.preferences._selected_engine = lambda: "faster-whisper"
-        with mock.patch("wayvoice.ui.controllers.settings.load_config", return_value={"engine": "whisper-cpp"}), mock.patch("wayvoice.ui.controllers.settings.update_config") as save, mock.patch("wayvoice.ui.controllers.settings.request_engine_setup", return_value=False):
+        with mock.patch("wayvoice.ui.controllers.settings.load_config", return_value={"engine": "whisper-cpp"}), mock.patch("wayvoice.ui.controllers.settings.update_config") as save, mock.patch("wayvoice.ui.controllers.settings.request_engine_setup", return_value=False) as prepare:
             ctx.preferences._setup_engine()
         save.assert_not_called()
+        prepare.assert_called_once()
+        self.assertEqual(prepare.call_args.args[0].id, "faster-whisper")
         self.assertFalse(ctx.preferences._setup_running)
 
 

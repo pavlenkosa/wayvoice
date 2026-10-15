@@ -1,0 +1,23 @@
+[
+  "README.md",
+  "CHANGELOG.md",
+  "LICENSE",
+  "CONTRIBUTING.md",
+  "SUPPORT.md",
+  "SECURITY.md",
+  "docs/installation.md",
+  "docs/getting-started.md",
+  "docs/desktop-support.md",
+  "docs/shortcuts-and-paste.md",
+  "docs/engines-and-models.md",
+  "docs/troubleshooting.md",
+  "docs/architecture.md",
+  "docs/development.md",
+  "docs/releasing.md",
+  "releases/TEMPLATE.md",
+  "third_party/ydotool/README.wayvoice.md",
+  "data/screenshots/home-en.png",
+  "data/screenshots/settings-en.png",
+  "data/screenshots/setup-en.png",
+  "data/icons/hicolor/scalable/apps/io.github.stepan.WayVoice.svg"
+]

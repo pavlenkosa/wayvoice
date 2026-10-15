@@ -60,10 +60,12 @@ class App(Adw.Application):
 
 
 def restart_installed_ui(window):
-    launcher = shutil.which('wayvoice-settings')
+    from ..paths import appimage_path
+    image = appimage_path()
+    launcher = image or shutil.which('wayvoice-settings')
     if not launcher:
         raise FileNotFoundError(window.state.t('update.launcher_missing'))
-    args = [launcher]
+    args = [launcher, "--settings"] if image else [launcher]
     if any(isinstance(w, IndicatorWindow) for w in window.get_application().get_windows()):
         args.append('--restore-indicator')
     # exec replaces old imported modules and releases the application's D-Bus

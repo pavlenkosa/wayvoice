@@ -116,6 +116,8 @@ class StatusController:
         epoch = self.transcript.epoch
         toggle_ack = self._toggle_ack_seq
         reply = request("status", timeout=0.12)
+        if self.ctx.selection is not None:
+            reply["_prepared_choices"] = self.ctx.selection.snapshot(load_config())
         reply["_transcript_epoch"] = epoch
         reply["_toggle_ack_seq"] = toggle_ack
         now = time.monotonic()
@@ -209,6 +211,9 @@ class StatusController:
         if self._toggle_pending and self._toggle_ack_seq == self._toggle_seq and reply.get("_toggle_ack_seq") == self._toggle_seq:
             self._toggle_pending = False
         self._update_cards(cfg)
+        if self.ctx.selection is not None:
+            self.ctx.preferences.sync_effective_selection(cfg)
+            self.ctx.selection.paint(reply, cfg)
         paint_setup(self.ctx, reply, cfg, missing_deps)
         restarting = self._maybe_restart(reply)
         if not reply.get("ok"):

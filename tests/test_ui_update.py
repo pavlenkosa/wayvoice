@@ -1,12 +1,13 @@
 """GUI update ownership and restart are tested without installing any package."""
 import io
+import time
 import unittest
 from unittest import mock
 try:
     import gi
     gi.require_version('Gtk', '4.0')
     gi.require_version('Adw', '1')
-    from gi.repository import Gtk, Adw, Gio
+    from gi.repository import Gtk, Adw, Gio, GLib
     from wayvoice.ui.dialogs.update import UpdateDialog, show_update
     from wayvoice.ui.window import WayVoiceWindow
     from wayvoice.ui.state import UiState
@@ -25,7 +26,7 @@ class UpdateUITests(unittest.TestCase):
         cls.app.register(None)
 
     def setUp(self):
-        with mock.patch('wayvoice.ui.window.TaskRunner') as runner, \
+        with mock.patch('wayvoice.ui.window.TaskRunner'), \
              mock.patch('wayvoice.ui.window.load_config', return_value={'ui_language': 'en'}):
             self.window = WayVoiceWindow(self.app)
         self.addCleanup(self.window.destroy)
@@ -34,13 +35,65 @@ class UpdateUITests(unittest.TestCase):
         self.window._update_dialog = self.update
         self.addCleanup(self.update.dialog.destroy)
 
+    def _settled_size(self):
+        deadline = time.monotonic() + .25
+        while time.monotonic() < deadline:
+            while GLib.MainContext.default().pending():
+                GLib.MainContext.default().iteration(False)
+            time.sleep(.005)
+        size = (self.update.dialog.get_width(), self.update.dialog.get_height())
+        self.assertGreaterEqual(size[0], 420)
+        self.assertGreaterEqual(size[1], 320)
+        return size
+
+    def test_update_content_minimum_excludes_window_css_padding(self):
+        # Non-composited X11 solid-csd adds padding to the window. A window
+        # size request includes it; the content must still be at least 420x320.
+        provider = Gtk.CssProvider()
+        provider.load_from_data(b"window.wayvoice-update-sizing-test { padding: 5px; }")
+        display = self.update.dialog.get_display()
+        Gtk.StyleContext.add_provider_for_display(display, provider, Gtk.STYLE_PROVIDER_PRIORITY_USER)
+        self.addCleanup(Gtk.StyleContext.remove_provider_for_display, display, provider)
+        self.update.dialog.add_css_class('wayvoice-update-sizing-test')
+        self.window.present()
+        initial = self._settled_size()
+        self.update._checked({'available': True, 'version': '99.0.0'})
+        self.update._supported(('deb', 'amd64'))
+        self.assertEqual(self._settled_size(), initial)
+
+    def test_update_geometry_remains_stable_across_normal_stages(self):
+        settled_size = self._settled_size
+
+        self.window.present()
+        for language in ('en', 'ru'):
+            with self.subTest(language=language):
+                self.update.dialog.destroy()
+                self.window.state.ui_lang = language
+                self.update = UpdateDialog(self.window)
+                self.window._update_dialog = self.update
+                self.addCleanup(self.update.dialog.destroy)
+                initial = settled_size()
+                self.update._checked({'available': True, 'version': '99.0.0'})
+                self.update._supported(('deb', 'amd64'))
+                self.assertEqual(settled_size(), initial)
+                self.update._start()
+                for stage in ('download', 'verify', 'authorize', 'install', 'restart'):
+                    self.update._progress({'stage': stage})
+                    self.assertEqual(settled_size(), initial)
+                self.update._failed(RuntimeError('Authorization declined'))
+                settled_size()
+                self.update.details.set_text('Diagnostic detail\n' * 100)
+                self.update.details_expander.set_expanded(True)
+                settled_size()
+                self.assertEqual(self.update.details.get_text().count('Diagnostic detail'), 100)
+
     def test_one_dialog_and_no_install_for_source_or_flatpak(self):
         show_update(self.window)
         self.assertIs(self.window._update_dialog, self.update)
         self.update._checked({'available': True, 'version': '99.0.0'})
         self.assertFalse(self.update.install_button.get_visible())
         self.update._unsupported(ValueError('source checkout'))
-        self.assertIn('Flatpak', self.update.dialog.get_body())
+        self.assertIn('AppImage', self.update.dialog.get_body())
 
     def test_busy_blocks_close_and_failure_restores_controls(self):
         self.update._start()
@@ -90,6 +143,27 @@ class UpdateUITests(unittest.TestCase):
         prefs._mutations.clear()
         deferred()
         self.assertTrue(self.update.busy)
+
+    def test_unsaved_confirmation_is_parented_to_active_update_dialog(self):
+        prefs = self.window.context.preferences
+        with mock.patch.object(prefs, 'has_unsaved_changes', return_value=True), \
+             mock.patch('wayvoice.ui.dialogs.confirmations.unsaved_confirmation') as confirm:
+            self.update._install()
+        self.assertIs(confirm.call_args.args[0], self.update.dialog)
+        self.assertFalse(self.update.busy)
+        confirm.call_args.args[2]('stay')
+        self.assertFalse(prefs._leave_dialog_open)
+        self.assertFalse(self.update.busy)
+
+    def test_normal_navigation_confirmation_keeps_main_window_parent(self):
+        prefs = self.window.context.preferences
+        proceed = mock.Mock()
+        with mock.patch('wayvoice.ui.dialogs.confirmations.unsaved_confirmation') as confirm:
+            prefs.confirm_leaving(proceed)
+        self.assertIs(confirm.call_args.args[0], self.window)
+        confirm.call_args.args[2]('leave')
+        proceed.assert_called_once_with()
+        self.assertFalse(prefs._leave_dialog_open)
 
     def test_home_notice_tracks_manual_check_and_reuses_update_action(self):
         self.update._checked({'available': True, 'version': '0.7.0'})

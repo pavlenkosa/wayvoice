@@ -1,0 +1,15 @@
+[run]
+branch = True
+source =
+    wayvoice.config
+    wayvoice.runtime.processes
+    wayvoice.runtime.worker_client
+    wayvoice.updater
+parallel = False
+
+[report]
+show_missing = True
+skip_covered = False
+
+[xml]
+output = coverage.xml

@@ -28,6 +28,10 @@ class UpdateDialog:
         self.target_version = None
         self.dialog = Adw.MessageDialog(transient_for=window, modal=True,
             heading=self.t('update.title'), body=self.t('update.checking'))
+        # A toplevel size request includes CSS decoration padding (solid-csd
+        # on non-composited X11). Constrain the complete dialog content so its
+        # usable area remains 420x320 regardless of those decorations.
+        self.dialog.get_child().set_size_request(420, 320)
         self.dialog.add_response('close', self.t('common.close'))
         self.dialog.set_close_response('close')
         self.dialog.connect('close-request', lambda *_: self.busy)
@@ -99,7 +103,7 @@ class UpdateDialog:
             self.window._toast(self.t('update.busy'))
             return
         if preferences.has_unsaved_changes():
-            preferences.confirm_leaving(lambda: self.window.tasks.idle(self._start))
+            preferences.confirm_leaving(lambda: self.window.tasks.idle(self._start), parent=self.dialog)
         else:
             self._start()
 

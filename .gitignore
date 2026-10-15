@@ -8,9 +8,23 @@ dist/
 .coverage
 .DS_Store
 
-# flatpak-builder working directories (the manifest itself is tracked)
+# Legacy local Flatpak build caches (never ship in source snapshots)
 build-dir/
 .flatpak-builder/
-/docs
+/docs/*
+!/docs/installation.md
+!/docs/getting-started.md
+!/docs/desktop-support.md
+!/docs/shortcuts-and-paste.md
+!/docs/engines-and-models.md
+!/docs/troubleshooting.md
+!/docs/architecture.md
+!/docs/development.md
+!/docs/releasing.md
 /scripts/opencode*
 PROFILE_CONTENTS.txt
+
+# Local quality-tool reports
+coverage.xml
+htmlcov/
+.ruff_cache/

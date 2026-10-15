@@ -357,4 +357,7 @@ def prepare_model(
         raise TranscriptionCancelled("Transcription cancelled")
     reply["warming"] = (worker_client.warm_worker(cfg) if cancel_event is None
                         else worker_client.warm_worker(cfg, cancel_event=cancel_event))
+    if not reply["warming"]:
+        reply["state"] = "error"
+        reply["error"] = "Model warm-up failed. Try again or select another prepared model."
     return reply

@@ -26,7 +26,6 @@ class ModelsController:
         self._prepare_request_seq = 0
         self._cancel_pending = False
         self._held_model = {}
-        self._operation_error = ""
         self._operation_error_id = None
 
 
@@ -124,7 +123,6 @@ class ModelsController:
                 return
             error = str(reply.get("error") or "")
             if error:
-                self._operation_error = error
                 self._operation_error_id = (self._download_report.get('download') or {}).get('operation_id')
                 show_model_error_details(self.ctx, error)
                 self.ctx.window._toast(self.ctx.state.t('store.download_recovery'))
@@ -133,7 +131,6 @@ class ModelsController:
         if not model_id:
             return
         name = display_name(model_id)
-        self._operation_error = ""
         show_model_error_details(self.ctx, "")
         self.ctx.window._toast(self.ctx.state.t("toast.prepare_started", model=name))
         # Optimistic row: the daemon is now fetching or loading the selected
@@ -170,7 +167,11 @@ class ModelsController:
         self.ctx.settings.model_state_row.set_visible(uses_models)
         self.ctx.settings.model_disk_row.set_visible(uses_models)
         forced = preset.get("language")
-        if uses_models and forced:
+        engine = self.ctx.preferences._selected_engine_object()
+        if engine and engine.auto_language_only:
+            self.ctx.settings.language.select_code("auto")
+            self.ctx.settings.language.set_sensitive(False)
+        elif uses_models and forced:
             # The model decides the language; show which one, but do not let it
             # be edited into something the model was not trained for.
             self.ctx.settings.language.select_code(str(forced))
@@ -267,7 +268,6 @@ class ModelsController:
         self.ctx.settings.model_download_cancel_btn.set_sensitive(
             download.get("state") in {"downloading", "warming"} and not self._cancel_pending)
         if download.get('operation_id') != self._operation_error_id or download.get('state') in {'ready', 'idle', 'cancelled'}:
-            self._operation_error = ""
             show_model_error_details(self.ctx, "")
         if boundary(previous) != boundary(download) and (
             download.get("state") in {"ready", "error", "idle", "warming"}
@@ -358,7 +358,6 @@ class ModelsController:
             error = str(reply.get('error') or '') if isinstance(reply, dict) else str(reply)
             message = self.ctx.state.t('store.cancel_failed', detail='')
             if operation_id == (self._download_report.get('download') or {}).get('operation_id'):
-                self._operation_error = error
                 self._operation_error_id = operation_id
                 show_model_error_details(self.ctx, error)
         self.ctx.window._toast(message)

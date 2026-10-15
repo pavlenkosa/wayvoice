@@ -363,7 +363,7 @@ class HelperStartTests(unittest.TestCase):
         return mock.patch.object(injector, "helper_answering", return_value=True)
 
     def test_a_dead_helper_is_started(self):
-        with self._not_answering() as answering, mock.patch(
+        with self._not_answering(), mock.patch(
             "wayvoice.service.start_user_unit", return_value=True
         ) as start:
             injector.ensure_helper_running(wait=0)

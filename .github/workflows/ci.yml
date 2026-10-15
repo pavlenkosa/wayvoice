@@ -99,8 +99,8 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  flatpak-manifest:
-    name: Flatpak manifest assertions
+  appimage-recipe:
+    name: AppImage recipe assertions
     runs-on: ubuntu-24.04
     timeout-minutes: 5
 
@@ -108,14 +108,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # The Flatpak build itself stays a manual, networked validation (see
-      # docs/PROJECT_TASKS.md P1.2); this job pins the manifest's structure so a
-      # regression that loses the wayvoice module, the wl-clipboard pin, the
-      # launch command or a permission the app cannot work without fails CI
-      # instead of shipping unnoticed. The same script backs the local release
-      # gate, so local truth and CI truth are one file.
-      - name: Check manifest structure
-        run: python3 scripts/check-flatpak-manifest.py
+      - name: Check portable recipe and dependency pins
+        run: |
+          python3 scripts/check-appimage.py
+          shellcheck packaging/appimage/AppRun
 
   gtk-tests:
     name: GTK UI tests
@@ -134,3 +130,65 @@ jobs:
         run: |
           xvfb-run -a dbus-run-session -- /usr/bin/python3 -c 'import gi; gi.require_version("Gtk", "4.0"); gi.require_version("Adw", "1"); from gi.repository import Gtk, Adw; assert Gtk.init_check(); Adw.init()'
           xvfb-run -a dbus-run-session -- /usr/bin/python3 -m unittest discover -s tests -t . -p 'test_ui*.py' -v
+
+  quality:
+    name: Static analysis & coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install pinned development tools
+        run: python -m pip install --requirement requirements-dev.txt
+      - name: Check Python correctness
+        run: python -m ruff check app/src tests scripts
+      - name: Check public documentation
+        run: python scripts/check-public-docs.py
+      - name: Measure critical-module branch coverage
+        env:
+          PYTHONPATH: app/src
+        run: |
+          python -m coverage run -m unittest discover -s tests -t . -q
+          python -m coverage report
+          python -m coverage xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: critical-coverage-${{ github.sha }}
+          path: coverage.xml
+          if-no-files-found: error
+          retention-days: 14
+
+  testing-artifacts:
+    name: Develop testing packages
+    if: github.ref == 'refs/heads/develop' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    needs: [test-and-build, gtk-tests, quality, appimage-recipe]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Download verified native packages
+        uses: actions/download-artifact@v4
+        with:
+          name: wayvoice-native-${{ github.sha }}
+          path: dist
+      - name: Build and inspect AppImage from the clean snapshot
+        run: python3 scripts/build-appimage.py
+      - name: Label testing artifacts and generate provenance
+        env:
+          BUILD_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 scripts/stage-testing-artifacts.py --run-url "$BUILD_RUN_URL"
+          cd build/testing-artifacts
+          sha256sum --check SHA256SUMS
+      - name: Upload testing packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: wayvoice-testing-${{ github.sha }}-${{ github.run_attempt }}
+          path: build/testing-artifacts/*
+          if-no-files-found: error
+          retention-days: 14

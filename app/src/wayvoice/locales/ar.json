@@ -407,7 +407,7 @@
   "model.subtitle.ele-sage/whisper-large-v3-turbo-fr-quebecois-ct2": "الفرنسية الكيبيكية · من المجتمع",
   "model.subtitle.LocalAI-io/whisper-large-v3-it-yodas-only-ct2-int8": "مدرّب إضافيًا للإيطالية · من المجتمع",
   "model.subtitle.__custom__": "معرّف مستودع Hugging Face أو مسار محلي",
-  "update.external": "حدّث هذا التثبيت عبر مدير الحزم أو Flatpak. يتطلب التحديث داخل التطبيق حزمة DEB أو RPM مثبتة.",
+  "update.external": "حدّث هذا التثبيت يدويًا. مع AppImage، أغلق WayVoice واستبدل الملف. يتطلب التحديث داخل التطبيق حزمة DEB أو RPM مثبتة.",
   "update.busy": "انتظر انتهاء العملية الحالية.",
   "update.interrupted": "انتهى التحديث دون تأكيد اكتماله.",
   "update.restart_failed": "تم تثبيت الحزمة، لكن تعذرت إعادة تشغيل الخدمات.",
@@ -454,5 +454,8 @@
   "vocab.empty": "لا توجد معاينة بعد.",
   "vocab.invalid": "تحقّق من قواعد القاموس قبل الحفظ.",
   "vocab.limit": "بحد أقصى 100 استبدال و16,384 حرفًا.",
-  "vocab.off": "الاستبدالات معطّلة. تستخدم المعاينة إعدادات المسودة الحالية."
+  "vocab.off": "الاستبدالات معطّلة. تستخدم المعاينة إعدادات المسودة الحالية.",
+  "settings.parakeet_binary": "مسار nemo-speech v0.2.0 ‏(CPU)",
+  "settings.parakeet_model": "مسار Parakeet v3 GGUF (اكتشاف اللغة تلقائيًا)",
+  "settings.parakeet_prepare": "تنزيل بيئة CPU والنموذج (~690 MiB)"
 }

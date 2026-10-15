@@ -1,0 +1,53 @@
+#!/bin/sh
+# Every portable component keeps its own runtime alive until its child exits.
+set -eu
+root=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+export APPDIR="$root"
+if [ -n "${APPIMAGE:-}" ]; then
+    export WAYVOICE_APPIMAGE="$APPIMAGE"
+else
+    # Extracted development smoke; no claim that this path survives deletion.
+    export WAYVOICE_APPIMAGE="$root/AppRun"
+fi
+export WAYVOICE_PYTHON="$root/usr/bin/python3.12"
+export WAYVOICE_RUNTIME="$root/usr/lib/wayvoice/runtime"
+export FONTCONFIG_PATH="$root/etc/fonts"
+export FONTCONFIG_FILE="$root/etc/fonts/wayvoice.conf"
+export WAYVOICE_BINDIR="$root/usr/bin"
+export PYTHONHOME="$root/usr"
+export PYTHONPATH="$root/usr/lib/wayvoice/app/src:$root/usr/lib/python3/dist-packages:$root/usr/lib/wayvoice/runtime/lib/python3.12/site-packages"
+export LD_LIBRARY_PATH="$root/usr/lib/x86_64-linux-gnu/libproxy:$root/usr/lib/x86_64-linux-gnu:$root/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export PATH="$root/usr/bin:$PATH"
+export GI_TYPELIB_PATH="$root/usr/lib/x86_64-linux-gnu/girepository-1.0"
+export GSETTINGS_SCHEMA_DIR="$root/usr/share/glib-2.0/schemas"
+export XDG_DATA_DIRS="$root/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+export GIO_MODULE_DIR="$root/usr/lib/x86_64-linux-gnu/gio/modules"
+export GDK_PIXBUF_MODULEDIR="$root/usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0/2.10.0/loaders"
+export PIPEWIRE_MODULE_DIR="$root/usr/lib/x86_64-linux-gnu/pipewire-0.3"
+export SPA_PLUGIN_DIR="$root/usr/lib/x86_64-linux-gnu/spa-0.2"
+export PIPEWIRE_CONFIG_DIR="$root/usr/share/pipewire"
+export SSL_CERT_FILE="$root/usr/share/wayvoice/ca-certificates.crt"
+export REQUESTS_CA_BUNDLE="$SSL_CERT_FILE"
+export GSK_RENDERER="${GSK_RENDERER:-cairo}"
+# Preserve the real XDG_RUNTIME_DIR: Wayland and PipeWire live there.
+cache=$(mktemp "${TMPDIR:-/tmp}/wayvoice-pixbuf-XXXXXX")
+cleanup() { rm -f "$cache"; }
+trap cleanup EXIT
+export GDK_PIXBUF_MODULE_FILE="$cache"
+"$root/usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0/gdk-pixbuf-query-loaders" > "$cache"
+mode=wayvoice.ui
+case "${1:-}" in
+    --daemon) mode=wayvoice.daemon; shift ;;
+    --engine-setup) mode=wayvoice.engine_setup; shift ;;
+    --settings) shift ;;
+    --check-runtime) mode=wayvoice.appimage_smoke; shift ;;
+    '') ;;
+    *) mode=wayvoice.cli ;;
+esac
+"$WAYVOICE_PYTHON" -m "$mode" "$@" &
+child=$!
+trap 'kill -TERM "$child" 2>/dev/null || :; wait "$child" || :; cleanup; exit 143' TERM INT HUP
+status=0
+wait "$child" || status=$?
+cleanup
+exit "$status"

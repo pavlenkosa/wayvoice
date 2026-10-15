@@ -407,7 +407,7 @@
   "model.subtitle.ele-sage/whisper-large-v3-turbo-fr-quebecois-ct2": "魁北克法语 · 社区模型",
   "model.subtitle.LocalAI-io/whisper-large-v3-it-yodas-only-ct2-int8": "针对意大利语微调 · 社区模型",
   "model.subtitle.__custom__": "Hugging Face 仓库 ID 或本地路径",
-  "update.external": "请通过软件包管理器或 Flatpak 更新此安装。应用内更新需要已安装的 WayVoice DEB 或 RPM 软件包。",
+  "update.external": "请手动更新此安装。使用 AppImage 时，请退出 WayVoice 并替换文件。应用内安装需要已安装的 DEB 或 RPM 软件包。",
   "update.busy": "请等待当前操作完成。",
   "update.interrupted": "更新进程已结束，但未确认完成。",
   "update.restart_failed": "软件包已安装，但服务重启失败。",
@@ -454,5 +454,8 @@
   "vocab.empty": "尚无预览。",
   "vocab.invalid": "保存前请检查词典规则。",
   "vocab.limit": "最多 100 条替换规则，共 16,384 个字符。",
-  "vocab.off": "文本替换已关闭。预览使用当前草稿设置。"
+  "vocab.off": "文本替换已关闭。预览使用当前草稿设置。",
+  "settings.parakeet_binary": "nemo-speech v0.2.0 路径（CPU）",
+  "settings.parakeet_model": "Parakeet v3 GGUF 路径（自动检测语言）",
+  "settings.parakeet_prepare": "下载 CPU 运行时和模型（约 690 MiB）"
 }
