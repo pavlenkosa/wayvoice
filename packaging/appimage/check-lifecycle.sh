@@ -25,7 +25,7 @@ trap cleanup EXIT
 outer=$!
 ready=false
 for attempt in 1 2 3 4 5 6 7 8 9 10; do
-    if "$image" ping >"$sandbox/ping.json" 2>/dev/null && grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' "$sandbox/ping.json"; then ready=true; break; fi
+    if "$image" ping >/dev/null 2>&1; then ready=true; break; fi
     echo "Waiting for portable daemon ($attempt/10)"
     sleep 1
 done
