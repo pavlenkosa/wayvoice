@@ -172,7 +172,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Download verified native packages
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: wayvoice-native-${{ github.sha }}
           path: dist
