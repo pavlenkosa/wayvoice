@@ -51,7 +51,6 @@ install -m 0644 third_party/ydotool/README.wayvoice.md %{buildroot}/usr/lib/wayv
 install -D -m 0644 data/80-wayvoice-uinput.rules %{buildroot}%{_udevrulesdir}/80-wayvoice-uinput.rules
 mkdir -p %{buildroot}%{_userunitdir}
 install -m 0644 systemd/*.service %{buildroot}%{_userunitdir}/
-install -D -m 0644 packaging/io.github.stepan.WayVoice.manage-deps.policy %{buildroot}%{_datadir}/polkit-1/actions/io.github.stepan.WayVoice.manage-deps.policy
 install -D -m 0644 data/io.github.stepan.WayVoice.desktop %{buildroot}%{_datadir}/applications/io.github.stepan.WayVoice.desktop
 install -D -m 0644 data/io.github.stepan.WayVoice.metainfo.xml %{buildroot}%{_datadir}/metainfo/io.github.stepan.WayVoice.metainfo.xml
 for kind in scalable symbolic; do
@@ -82,7 +81,6 @@ udevadm control --reload-rules >/dev/null 2>&1 || :
 /usr/lib/wayvoice/
 %{_userunitdir}/wayvoice*.service
 %{_udevrulesdir}/80-wayvoice-uinput.rules
-%{_datadir}/polkit-1/actions/io.github.stepan.WayVoice.manage-deps.policy
 %{_datadir}/applications/io.github.stepan.WayVoice.desktop
 %{_datadir}/metainfo/io.github.stepan.WayVoice.metainfo.xml
 %{_datadir}/icons/hicolor/scalable/apps/io.github.stepan.WayVoice.svg

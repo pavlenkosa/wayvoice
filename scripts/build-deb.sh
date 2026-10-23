@@ -27,7 +27,6 @@ mkdir -p \
   "$PKG/usr/lib/wayvoice" \
   "$PKG/usr/lib/systemd/user" \
   "$PKG/usr/lib/udev/rules.d" \
-  "$PKG/usr/share/polkit-1/actions" \
   "$PKG/usr/share/applications" \
   "$PKG/usr/share/metainfo" \
   "$PKG/usr/share/icons/hicolor/scalable/apps" \
@@ -62,9 +61,8 @@ if command -v cc >/dev/null 2>&1; then
 else
     echo "wayvoice: no C compiler; continuing without the bundled ydotool" >&2
 fi
-# Lets the settings UI and `wayvoice deps --install` run the package manager
-# through pkexec; without it polkit would deny every install attempt.
-cp "$ROOT/packaging/io.github.stepan.WayVoice.manage-deps.policy" "$PKG/usr/share/polkit-1/actions/"
+# Dependency installation uses the standard pkexec administrator prompt.
+# Do not install custom policies targeting shared package-manager binaries.
 cp "$ROOT/data/io.github.stepan.WayVoice.desktop" "$PKG/usr/share/applications/"
 cp "$ROOT/data/io.github.stepan.WayVoice.metainfo.xml" "$PKG/usr/share/metainfo/"
 cp "$ROOT/data/icons/hicolor/scalable/apps/io.github.stepan.WayVoice.svg" "$PKG/usr/share/icons/hicolor/scalable/apps/"
@@ -97,9 +95,6 @@ chmod 0755 "$PKG/DEBIAN"
 chmod g-s "$PKG/DEBIAN"
 chmod 0755 "$PKG/DEBIAN/postinst" "$PKG/DEBIAN/postrm" "$PKG/DEBIAN/prerm"
 chmod 0755 "$PKG/usr/bin/wayvoice" "$PKG/usr/bin/wayvoice-daemon" "$PKG/usr/bin/wayvoice-settings" "$PKG/usr/bin/wayvoice-engine-setup" "$PKG/usr/bin/setup-user" "$PKG/usr/bin/wayvoice-ydotoold"
-# md5sums is generated below from every file under usr, so the polkit policy is
-# covered automatically; only its mode needs pinning (0644, world readable).
-chmod 0644 "$PKG/usr/share/polkit-1/actions/io.github.stepan.WayVoice.manage-deps.policy"
 find "$PKG/usr/lib/wayvoice/app" -type d -name __pycache__ -prune -exec rm -rf {} +
 (cd "$PKG" && find usr -type f -print0 | sort -z | xargs -0 -r md5sum) > "$PKG/DEBIAN/md5sums"
 
