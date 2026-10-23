@@ -35,6 +35,9 @@
   <supports><control>pointing</control><control>keyboard</control></supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.8.4" date="2026-10-23">
+      <description><p>Harden recording limits, cancellation and local worker responses. Keep temporary recordings in private, process-owned sessions, preserve model preparation during interface version recovery, and report reclaimed model-cache space accurately.</p></description>
+    </release>
     <release version="0.8.3" date="2026-10-16">
       <description><p>Include the 0.8.0 feature set and fix AppImage builds on CI runners with a non-default user ID. Align release metadata with the next unused version after mismatched 0.8.1 and 0.8.2 tags.</p></description>
     </release>

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.4 — 2026-10-23
+
+- Keep temporary recordings in private directories with process-lifetime ownership locks; only abandoned, verified sessions are eligible for stale-file cleanup.
+- Reject recording limits above 24 hours before opening the microphone, and prevent detached subprocess pipe owners from extending recognition cancellation or timeouts indefinitely.
+- Apply cumulative deadlines and response-size limits to local worker communication while retaining request ownership before recovery or fallback.
+- Defer interface-triggered daemon version recovery while a model is downloading or warming, and use one configuration snapshot for each status update.
+- Include orphaned downloads and removed metadata in model-cache deletion accounting while preserving shared files and partial-failure reporting.
+- Remove custom polkit actions targeting shared package-manager binaries; dependency installation uses the standard system administrator prompt.
+- Strengthen regression assertions and test isolation, consolidate duplicate checks, and eliminate waits for unrelated threads. The measured local GTK suite runs in about half its previous time.
+
 ## 0.8.3 — 2026-10-16
 
 - Include the features listed under 0.8.0 and fix AppImage CI builds by provisioning the runner UID/GID in both container images; retain nonroot execution.
