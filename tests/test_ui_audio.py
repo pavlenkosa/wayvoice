@@ -3,13 +3,13 @@ import json
 import time
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
-try:
+from tests.ui_support import GTK_AVAILABLE
+
+if GTK_AVAILABLE:
     from wayvoice.ui.controllers.audio import AudioController
-except ImportError:
-    AudioController = None
 
 
-@unittest.skipIf(AudioController is None, 'GTK unavailable')
+@unittest.skipUnless(GTK_AVAILABLE, "GTK/libadwaita bindings unavailable")
 class AudioUiTests(unittest.TestCase):
     def test_check_uses_daemon_and_blocks_duplicate_jobs(self):
         ctx = SimpleNamespace(state=SimpleNamespace(cfg={}, t=lambda k: k), tasks=Mock(),

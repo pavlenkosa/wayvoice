@@ -200,7 +200,7 @@ class CommandWorkerTests(unittest.TestCase):
             reply = _ask("prepare-model", 10.0)
         self.assertFalse(reply.get("ok"), reply)
         self.assertIn("engine exploded", str(reply.get("error")))
-        self.assertTrue(_ask("ping", 1.0).get("ok"), "the worker did not survive")
+        self.assertTrue(_ask("cancel", 1.0).get("ok"), "the command worker did not survive")
 
     def test_a_client_that_hangs_up_mid_command_does_not_break_the_worker(self):
         # The reply goes to a socket nobody is on; the worker must move on to the next
@@ -216,7 +216,7 @@ class CommandWorkerTests(unittest.TestCase):
             rude.connect(str(socket_path()))
             rude.sendall(b"prepare-model\n")
             rude.close()
-            self.assertTrue(_ask("ping", 2.0).get("ok"))
+            self.assertTrue(_ask("cancel", 2.0).get("ok"), "the command worker did not survive")
 
 
 class NotifyTests(unittest.TestCase):
@@ -271,6 +271,7 @@ class NotifyTests(unittest.TestCase):
         )
         popen.start()
         self.addCleanup(popen.stop)
+        self.addCleanup(self._release_all)
 
     def _release_all(self):
         for proc in self.procs:
@@ -280,7 +281,6 @@ class NotifyTests(unittest.TestCase):
         # Otherwise every dictation ends with a pause of up to the notification's
         # own deadline, and a stalled session bus makes it the longest part of
         # pressing the key.
-        self.addCleanup(self._release_all)
         began = time.monotonic()
         notify_mod.notify("WayVoice", "recording started")
         elapsed = time.monotonic() - began
@@ -294,7 +294,6 @@ class NotifyTests(unittest.TestCase):
         # short: the point is that the caller is not held at all. The programs
         # are still running, which is the "abandoned" part - and nothing may have
         # released them, or the test would be measuring its own cleanup.
-        self.addCleanup(self._release_all)
         began = time.monotonic()
         for _ in range(3):
             notify_mod.notify("WayVoice", "text")  # must not raise
@@ -311,7 +310,6 @@ class NotifyTests(unittest.TestCase):
         # which() said yes and the program is gone: the race that used to abort a
         # recording that had already started. Nothing may be started, and nothing
         # may be raised.
-        self.addCleanup(self._release_all)
         with mock.patch.object(notify_mod.subprocess, "Popen", side_effect=OSError):
             notify_mod.notify("WayVoice", "text")  # must not raise
         self.assertEqual(self.procs, [], "a program was left half-started")
@@ -331,8 +329,9 @@ class NotifyTests(unittest.TestCase):
         self.assertEqual(self.procs, [])
 
     def test_notifications_can_be_switched_off(self):
-        with mock.patch.object(notify_mod.shutil, "which", return_value=None):
+        with mock.patch.object(notify_mod.shutil, "which", return_value="/usr/bin/notify-send") as lookup:
             notify_mod.notify("WayVoice", "text", enabled=False)
+        lookup.assert_not_called()
         self.assertEqual(self.procs, [])
 
 

@@ -1,21 +1,17 @@
 """Behavioral characterization of the owned models controller units."""
 
-from tests.ui_support import controller_context
+from tests.ui_support import GTK_AVAILABLE, controller_context
 
 import unittest
 
 from wayvoice import model_store
 from wayvoice.i18n import tr
 
-try:
-    from wayvoice import ui
-except Exception as _exc:  # no GTK bindings for this interpreter
-    ui = None
-    _why = f"{type(_exc).__name__}: {_exc}"
-else:
-    _why = ""
 
-needs_window = unittest.skipIf(ui is None, f"the settings window is unavailable ({_why})")
+if GTK_AVAILABLE:
+    from wayvoice import ui
+
+needs_window = unittest.skipUnless(GTK_AVAILABLE, "GTK/libadwaita bindings unavailable")
 
 
 class FakeButton:

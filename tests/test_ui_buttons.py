@@ -14,31 +14,19 @@ is the one already known to work, and the logs button reads the journal and puts
 the text into the clipboard.
 """
 
-from tests.ui_support import controller_context
-try:
-    from gi.repository import GLib
-    from wayvoice.ui.controllers.status import StatusController
-except Exception:
-    pass
-
+from tests.ui_support import GTK_AVAILABLE, controller_context
 import subprocess
 import threading
-import time
 import unittest
 from unittest import mock
 
 from wayvoice import injector, model_store
 from wayvoice.i18n import tr
 
-try:
-    from wayvoice import ui
-except Exception as _exc:  # no GTK bindings for this interpreter
-    ui = None
-    _why = f"{type(_exc).__name__}: {_exc}"
-else:
-    _why = ""
+if GTK_AVAILABLE:
+    from wayvoice.ui.controllers.status import StatusController
 
-needs_window = unittest.skipIf(ui is None, f"the settings window is unavailable ({_why})")
+needs_window = unittest.skipUnless(GTK_AVAILABLE, "GTK/libadwaita bindings unavailable")
 
 
 class FakeToast:
@@ -93,14 +81,6 @@ class FakeButton:
         self.visible = bool(value)
 
 
-class FakeClipboard:
-    def __init__(self):
-        self.texts = []
-
-    def set_text(self, text):
-        self.texts.append(text)
-
-
 @needs_window
 class DiagnosticsButtonTests(unittest.TestCase):
     def setUp(self):
@@ -110,24 +90,13 @@ class DiagnosticsButtonTests(unittest.TestCase):
         self.window.window.toast = FakeToast()
         self.window.status._logs_copying = False
         self.window.status._logs_button = None
-        patcher = mock.patch.object(self.window.status, '_diagnostics_preview',
-            side_effect=lambda report: self.window.status.ctx.tasks.run(
-                lambda: injector.copy_to_clipboard(report, self.window.state.ui_lang),
-                lambda _: self.window.status._diagnostics_finished(None),
-                self.window.status._diagnostics_finished))
-        patcher.start()
+        patcher = mock.patch('wayvoice.ui.dialogs.diagnostics.diagnostics_preview')
+        self.preview = patcher.start()
         self.addCleanup(patcher.stop)
         self.copied = []
         patcher = mock.patch.object(
             injector, "copy_to_clipboard",
             side_effect=lambda text, language=None: self.copied.append(text),
-        )
-        patcher.start()
-        self.addCleanup(patcher.stop)
-        # Workers queue completions; the test drains them on the calling thread.
-        patcher = mock.patch.object(
-            GLib, "idle_add",
-            side_effect=lambda callback, *args, **kwargs: callback(*args, **kwargs),
         )
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -137,16 +106,14 @@ class DiagnosticsButtonTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def _wait(self):
-        """Join the worker, so the assertions see a finished run."""
-        for thread in threading.enumerate():
-            if thread is not threading.current_thread():
-                thread.join(timeout=10)
-
     def test_the_report_goes_to_a_clipboard_that_works(self):
         # The regression: the GTK3 clipboard accepts text on Wayland and never
         # offers it, so the button reported success and copied nothing.
         self.window.status._copy_diagnostics()
+        self.preview.assert_called_once()
+        self.assertEqual(self.preview.call_args.args[1], "WayVoice 0.6.2\nOS: Linux")
+        self.assertEqual(self.copied, [], "opening the preview must not replace the clipboard")
+        self.preview.call_args.args[3]()
         self.assertEqual(self.copied, ["WayVoice 0.6.2\nOS: Linux"])
         self.assertEqual(self.window.window.toast.titles, [tr("toast.diagnostics_copied", "en")])
 
@@ -157,6 +124,8 @@ class DiagnosticsButtonTests(unittest.TestCase):
             side_effect=injector.InjectionError("no Wayland display"),
         ):
             self.window.status._copy_diagnostics()
+            self.preview.assert_called_once()
+            self.preview.call_args.args[3]()
         self.assertEqual(len(self.window.window.toast.titles), 1)
         self.assertIn("no Wayland display", self.window.window.toast.titles[0])
         self.assertNotIn(tr("toast.diagnostics_copied", "en"), self.window.window.toast.titles)
@@ -169,7 +138,7 @@ class LogsButtonTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         self.window = controller_context()
-        from tests.test_ui_async_tasks import FakeGLib, TaskRunner
+        from tests.ui_tasks import FakeGLib, TaskRunner
         self.glib = FakeGLib()
         self.window.tasks = TaskRunner(self.glib)
         self.addCleanup(self.window.tasks.close)
@@ -188,10 +157,8 @@ class LogsButtonTests(unittest.TestCase):
         # Workers queue completions; the test drains them on the calling thread.
 
     def _wait(self):
-        """Join the worker, so the assertions see a finished run."""
-        for thread in threading.enumerate():
-            if thread is not threading.current_thread():
-                thread.join(timeout=10)
+        """Wait only for this runner's completion, never unrelated process threads."""
+        self.assertTrue(self.glib.ready.wait(2), "logs job did not finish")
         self.glib.drain()
 
     def _journal(self, stdout="2026-10-05 01:00:00 line\n", returncode=0, stderr=""):
@@ -201,7 +168,7 @@ class LogsButtonTests(unittest.TestCase):
     def test_the_journal_lands_in_the_clipboard(self):
         with self._journal():
             self.window.status._copy_logs()
-        self._wait()
+            self._wait()
         self.assertEqual(self.copied, ["2026-10-05 01:00:00 line\n"])
         self.assertEqual(self.window.window.toast.titles, [tr("toast.logs_copied", "en")])
 
@@ -217,7 +184,7 @@ class LogsButtonTests(unittest.TestCase):
 
         with mock.patch.object(subprocess, "run", side_effect=record):
             self.window.status._copy_logs()
-        self._wait()
+            self._wait()
         self.assertIn("--no-pager", seen["cmd"])
         self.assertIn("wayvoice.service", seen["cmd"])
         self.assertIs(seen["kwargs"].get("check"), False)
@@ -226,7 +193,7 @@ class LogsButtonTests(unittest.TestCase):
     def test_an_empty_journal_is_said_rather_than_copied(self):
         with self._journal(stdout="   \n"):
             self.window.status._copy_logs()
-        self._wait()
+            self._wait()
         self.assertEqual(self.copied, [])
         self.assertEqual(self.window.window.toast.titles, [tr("toast.logs_empty", "en")])
 
@@ -235,7 +202,7 @@ class LogsButtonTests(unittest.TestCase):
         # reason on stderr; a silent empty clipboard would be a dead button again.
         with self._journal(returncode=1, stderr="Unit wayvoice.service could not be found."):
             self.window.status._copy_logs()
-        self._wait()
+            self._wait()
         self.assertEqual(self.copied, [])
         self.assertEqual(len(self.window.window.toast.titles), 1)
         self.assertIn("could not be found", self.window.window.toast.titles[0])
@@ -243,7 +210,7 @@ class LogsButtonTests(unittest.TestCase):
     def test_a_missing_journalctl_is_reported_not_raised(self):
         with mock.patch.object(subprocess, "run", side_effect=FileNotFoundError("journalctl")):
             self.window.status._copy_logs()
-        self._wait()
+            self._wait()
         self.assertEqual(self.copied, [])
         self.assertEqual(len(self.window.window.toast.titles), 1)
 
@@ -253,7 +220,7 @@ class LogsButtonTests(unittest.TestCase):
             side_effect=subprocess.TimeoutExpired("journalctl", 5),
         ):
             self.window.status._copy_logs()
-        self._wait()
+            self._wait()
         self.assertEqual(len(self.window.window.toast.titles), 1)
 
 
@@ -291,7 +258,7 @@ class MainLoopTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         self.window = controller_context()
-        from tests.test_ui_async_tasks import FakeGLib, TaskRunner
+        from tests.ui_tasks import FakeGLib, TaskRunner
         self.glib = FakeGLib()
         self.window.tasks = TaskRunner(self.glib)
         self.addCleanup(self.window.tasks.close)
@@ -315,15 +282,12 @@ class MainLoopTests(unittest.TestCase):
 
         def slow(*_args, **_kwargs):
             where.append(threading.current_thread())
-            time.sleep(0.05)
             return subprocess.CompletedProcess(["journalctl"], 0, "line\n", "")
 
         with mock.patch.object(subprocess, "run", side_effect=slow):
             self.window.status._copy_logs()
-            for thread in threading.enumerate():
-                if thread is not threading.current_thread():
-                    thread.join(timeout=10)
-        self.glib.drain()
+            self.assertTrue(self.glib.ready.wait(2), "logs job did not finish")
+            self.glib.drain()
         self.assertTrue(where, "journalctl never ran at all")
         for thread in where:
             self.assertIsNot(thread, clicked_on,
@@ -395,15 +359,6 @@ class DownloadErrorTests(unittest.TestCase):
         self.window.models._download_report = {}
         self.window.models._selected_model_id = lambda: "small"
         self.window.window.toast = FakeToast()
-        # GLib.idle_add runs its callback at once, so the reply is handled on
-        # this thread the way the main loop would - without a running loop.
-        patcher = mock.patch.object(
-            GLib, "idle_add",
-            side_effect=lambda callback, *args, **kwargs: callback(*args, **kwargs),
-        )
-        patcher.start()
-        self.addCleanup(patcher.stop)
-
     def _entry(self, **entry):
         base = {"id": "small", "kind": model_store.KIND_REPO,
                 "downloaded": False, "size_bytes": 1500}
@@ -450,7 +405,7 @@ class DownloadErrorTests(unittest.TestCase):
         self.assertEqual(self.window.settings.model_download_row.tooltip, "refused: busy")
 
     def test_the_reply_is_marshalled_to_the_main_loop(self):
-        from tests.test_ui_async_tasks import FakeGLib, TaskRunner
+        from tests.ui_tasks import FakeGLib, TaskRunner
         glib = FakeGLib()
         runner = TaskRunner(glib)
         self.addCleanup(runner.close)

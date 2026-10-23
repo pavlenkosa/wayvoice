@@ -45,26 +45,7 @@ STATES = {"ready", "missing", "installing", "error"}
 _APPLICATION = None
 
 
-def _gtk_available() -> bool:
-    """Whether this process can really open a GTK window.
-
-    Not ``Gtk.init_check()``: on a machine with the bindings but no display - a build
-    server, a plain ssh session - that still answers true, the tests go on to build widgets,
-    and GTK takes the process down. A segfault is worse than a failure, because it takes the
-    other four hundred tests with it.
-    """
-    if not (os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY")):
-        return False
-    try:
-        import gi
-
-        gi.require_version("Gtk", "4.0")
-        gi.require_version("Adw", "1")
-        from gi.repository import Gtk
-
-        return bool(Gtk.init_check())
-    except Exception:
-        return False
+from tests.ui_support import gtk_display_available
 
 
 def _test_application():
@@ -427,7 +408,7 @@ class TranscribeDispatchTests(unittest.TestCase):
                 transcribe(Path("/nonexistent.wav"), {"engine": "test-failing"})
 
 
-@unittest.skipUnless(_gtk_available(), "no GTK display available")
+@unittest.skipUnless(gtk_display_available(), "no GTK display available")
 class SettingsWindowRegistryTests(unittest.TestCase):
     """The settings window must show what the registry says, not its own list."""
 

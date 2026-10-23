@@ -74,15 +74,7 @@ _READY_ENGINE = {"state": "ready", "message": "Ready"}
 #: in a code path that is otherwise fine.
 _ISOLATED_GLOBALS = {"_worker_retry_after": 0.0}
 
-#: What each name was before any test touched it. Restoring these explicitly rather
-#: through the patcher keeps the cleanup correct when a test patched the same name
-#: itself: ``mock.patch`` restores whatever it found when it stopped, which here would
-#: be this module's replacement rather than the real function.
 _OWNERS = {"_start_worker": worker_client, "model_is_present": model_preparation, "download_model": model_preparation, "_worker_retry_after": worker_client}
-_ORIGINALS = {name: getattr(_OWNERS[name], name) for name in _ISOLATED}
-_ORIGINAL_GLOBALS = {
-    name: getattr(_OWNERS[name], name) for name in _ISOLATED_GLOBALS
-}
 
 
 def isolate_environment(test) -> Path:
@@ -95,12 +87,12 @@ def isolate_environment(test) -> Path:
     root = Path(tempfile.mkdtemp(prefix="wayvoice-test-"))
     test.addCleanup(shutil.rmtree, root, ignore_errors=True)
     for name in _XDG_VARS:
-        patcher = mock.patch.dict(os.environ, {name: str(root / name)})
-        patcher.start()
-        test.addCleanup(patcher.stop)
         # The runtime has to exist inside the redirect, or the code under test answers
         # "not prepared" instead of doing what the test is about.
         (root / name).mkdir(parents=True, exist_ok=True)
+    patcher = mock.patch.dict(os.environ, {name: str(root / name) for name in _XDG_VARS})
+    patcher.start()
+    test.addCleanup(patcher.stop)
     return root
 
 
@@ -115,17 +107,16 @@ def isolate_engine(test) -> None:
     this one: each is a promise to the tests that follow, and a promise that quietly stops
     being kept costs a code path its only exercise.
     """
-    for name, replacement in _ISOLATED.items():
-        test.addCleanup(setattr, _OWNERS[name], name, _ORIGINALS[name])
-        setattr(_OWNERS[name], name, replacement)
-    for name, value in _ISOLATED_GLOBALS.items():
-        test.addCleanup(setattr, _OWNERS[name], name, _ORIGINAL_GLOBALS[name])
-        setattr(_OWNERS[name], name, value)
+    # Restore the state present at entry, including any enclosing fixture. LIFO
+    # cleanups also restore nested isolation or overrides made by the test.
+    for name, replacement in (_ISOLATED | _ISOLATED_GLOBALS).items():
+        patcher = mock.patch.object(_OWNERS[name], name, replacement)
+        patcher.start()
+        test.addCleanup(patcher.stop)
     # The daemon imported the name, so patching the engine's does not reach it.
     from wayvoice import daemon as _daemon
 
     for module in (_engine, _daemon):
-        name = "engine_status"
-        original = getattr(module, name)
-        test.addCleanup(setattr, module, name, original)
-        setattr(module, name, lambda cfg: dict(_READY_ENGINE))
+        patcher = mock.patch.object(module, "engine_status", lambda cfg: dict(_READY_ENGINE))
+        patcher.start()
+        test.addCleanup(patcher.stop)

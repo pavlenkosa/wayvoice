@@ -2,13 +2,13 @@
 import unittest
 from types import SimpleNamespace
 from unittest import mock
-try:
+from tests.ui_support import GTK_AVAILABLE
+
+if GTK_AVAILABLE:
     from wayvoice.ui.controllers.updates import UpdatesController
-except (ImportError, ValueError):
-    UpdatesController = None
 
 
-@unittest.skipIf(UpdatesController is None, 'GTK package unavailable')
+@unittest.skipUnless(GTK_AVAILABLE, "GTK/libadwaita bindings unavailable")
 class AutoUpdateTests(unittest.TestCase):
     def setUp(self):
         self.ctx = SimpleNamespace(tasks=mock.Mock(closed=False), window=SimpleNamespace(_update_busy=False),

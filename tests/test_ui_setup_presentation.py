@@ -2,13 +2,13 @@
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
-try:
+from tests.ui_support import GTK_AVAILABLE
+
+if GTK_AVAILABLE:
     from wayvoice.ui.setup_presentation import setup_steps, model_missing, paint_setup
-except (ImportError, ValueError):
-    setup_steps = None
 
 
-@unittest.skipIf(setup_steps is None, 'GTK UI package unavailable')
+@unittest.skipUnless(GTK_AVAILABLE, "GTK/libadwaita bindings unavailable")
 class SetupStepsTests(unittest.TestCase):
     def steps(self, model=None, **changes):
         reply = {'ok': True, 'engine': {'state': 'ready'}, 'model': model or {}}

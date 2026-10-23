@@ -2,11 +2,11 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from wayvoice.engine import _postprocess
-try:
+from tests.ui_support import GTK_AVAILABLE, gtk_display_available
+
+if GTK_AVAILABLE:
     from wayvoice.ui.widgets.vocabulary import VocabularyEditor
     from gi.repository import Gtk
-except ImportError:
-    VocabularyEditor = None
 
 
 class PipelineVocabularyTests(unittest.TestCase):
@@ -32,10 +32,10 @@ class PipelineVocabularyTests(unittest.TestCase):
             self.assertEqual(path.read_text(), raw)
 
 
-@unittest.skipIf(VocabularyEditor is None, 'GTK unavailable')
+@unittest.skipUnless(GTK_AVAILABLE, "GTK/libadwaita bindings unavailable")
 class VocabularyEditorTests(unittest.TestCase):
     def test_preview_uses_draft_and_invalid_rules_block_save(self):
-        if not Gtk.init_check():
+        if not gtk_display_available():
             self.skipTest('no GTK display')
         ctx = SimpleNamespace(state=SimpleNamespace(cfg={}, t=lambda k: k), preferences=Mock())
         editor = VocabularyEditor(ctx)

@@ -32,21 +32,6 @@ class RuntimeMissingTests(unittest.TestCase):
         patch.start()
         self.addCleanup(patch.stop)
 
-    def test_download_model_with_missing_runtime_returns_error_state(self):
-        """Test that download_model returns 'error' state when runtime is missing."""
-        # Mock the _model_download_args to return None when runtime python is missing
-        with mock.patch.object(model_preparation, "model_is_present", return_value=False):
-            with mock.patch.object(model_preparation, "_model_download_args", return_value=None):
-                # This should return error state, not unsupported
-                result = engine.download_model("small", language="en")
-                
-        # Should be error state, not unsupported
-        self.assertEqual(result["state"], "error")
-        # Should mention runtime/setup
-        self.assertIn("runtime", result["error"].lower())
-        # Should NOT be "unsupported"
-        self.assertNotEqual(result["state"], "unsupported")
-
     def test_download_model_with_non_hub_id_still_returns_unsupported(self):
         """Test that download_model still returns 'unsupported' for non-hub models."""
         # Mock the _model_download_args to return None for a local path

@@ -15,6 +15,7 @@ from wayvoice.runtime import worker_client, model_preparation
 import os
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from wayvoice import engine
 
@@ -98,12 +99,30 @@ class EngineIsolationTests(_Case):
         # a deadline in the future, and every test after it skips starting one without
         # trying.
         moved = worker_client.time.monotonic() + 3600.0
-        worker_client._worker_retry_after = moved
-        self.addCleanup(setattr, worker_client, "_worker_retry_after", moved)
-        support.isolate_engine(self)
-        self.assertEqual(worker_client._worker_retry_after, 0.0)
-        self._after_cleanup()
-        self.assertEqual(worker_client._worker_retry_after, moved, "the deadline was left moved")
+        isolated = unittest.TestCase()
+        with mock.patch.object(worker_client, "_worker_retry_after", moved):
+            try:
+                support.isolate_engine(isolated)
+                self.assertEqual(worker_client._worker_retry_after, 0.0)
+                worker_client._worker_retry_after = 123.0
+            finally:
+                isolated.doCleanups()
+            self.assertEqual(worker_client._worker_retry_after, moved, "the deadline was left moved")
+
+    def test_cleanup_preserves_enclosing_overrides(self):
+        with mock.patch.object(model_preparation, "model_is_present", return_value=False) as enclosing:
+            outer, inner = unittest.TestCase(), unittest.TestCase()
+            try:
+                support.isolate_engine(outer)
+                outer_hook = model_preparation.model_is_present
+                support.isolate_engine(inner)
+                inner.doCleanups()
+                self.assertIs(model_preparation.model_is_present, outer_hook)
+                outer.doCleanups()
+                self.assertIs(model_preparation.model_is_present, enclosing)
+            finally:
+                inner.doCleanups()
+                outer.doCleanups()
 
     def test_the_engine_is_reported_ready(self):
         # The answer to "is the engine prepared" is a question about this

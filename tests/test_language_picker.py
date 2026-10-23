@@ -5,33 +5,16 @@ state: a :class:`Gtk.DropDown` changes its selection without telling anyone, so 
 but reading it back can catch it.
 """
 
-import os
 import unittest
 
 
-def _gtk_available() -> bool:
-    """Whether this process can really open a GTK window.
+from tests.ui_support import GTK_AVAILABLE, gtk_display_available
 
-    Not ``Gtk.init_check()``: with the bindings installed but no display - a build server, a
-    plain ssh session - that still answers true, the tests go on to build widgets, and GTK
-    takes the process down. A segfault is worse than a failure, because it takes the other
-    four hundred tests with it.
-    """
-    if not (os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY")):
-        return False
-    try:
-        import gi
-
-        gi.require_version("Gtk", "4.0")
-        gi.require_version("Adw", "1")
-        from gi.repository import Gtk
-
-        return bool(Gtk.init_check())
-    except Exception:
-        return False
+if GTK_AVAILABLE:
+    from wayvoice import ui
 
 
-@unittest.skipUnless(_gtk_available(), "no GTK display available")
+@unittest.skipUnless(gtk_display_available(), "no GTK display available")
 class LanguagePickerTests(unittest.TestCase):
     def setUp(self):
         import gi
@@ -95,6 +78,7 @@ class LanguagePickerTests(unittest.TestCase):
         self.assertEqual(self.picker.selected_code(), "en")
 
 
+@unittest.skipUnless(GTK_AVAILABLE, "GTK/libadwaita bindings unavailable")
 class LanguageChoiceTests(unittest.TestCase):
     """The label list itself: no widgets, but the module that builds it.
 
@@ -105,10 +89,6 @@ class LanguageChoiceTests(unittest.TestCase):
     """
 
     def setUp(self):
-        try:
-            from wayvoice import ui
-        except Exception as exc:
-            self.skipTest(f"the settings window is unavailable ({type(exc).__name__})")
         self.ui = ui
 
     def test_labels_are_localized_by_the_interface_language(self):

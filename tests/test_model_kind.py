@@ -15,7 +15,7 @@ was written by hand from memory; only the real function settles it. So the guard
 below do not spell the values out - they ask ``describe()``.
 """
 
-from tests.ui_support import controller_context
+from tests.ui_support import GTK_AVAILABLE, controller_context
 
 import tempfile
 import unittest
@@ -23,16 +23,7 @@ from pathlib import Path
 
 from wayvoice import model_store
 
-try:
-    from wayvoice import ui
-except Exception as _exc:  # no GTK bindings for this interpreter
-    ui = None
-    _why = f"{type(_exc).__name__}: {_exc}"
-else:
-    _why = ""
-
-needs_ui = unittest.skipIf(ui is None, f"the settings window is unavailable ({_why})")
-
+needs_ui = unittest.skipUnless(GTK_AVAILABLE, "GTK/libadwaita bindings unavailable")
 
 def _entry_for(root: Path, model_id: str) -> dict:
     """A real describe() answer, from a cache that holds nothing."""

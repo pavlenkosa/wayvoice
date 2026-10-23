@@ -1,5 +1,4 @@
 """Preview never copies implicitly; saving uses asynchronous private file IO."""
-import os
 import stat
 import tempfile
 import time
@@ -7,17 +6,14 @@ from pathlib import Path
 import unittest
 from unittest import mock
 
-try:
-    import gi
-    gi.require_version("Gtk", "4.0")
+from tests.ui_support import GTK_AVAILABLE, gtk_display_available
+
+if GTK_AVAILABLE:
     from gi.repository import Gio, Gtk, GLib
-except (ImportError, ValueError):
-    Gtk = None
-else:
     from wayvoice.ui.dialogs.diagnostics import diagnostics_preview
 
 
-@unittest.skipUnless(Gtk and (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")) and Gtk.init_check(), "GTK display unavailable")
+@unittest.skipUnless(gtk_display_available(), "GTK display unavailable")
 class PreviewTests(unittest.TestCase):
     def setUp(self):
         self.parent = Gtk.Window()

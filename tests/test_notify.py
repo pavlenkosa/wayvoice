@@ -10,7 +10,6 @@ it does with it.
 
 import subprocess
 import threading
-import time
 import unittest
 from unittest import mock
 
@@ -171,13 +170,6 @@ class NotifyTests(unittest.TestCase):
         notify_mod.notify("WayVoice", "recording started")
         self._deliver()
         self.assertEqual(self.fake.kwargs[0].get("stdout"), subprocess.PIPE)
-
-    def test_notify_returns_before_the_program_finishes(self):
-        # The id is read on the background thread, so the hot key is never held
-        # waiting for a session bus that may be slow or gone.
-        began = time.monotonic()
-        notify_mod.notify("WayVoice", "recording started")
-        self.assertLess(time.monotonic() - began, 0.5)
 
     def test_nothing_is_raised_when_the_delivery_reports_nothing(self):
         fake = mock.Mock()

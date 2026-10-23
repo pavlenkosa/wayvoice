@@ -23,6 +23,7 @@ application simply gets slower and stays slower.
 """
 from wayvoice.runtime import locations, worker_client
 
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -86,49 +87,77 @@ class StopWorkerSocketTests(unittest.TestCase):
 class NumericSettingsTests(unittest.TestCase):
     """A config file a person edited must not raise inside the engine."""
 
-    def test_beam_size_falls_back_instead_of_raising(self):
-        for value in (None, "soon", [], {}, "5"):
+    def test_worker_settings_validate_beam_size(self):
+        cases = [(None, 5), ("soon", 5), ([], 5), ({}, 5),
+                 (float("nan"), 5), (float("inf"), 5), ("2.5", 5),
+                 (3, 3), ("3", 3)]
+        for value, expected in cases:
             with self.subTest(value=value):
-                settings = worker_client._worker_settings({"beam_size": value})
-                self.assertIsInstance(settings["beam_size"], int)
-
-    def test_the_default_is_used_when_the_value_is_not_a_number(self):
-        self.assertEqual(worker_client._worker_settings({"beam_size": None})["beam_size"], 5)
-        self.assertEqual(worker_client._worker_settings({"beam_size": "x"})["beam_size"], 5)
-
-    def test_a_good_value_is_kept(self):
-        self.assertEqual(worker_client._worker_settings({"beam_size": 3})["beam_size"], 3)
-        self.assertEqual(worker_client._worker_settings({"beam_size": "3"})["beam_size"], 3)
+                actual = worker_client._worker_settings({"beam_size": value})["beam_size"]
+                self.assertEqual(actual, expected)
+                self.assertIs(type(actual), int)
 
     def test_the_helper_keeps_integers_and_floats_apart(self):
         from wayvoice.config import number
 
-        self.assertEqual(number({"x": "2"}, "x", 1.0), 2.0)
-        self.assertEqual(number({"x": "2"}, "x", 1), 2)
-        # "2.5" is not an integer, and quietly dropping the fraction would change the
-        # setting the user wrote, so the default stands.
-        self.assertEqual(number({"x": "2.5"}, "x", 1), 1)
-        self.assertEqual(number({"x": "soon"}, "x", 1.5), 1.5)
+        for value, default, expected in (("2", 1.0, 2.0), ("2", 1, 2),
+                                         ("2.5", 1, 1), ("soon", 1.5, 1.5)):
+            with self.subTest(value=value, default=default):
+                actual = number({"x": value}, "x", default)
+                self.assertEqual(actual, expected)
+                self.assertIs(type(actual), type(expected))
 
-    def test_no_unguarded_conversion_of_a_config_value_is_left(self):
-        # A guard rather than a test of one line: the sixth such conversion is what
-        # the next bad config file finds.
-        import ast
+    def test_malformed_numbers_reach_engine_commands_as_defaults(self):
+        from wayvoice.runtime import parakeet, processes
 
-        offenders = []
-        for path in sorted(Path(engine_mod.__file__).parent.glob("*.py")):
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
-                    continue
-                if node.func.id not in {"int", "float"}:
-                    continue
-                for argument in node.args:
-                    if isinstance(argument, ast.Call) and isinstance(argument.func, ast.Attribute) \
-                            and argument.func.attr == "get":
-                        offenders.append(f"{path.name}:{node.lineno}")
-        self.assertEqual(offenders, [],
-                         "cfg.get() converted without a floor:\n" + "\n".join(offenders))
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory)
+            (runtime / "bin").mkdir()
+            (runtime / "bin/python").touch()
+            model = runtime / "model.bin"
+            model.touch()
+            for value in (None, "soon", [], {}, float("nan"), float("inf")):
+                cfg = {"engine_worker": False, "beam_size": value,
+                       "transcription_timeout_sec": value, "custom_command": "recognize {audio}",
+                       "whisper_cpp_model": str(model)}
+                with self.subTest(value=value), \
+                        mock.patch.object(locations, "faster_runtime", return_value=runtime), \
+                        mock.patch.object(engine_mod, "_find_whisper_cpp", return_value="whisper-cli"), \
+                        mock.patch.object(parakeet, "command", return_value=["parakeet"]), \
+                        mock.patch.object(processes, "_run_cancelable") as run:
+                    with mock.patch.object(worker_client, "ensure_worker", return_value=True), \
+                            mock.patch.object(worker_client, "_worker_request", return_value={"ok": True, "text": "transcript"}) as request:
+                        self.assertEqual(engine_mod._transcribe_via_worker(model, cfg, None), "transcript")
+                        self.assertEqual(request.call_args.args[2], 90)
+                        self.assertIs(type(request.call_args.args[2]), int)
+                    for transcribe in (engine_mod._transcribe_faster, engine_mod._transcribe_custom,
+                                       engine_mod._transcribe_whisper_cpp, parakeet.transcribe):
+                        run.return_value = subprocess.CompletedProcess([], 0,
+                            '{"text":"transcript"}' if transcribe is parakeet.transcribe else "transcript", "")
+                        self.assertEqual(transcribe(model, cfg, None), "transcript")
+                        self.assertEqual(run.call_args.kwargs["timeout"], 90)
+                        self.assertIs(type(run.call_args.kwargs["timeout"]), int)
+                        if transcribe is engine_mod._transcribe_faster:
+                            command = run.call_args.args[0]
+                            self.assertEqual(command[command.index("--beam-size") + 1], "5")
+
+    def test_worker_spawn_validates_beam_and_idle_settings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory)
+            (runtime / "bin").mkdir()
+            (runtime / "bin/python").touch()
+            for value in (None, "soon", [], {}, float("nan"), float("inf")):
+                with self.subTest(value=value), \
+                        mock.patch.object(locations, "faster_runtime", return_value=runtime), \
+                        mock.patch.object(locations, "worker_log_path", return_value=runtime / "worker.log"), \
+                        mock.patch.object(locations, "worker_pid_path", return_value=runtime / "worker.pid"), \
+                        mock.patch.object(locations, "worker_socket_path", return_value=runtime / "worker.sock"), \
+                        mock.patch.object(worker_client, "_worker_procs", []), \
+                        mock.patch.object(worker_client.subprocess, "Popen", return_value=mock.Mock(pid=123)) as spawn:
+                    self.assertTrue(worker_client._start_worker({"beam_size": value, "engine_worker_idle_sec": value}))
+                    command = spawn.call_args.args[0]
+                    self.assertEqual(command[command.index("--beam-size") + 1], "5")
+                    self.assertEqual(command[command.index("--idle-timeout") + 1], "900")
 
 
 class PreparationThreadTests(unittest.TestCase):

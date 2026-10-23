@@ -1,5 +1,7 @@
 import unittest
 from pathlib import Path
+import tempfile
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -14,9 +16,7 @@ FORBIDDEN = (
 )
 
 GLOBS = (
-    "app/src/wayvoice/*.py",
-    # UI-ARCH-001: the ui package (pages/controllers/widgets/dialogs) too.
-    "app/src/wayvoice/ui/**/*.py",
+    "app/src/wayvoice/**/*.py",
     "systemd/*.service",
     "data/*.desktop",
 )
@@ -37,6 +37,16 @@ def scanned_files() -> list[Path]:
 
 
 class NoHardcodedPathsTests(unittest.TestCase):
+    def test_new_runtime_subpackages_are_scanned(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "scripts").mkdir()
+            source = root / "app/src/wayvoice/runtime/backend/unsafe.py"
+            source.parent.mkdir(parents=True)
+            source.write_text("PYTHON = '/usr/bin/python3'\n")
+            with mock.patch(__name__ + ".ROOT", root):
+                self.assertIn(source, scanned_files())
+
     def test_no_hardcoded_install_prefix(self):
         offenders = []
         for path in scanned_files():

@@ -39,7 +39,9 @@ class UnavailableNamesDoNotCancelTheRest(unittest.TestCase):
         patcher = mock.patch.object(pkgsys, "requires_privilege", return_value=False)
         patcher.start()
         self.addCleanup(patcher.stop)
-        self.ran = []
+        patcher = mock.patch.object(pkgsys, "detect_manager", return_value="apt")
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _install(self, names, known):
         with mock.patch.object(pkgsys, "package_available",
@@ -52,9 +54,8 @@ class UnavailableNamesDoNotCancelTheRest(unittest.TestCase):
             known={"pipewire-bin", "wl-clipboard", "libnotify-bin"})
         self.assertTrue(ok, message)
         self.assertEqual(len(self.ran), 1, "the package manager was never started")
-        installed = [name for name in self.ran[0] if not name.startswith("-")]
-        self.assertIn("pipewire-bin", installed)
-        self.assertNotIn("ydotool", installed)
+        self.assertEqual(self.ran[0][-3:], ["pipewire-bin", "wl-clipboard", "libnotify-bin"])
+        self.assertNotIn("ydotool", self.ran[0])
 
     def test_the_skipped_name_is_named_in_the_message(self):
         ok, message = self._install(["pipewire-bin", "ydotool"],

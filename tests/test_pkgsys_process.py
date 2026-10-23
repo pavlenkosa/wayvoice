@@ -48,6 +48,7 @@ class ManagerEnvironmentTests(unittest.TestCase):
 
         with mock.patch.object(pkgsys.subprocess, "Popen", side_effect=fake_popen), \
              mock.patch.object(pkgsys, "requires_privilege", return_value=False), \
+             mock.patch.object(pkgsys, "detect_manager", return_value="apt"), \
              mock.patch.object(pkgsys, "package_available", return_value=True):
             ok, message = pkgsys.install_packages(["wl-clipboard"], language="en")
         self.assertTrue(ok, message)

@@ -1,28 +1,20 @@
 """Dialogs use a minimal transient window, never the real application startup."""
-import os
 import unittest
 from unittest import mock
 from wayvoice.i18n import tr
 from tests.support import isolate_environment
 
-try:
-    import gi
-    gi.require_version('Gtk','4.0')
-    gi.require_version('Adw','1')
+from tests.ui_support import GTK_AVAILABLE, gtk_display_available
+
+if GTK_AVAILABLE:
     from gi.repository import Gtk, Adw
     from wayvoice.ui.dialogs.about import show_about
     from wayvoice.ui.dialogs.confirmations import download_confirmation
     from wayvoice.ui.dialogs.model_delete import delete_confirmation
     from wayvoice.ui.dialogs.shortcut_window import shortcut_capture
-except Exception:
-    Gtk = None
 
 
-def has_display():
-    return bool(Gtk and (os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')) and Gtk.init_check())
-
-
-@unittest.skipUnless(has_display(), 'no GTK display available')
+@unittest.skipUnless(gtk_display_available(), 'no GTK display available')
 class TestDialogs(unittest.TestCase):
     def setUp(self):
         isolate_environment(self)

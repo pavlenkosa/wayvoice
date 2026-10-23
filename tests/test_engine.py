@@ -51,21 +51,10 @@ class WorkerVersionTests(unittest.TestCase):
     previous release keeps decoding speech.
     """
 
-    def test_a_worker_from_another_version_does_not_match(self):
+    def _healthy_reply(self):
         from wayvoice import __version__
 
-        reply = {
-            "ok": True,
-            "version": "0.0.1-old",
-            "config": {"model": "small", "device": "auto", "beam_size": 5, "vad": True},
-        }
-        self.assertNotEqual(__version__, "0.0.1-old")
-        self.assertFalse(_worker_settings_match(reply, {"model": "small"}))
-
-    def test_a_worker_of_this_version_matches(self):
-        from wayvoice import __version__
-
-        reply = {
+        return {
             "ok": True,
             "version": __version__,
             "request_status": True,
@@ -73,21 +62,27 @@ class WorkerVersionTests(unittest.TestCase):
             "request_completion": True,
             "config": {"model": "small", "device": "auto", "beam_size": 5, "vad": True},
         }
+
+    def test_a_worker_from_another_version_does_not_match(self):
+        reply = self._healthy_reply()
         self.assertTrue(_worker_settings_match(reply, {"model": "small"}))
+        reply["version"] = "0.0.1-old"
+        self.assertFalse(_worker_settings_match(reply, {"model": "small"}))
+
+    def test_a_worker_of_this_version_matches(self):
+        self.assertTrue(_worker_settings_match(self._healthy_reply(), {"model": "small"}))
 
     def test_same_version_worker_without_recovery_protocol_is_replaced(self):
-        from wayvoice import __version__
-        self.assertFalse(_worker_settings_match({"version": __version__}, {}))
+        for flag in ("request_status", "warm_recovery", "request_completion"):
+            with self.subTest(flag=flag):
+                reply = self._healthy_reply()
+                del reply[flag]
+                self.assertFalse(_worker_settings_match(reply, {"model": "small"}))
 
     def test_a_worker_started_with_another_model_is_not_used(self):
-        # The version is only half of the match: a worker left over from a changed
-        # setting decodes with the wrong model, which sounds like recognition being
-        # broken rather than like a stale worker.
-        reply = {
-            "ok": True,
-            "version": __import__("wayvoice").__version__,
-            "config": {"model": "large-v3", "device": "auto", "beam_size": 5, "vad": True},
-        }
+        reply = self._healthy_reply()
+        self.assertTrue(_worker_settings_match(reply, {"model": "small"}))
+        reply["config"]["model"] = "large-v3"
         self.assertFalse(_worker_settings_match(reply, {"model": "small"}))
 
     def test_a_worker_that_reports_no_version_is_still_trusted(self):

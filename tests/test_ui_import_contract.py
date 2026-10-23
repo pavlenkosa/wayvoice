@@ -2,17 +2,10 @@
 import importlib
 import unittest
 
-try:
-    import gi
-    gi.require_version('Gtk','4.0')
-    gi.require_version('Adw','1')
-except (ImportError, ValueError):
-    has_bindings = False
-else:
-    has_bindings = True
+from tests.ui_support import GTK_AVAILABLE
 
 
-@unittest.skipUnless(has_bindings, 'GTK/libadwaita bindings unavailable')
+@unittest.skipUnless(GTK_AVAILABLE, 'GTK/libadwaita bindings unavailable')
 class UiImportContractTests(unittest.TestCase):
     def test_public_entry_and_all_units_import_without_starting_jobs(self):
         ui = importlib.import_module('wayvoice.ui')

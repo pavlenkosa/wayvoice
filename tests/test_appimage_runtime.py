@@ -4,6 +4,7 @@ import shlex
 import unittest
 from unittest import mock
 from wayvoice import service, shortcut, updater
+from tests.ui_support import GTK_AVAILABLE
 
 
 class AppImageRuntimeTests(unittest.TestCase):
@@ -29,11 +30,9 @@ class AppImageRuntimeTests(unittest.TestCase):
                 updater.package_system()
             probe.assert_not_called()
 
+    @unittest.skipUnless(GTK_AVAILABLE, 'GTK/libadwaita bindings unavailable')
     def test_ui_restart_uses_stable_image_entry_point(self):
-        try:
-            from wayvoice.ui import application
-        except (ImportError, ValueError):
-            self.skipTest('GTK unavailable')
+        from wayvoice.ui import application
         window = mock.Mock()
         window.get_application.return_value.get_windows.return_value = []
         with mock.patch.dict(os.environ, {'WAYVOICE_APPIMAGE': '/tmp/Way Voice.AppImage'}), mock.patch.object(application.os, 'execv') as execute:

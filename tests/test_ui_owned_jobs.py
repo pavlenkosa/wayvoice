@@ -2,13 +2,12 @@
 import threading
 import unittest
 from unittest import mock
-from tests.ui_support import controller_context
-from tests.test_ui_async_tasks import FakeGLib, TaskRunner
+from tests.ui_support import GTK_AVAILABLE, controller_context
+from tests.ui_tasks import FakeGLib, TaskRunner
 
-try:
+
+if GTK_AVAILABLE:
     from wayvoice.ui.controllers.settings import SettingsController
-except Exception:
-    SettingsController = None
 
 
 class ControlledTasks:
@@ -28,7 +27,7 @@ class ControlledTasks:
             done(result)
 
 
-@unittest.skipIf(SettingsController is None, 'GTK bindings unavailable')
+@unittest.skipUnless(GTK_AVAILABLE, "GTK/libadwaita bindings unavailable")
 class OwnedJobTests(unittest.TestCase):
     def setUp(self):
         self.ctx = controller_context()

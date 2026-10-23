@@ -141,8 +141,12 @@ class DetectTests(unittest.TestCase):
             probed.append(name)
             return "/usr/bin/dnf" if name == "dnf" else None
 
-        with mock.patch("shutil.which", _which):
+        with mock.patch("shutil.which", _which), \
+             mock.patch.object(pkgsys.subprocess, "run") as run, \
+             mock.patch.object(pkgsys.subprocess, "Popen") as popen:
             self.assertEqual(pkgsys.detect_manager(), "dnf")
+        run.assert_not_called()
+        popen.assert_not_called()
         # Probing stops at the first match and only looks names up in PATH;
         # no manager binary is ever run.
         self.assertEqual(probed, ["xbps-install", "pacman", "zypper", "apt-get", "dnf"])

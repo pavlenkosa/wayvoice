@@ -2,23 +2,20 @@
 import unittest
 from types import SimpleNamespace
 from unittest import mock
-try:
-    import gi
-    gi.require_version("Gtk", "4.0")
-    gi.require_version("Adw", "1")
+from tests.ui_support import GTK_AVAILABLE, gtk_display_available
+
+if GTK_AVAILABLE:
     from gi.repository import Gtk, Adw
     from wayvoice.ui.controllers.profiles import ProfilesController, PROFILES
     from wayvoice.ui.controllers.models import ModelsController
     from wayvoice.engine import engine_ids
     from wayvoice.models import preset_index
-except (ImportError, ValueError):
-    ProfilesController = None
 
 
-@unittest.skipIf(ProfilesController is None, 'GTK UI package unavailable')
+@unittest.skipUnless(GTK_AVAILABLE, "GTK/libadwaita bindings unavailable")
 class ProfilesTests(unittest.TestCase):
     def setUp(self):
-        if not Gtk.init_check():
+        if not gtk_display_available():
             self.skipTest('GTK display unavailable')
         page = SimpleNamespace()
         for name, choices in (('engine', engine_ids()), ('model', [str(n) for n in range(25)]),

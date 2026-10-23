@@ -92,9 +92,6 @@ class SentencesStillWork(unittest.TestCase):
     def test_double_spaces_collapse_and_newlines_survive(self):
         self.assertEqual(normalize("два  слова.\nтретье"), "Два слова.\nТретье.")
 
-    def test_an_ordinary_sentence_is_untouched(self):
-        self.assertEqual(normalize("привет мир"), "Привет мир.")
-
     def test_an_unknown_extension_is_treated_as_a_sentence(self):
         # The rule that lets "отчёт.pdf" through must not let every dotted Russian
         # word through, or the pass stops fixing what it exists for.

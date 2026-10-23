@@ -2,19 +2,13 @@ import json
 import unittest
 from unittest import mock
 
-try:
-    import gi
-    gi.require_version("Gtk", "4.0")
-    gi.require_version("Adw", "1")
-except (ImportError, ValueError):
-    GI_AVAILABLE = False
-else:
-    GI_AVAILABLE = True
-    from tests.ui_support import controller_context
+from tests.ui_support import GTK_AVAILABLE, controller_context
+
+if GTK_AVAILABLE:
     from wayvoice.ui.controllers import models
 
 
-@unittest.skipUnless(GI_AVAILABLE, "GTK unavailable")
+@unittest.skipUnless(GTK_AVAILABLE, "GTK unavailable")
 class ModelTargetTests(unittest.TestCase):
     def setUp(self):
         self.ctx = controller_context()

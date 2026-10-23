@@ -1,18 +1,13 @@
 """Actual composition, navigation and signal wiring with all external work isolated."""
-import os
 import unittest
 from unittest import mock
 from tests.support import isolate_environment
 
-try:
+from tests.ui_support import GTK_AVAILABLE, gtk_display_available
+
+if GTK_AVAILABLE:
     from wayvoice import ui
     from gi.repository import Gtk, Adw, Gio
-except Exception:
-    ui = None
-
-
-def has_display():
-    return bool(ui and (os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')) and Gtk.init_check())
 
 
 class RecordingTasks:
@@ -34,7 +29,7 @@ class RecordingTasks:
         self.sources.clear()
 
 
-@unittest.skipUnless(has_display(), 'no GTK display available')
+@unittest.skipUnless(gtk_display_available(), 'no GTK display available')
 class CompositionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -62,11 +57,20 @@ class CompositionTests(unittest.TestCase):
         self.assertIs(self.window.context.home, self.window.home)
         self.assertFalse(hasattr(self.window, '_save'))
         self.assertFalse(hasattr(self.window, 'model'))
-        self.assertEqual([s[0] for s in self.tasks.sources], ['idle','idle','idle',60_000,650,900,'idle'])
-        # The new startup source and timer are inert without saved consent.
-        _, configure, args = self.tasks.sources[2]
-        configure(*args)
-        self.tasks.sources[3][1]()
+        ctx = self.window.context
+        self.assertCountEqual([(source[0], source[1]) for source in self.tasks.sources], [
+            ('idle', ctx.integration._background_start),
+            ('idle', ctx.models._refresh_model_state),
+            ('idle', ctx.updates.configure),
+            (60_000, ctx.updates.tick),
+            (650, ctx.status._poll_status),
+            (900, ctx.preferences._poll_engine_settings),
+            ('idle', ctx.audio.refresh),
+        ])
+        # Saved consent, rather than source ordering, controls background checks.
+        configure = next(source for source in self.tasks.sources if source[1] == ctx.updates.configure)
+        configure[1](*configure[2])
+        ctx.updates.tick()
         self.assertFalse(self.window.context.updates.pending)
 
     def test_settings_uses_available_width_within_clamp(self):

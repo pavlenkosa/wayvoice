@@ -48,14 +48,13 @@ class PortalDaemonTests(unittest.TestCase):
             self.daemon._shortcut_portal.start.assert_called_once_with('F9')
             self.daemon._shortcut_portal.configure.assert_not_called()
 
-try:
-    from tests.ui_support import controller_context
+from tests.ui_support import GTK_AVAILABLE, controller_context
+
+if GTK_AVAILABLE:
     from wayvoice.ui.controllers.shortcut import ShortcutController
-except (ImportError, ValueError):
-    ShortcutController = None
 
 
-@unittest.skipIf(ShortcutController is None, 'GTK unavailable')
+@unittest.skipUnless(GTK_AVAILABLE, 'GTK/libadwaita bindings unavailable')
 class PortalControllerTests(unittest.TestCase):
     def test_configuration_serializes_with_save_and_does_not_change_draft(self):
         ctx = controller_context()

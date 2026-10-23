@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from wayvoice import engine
+from wayvoice import engine, paths
 from wayvoice.paths import app_dir
 
 
@@ -66,7 +66,7 @@ class FasterRuntimeLocationTests(unittest.TestCase):
 
 class AppDirTests(unittest.TestCase):
     def test_app_dir_is_next_to_the_sources(self):
-        self.assertTrue(app_dir().name in {"app"} or app_dir().name.startswith("wayvoice"))
+        self.assertEqual(app_dir() / "src" / "wayvoice", Path(paths.__file__).resolve().parent)
 
 
 if __name__ == "__main__":

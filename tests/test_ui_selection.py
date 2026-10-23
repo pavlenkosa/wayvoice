@@ -3,22 +3,19 @@ import copy
 import json
 import unittest
 from unittest import mock
-try:
-    import gi
-    gi.require_version('Gtk', '4.0')
-    gi.require_version('Adw', '1')
+from tests.ui_support import GTK_AVAILABLE, gtk_display_available
+
+if GTK_AVAILABLE:
     from gi.repository import Gtk, Adw, Gio
     from wayvoice.ui.window import WayVoiceWindow
     from wayvoice.config import DEFAULTS
-except (ImportError, ValueError):
-    WayVoiceWindow = None
 
 
-@unittest.skipIf(WayVoiceWindow is None, 'GTK unavailable')
+@unittest.skipUnless(GTK_AVAILABLE, "GTK/libadwaita bindings unavailable")
 class QuickSelectionUITests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if not Gtk.init_check():
+        if not gtk_display_available():
             raise unittest.SkipTest('GTK display unavailable')
         cls.app = Adw.Application(application_id='io.github.stepan.WayVoice.SelectionTest', flags=Gio.ApplicationFlags.NON_UNIQUE)
         cls.app.register(None)

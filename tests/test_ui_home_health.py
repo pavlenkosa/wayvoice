@@ -1,14 +1,14 @@
 """Home recovery, accessibility and ephemeral transcript behavior with fake views."""
 import unittest
 from unittest import mock
-try:
+from tests.ui_support import GTK_AVAILABLE
+
+if GTK_AVAILABLE:
     from tests.ui_support import controller_context
     from wayvoice.ui.health_presentation import recovery_text
-except (ImportError, ValueError):
-    controller_context = None
 
 
-@unittest.skipIf(controller_context is None, 'GTK unavailable')
+@unittest.skipUnless(GTK_AVAILABLE, "GTK/libadwaita bindings unavailable")
 class HomeHealthTests(unittest.TestCase):
     def setUp(self):
         self.ctx = controller_context()

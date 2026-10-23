@@ -35,7 +35,7 @@ class ArchitectureMetadataTests(unittest.TestCase):
             if not line.lstrip().startswith("#")
         )
         self.assertNotRegex(
-            code, r"^Architecture: all\b",
+            code, r"(?m)^Architecture:\s*all\b",
             "the control file claims a package with native ELF is architecture-independent",
         )
 

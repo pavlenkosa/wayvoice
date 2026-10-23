@@ -9,11 +9,10 @@ with what, not how a ``Gtk.ProgressBar`` draws.  The window itself is built
 without its constructor, because that one starts threads and talks to a daemon.
 """
 
-from tests.ui_support import controller_context
-try:
+from tests.ui_support import GTK_AVAILABLE, controller_context
+
+if GTK_AVAILABLE:
     from wayvoice.ui.model_presentation import hero_preparation_caption, show_hero_preparation
-except Exception:
-    pass
 
 import unittest
 from unittest import mock
@@ -21,16 +20,7 @@ from unittest import mock
 from wayvoice import model_store
 from wayvoice.i18n import tr
 
-try:
-    from wayvoice import ui
-except Exception as _exc:  # no GTK bindings for this interpreter
-    ui = None
-    _why = f"{type(_exc).__name__}: {_exc}"
-else:
-    _why = ""
-
-#: Applied to every class below: they all need ``ui.WayVoiceWindow``.
-needs_window = unittest.skipIf(ui is None, f"the settings window is unavailable ({_why})")
+needs_window = unittest.skipUnless(GTK_AVAILABLE, "GTK/libadwaita bindings unavailable")
 
 
 class FakeRow:

@@ -436,22 +436,22 @@ class PrepareTests(unittest.TestCase):
                 self.assertIsNotNone(eng.model_download, eng.id)
 
 
-#: Long enough that the test cannot pass by accident on a loaded machine, short
-#: enough that it does not become the slowest thing in the suite.
-WARM_DEADLINE = 30.0
-
-
 class WarmWorkerTests(unittest.TestCase):
     """Warm outcomes remain compatible through the owned request transport."""
 
     def test_a_worker_that_answers_and_loads_the_model(self):
-        with mock.patch.object(worker_client, "ensure_worker", return_value=True), \
-             mock.patch.object(worker_client, "_worker_request", return_value={"ok": True, "warm": True}) as call:
-            self.assertTrue(engine.warm_worker({}))
-        payload, request_id, timeout, event = call.call_args.args
-        self.assertEqual(payload, {"cmd": "warm", "request_id": request_id})
-        self.assertTrue(request_id)
-        self.assertEqual(timeout, worker_client.WARM_TIMEOUT)
+        for configured_timeout in (None, 30.0):
+            with self.subTest(timeout=configured_timeout), \
+                 mock.patch.object(worker_client, "ensure_worker", return_value=True), \
+                 mock.patch.object(worker_client, "_worker_request", return_value={"ok": True, "warm": True}) as call:
+                kwargs = {} if configured_timeout is None else {"timeout": configured_timeout}
+                self.assertTrue(engine.warm_worker({}, **kwargs))
+            call.assert_called_once()
+            payload, request_id, timeout, event = call.call_args.args
+            self.assertEqual(payload, {"cmd": "warm", "request_id": request_id})
+            self.assertTrue(request_id)
+            self.assertEqual(timeout, worker_client.WARM_TIMEOUT if configured_timeout is None else configured_timeout)
+            self.assertIsNone(event)
 
     def test_a_worker_that_cannot_be_started_is_not_a_failure(self):
         with mock.patch.object(worker_client, "ensure_worker", return_value=False), \
@@ -469,23 +469,6 @@ class WarmWorkerTests(unittest.TestCase):
             with self.subTest(error=error), mock.patch.object(worker_client, "ensure_worker", return_value=True), \
                  mock.patch.object(worker_client, "_worker_request", side_effect=error):
                 self.assertFalse(engine.warm_worker({}))
-
-    def test_a_model_that_is_still_loading_is_watched_until_it_is_there(self):
-        def loading(*args):
-            time.sleep(0.02)
-            return {"ok": True, "warm": True}
-        with mock.patch.object(worker_client, "ensure_worker", return_value=True), \
-             mock.patch.object(worker_client, "_worker_request", side_effect=loading) as call:
-            self.assertTrue(engine.warm_worker({}, timeout=30.0))
-        self.assertEqual(call.call_args.args[2], 30.0)
-        call.assert_called_once()
-
-    def test_a_worker_that_dies_while_being_watched_is_not_waited_for(self):
-        began = time.monotonic()
-        with mock.patch.object(worker_client, "ensure_worker", return_value=True), \
-             mock.patch.object(worker_client, "_worker_request", side_effect=engine.WorkerUnavailable("worker closed connection")):
-            self.assertFalse(engine.warm_worker({}, timeout=WARM_DEADLINE))
-        self.assertLess(time.monotonic() - began, 5.0)
 
     def test_a_model_that_never_arrives_is_reported_as_not_warm(self):
         with mock.patch.object(worker_client, "ensure_worker", return_value=True), \

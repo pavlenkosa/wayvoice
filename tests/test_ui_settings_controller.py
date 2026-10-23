@@ -1,21 +1,17 @@
 """Behavioral characterization of the owned settings controller units."""
 
-from tests.ui_support import controller_context
+from tests.ui_support import GTK_AVAILABLE, controller_context
 
 import unittest
 from unittest import mock
 
-try:
+
+if GTK_AVAILABLE:
     from wayvoice import ui
     from wayvoice.ui.controllers.settings import SettingsController
     from wayvoice.ui.controllers.models import ModelsController
-except Exception as _exc:  # no GTK bindings for this interpreter
-    ui = None
-    _why = f"{type(_exc).__name__}: {_exc}"
-else:
-    _why = ""
 
-needs_window = unittest.skipIf(ui is None, f"the settings window is unavailable ({_why})")
+needs_window = unittest.skipUnless(GTK_AVAILABLE, "GTK/libadwaita bindings unavailable")
 
 
 @needs_window
@@ -337,8 +333,6 @@ class ExitPolicyTests(unittest.TestCase):
         prepare.assert_called_once()
         self.assertEqual(prepare.call_args.args[0].id, "faster-whisper")
         self.assertFalse(ctx.preferences._setup_running)
-
-
 
 
 @needs_window
