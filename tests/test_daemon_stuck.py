@@ -178,9 +178,21 @@ class BusySurvivesAFailedUnlinkTests(DaemonCase):
         self.assertEqual(d._busy_started, 0.0)
 
     def test_the_cancel_flag_is_cleared_too(self):
-        d = self._work(PermissionError(13, "Permission denied"))
+        d = _daemon(self)
+        d.busy = True
+
+        def cancel_transcription(*args):
+            d._transcribe_cancel.set()
+            raise daemon_mod.TranscriptionCancelled("cancelled during recognition")
+
+        wav = Path(tempfile.gettempdir()) / "wayvoice-test-busy.wav"
+        with mock.patch.object(daemon_mod, "transcribe", side_effect=cancel_transcription), \
+                mock.patch.object(daemon_mod.Path, "unlink", side_effect=PermissionError("denied")):
+            d._transcribe_worker(wav)
+        self.assertFalse(d.busy)
         self.assertFalse(d._transcribe_cancel.is_set(),
                          "the next dictation would start already cancelled")
+        self.assertEqual(d._pending_asr_cleanup, {wav})
 
     def test_the_text_was_still_delivered(self):
         # The unlink is cleanup; failing it must not cost the user their transcript.
@@ -262,20 +274,33 @@ class RecordingLimitTests(DaemonCase):
     def test_a_limit_that_is_not_a_number_does_not_start_anything(self):
         # The regression: the recorder was already running when int() raised, so the
         # microphone stayed open with no timer to close it.
-        _d, recorder, reply = self._start()
+        d, recorder, reply = self._start()
         self.assertFalse(reply["ok"], reply)
-        self.assertFalse(recorder.start.called, "the recorder was started anyway")
+        self.assertIn("max_recording_sec", reply["error"])
+        recorder.start.assert_not_called()
         self.assertFalse(recorder.recording)
-
-    def test_no_timer_is_left_running(self):
-        d, _recorder, _reply = self._start()
         self.assertIsNone(d._record_timer)
         self.assertEqual(d._record_started, 0.0)
 
-    def test_the_reason_is_a_setting_problem_not_a_crash(self):
-        _d, _recorder, reply = self._start()
-        self.assertIn("max_recording_sec", str(reply.get("error") or ""),
-                      "the user is told which setting to fix")
+    def test_out_of_range_limit_is_refused_before_microphone_or_timer_start(self):
+        for limit in (10 ** 100, "1" + "0" * 100, daemon_mod.MAX_RECORDING_SECONDS + 1):
+            with self.subTest(limit=limit), mock.patch.object(
+                    daemon_mod, "load_config", return_value={**CONFIG, "max_recording_sec": limit}):
+                d, recorder, reply = self._start()
+                self.assertFalse(reply["ok"], reply)
+                self.assertIn("max_recording_sec", reply["error"])
+                recorder.start.assert_not_called()
+                self.assertIsNone(d._record_timer)
+
+    def test_maximum_limit_can_arm_a_real_timer(self):
+        limit = daemon_mod._recording_limit({"max_recording_sec": daemon_mod.MAX_RECORDING_SECONDS})
+        timer = threading.Timer(limit, lambda: None)
+        timer.start()
+        try:
+            self.assertTrue(timer.is_alive())
+        finally:
+            timer.cancel()
+            timer.join(timeout=1)
 
     def test_the_auto_stop_timer_survives_a_bad_value(self):
         # The same int() runs again on the timer thread, where an exception would
@@ -327,28 +352,16 @@ class RecordingLimitTests(DaemonCase):
 
 
 class StaleRecordingSweeperTests(DaemonCase):
-    """The sweeper is what covers a file whose owner died before cleaning up."""
+    """Legacy temporary files have no proof that WayVoice owns their contents."""
 
-    def test_it_still_removes_recordings_nobody_owns(self):
-        # The sweeper is what covers a file whose owner died before cleaning up: it
-        # globs the system temporary directory, so the files have to be there.
-        made = []
-        old = Path(tempfile.gettempdir()) / "wayvoice-sweeper-old.wav"
-        fresh = Path(tempfile.gettempdir()) / "wayvoice-sweeper-fresh.wav"
-        made += [old, fresh]
-        for path, payload in ((old, 300), (fresh, 300)):
-            path.write_bytes(b"RIFF" + b"\x00" * payload)
-        ancient = 60 * 60 * 24
-        now = time.time()
-        os.utime(old, (now - ancient, now - ancient))
-        os.utime(fresh, (now, now))
-        try:
-            daemon_mod._sweep_stale_recordings(max_age=3600)
-            self.assertFalse(old.exists(), "a stale recording survived the sweep")
-            self.assertTrue(fresh.exists(), "a recording in progress was swept")
-        finally:
-            for path in made:
-                path.unlink(missing_ok=True)
+    def test_daemon_does_not_sweep_unverified_legacy_wavs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            old = Path(directory) / "wayvoice-user-document.wav"
+            old.write_bytes(b"RIFF" + b"\x00" * 300)
+            os.utime(old, (0, 0))
+            with mock.patch("wayvoice.recordings.tempfile.gettempdir", return_value=directory):
+                self.assertEqual(daemon_mod._sweep_stale_recordings(max_age=3600), 0)
+            self.assertTrue(old.exists(), "filename and age do not establish ownership")
 
 
 if __name__ == "__main__":

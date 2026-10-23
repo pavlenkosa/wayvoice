@@ -661,26 +661,22 @@ def delete(
     #: directory and leave that model with dangling links.
     shared_inside = {blob for blob in others if _is_inside(blob, path)}
 
-    # Measured before anything is removed, because a repository's own blobs live inside
-    # the directory step 5 deletes: asking the filesystem afterwards reports them as
-    # "already gone" and understates the freed space.
-    #
-    # Two different things are counted and must not be added up: what the disk really
-    # gets back, and what survives because another model links to it. A relocated
-    # blob belongs to the second group - its content lives on under the new name, so
-    # counting it as freed would promise space that did not become free.
-    freed: dict[Path, int] = {}
+    # Record all real repository files before removal, including metadata and
+    # orphaned/partial downloads that no snapshot references. Follow links only
+    # for accounting, and count targets inside this repository once: deleting a
+    # symlink to another cache or a user-owned file does not free its target.
+    # Shared blobs remain excluded; the outcome check below also handles partial
+    # failures without claiming bytes for files that survived.
+    freed = {
+        real: size for real, size in _real_files(path)
+        if _is_inside(real, path) and real not in shared_inside
+    }
     kept_bytes = 0
-    for blob in own | shared_inside:
+    for blob in shared_inside:
         try:
-            size = blob.stat().st_size
+            kept_bytes += blob.stat().st_size
         except OSError:
             continue
-        if blob in shared_inside:
-            kept_bytes += size
-            continue
-        if _is_inside(blob, path):
-            freed[blob] = size
     for blob in exclusive:
         if not _is_inside(blob, hub) or _is_inside(blob, path):
             continue  # outside our cache, or already counted with the directory

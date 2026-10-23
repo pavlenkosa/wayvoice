@@ -116,8 +116,9 @@ class StatusController:
         epoch = self.transcript.epoch
         toggle_ack = self._toggle_ack_seq
         reply = request("status", timeout=0.12)
+        cfg = load_config()
         if self.ctx.selection is not None:
-            reply["_prepared_choices"] = self.ctx.selection.snapshot(load_config())
+            reply["_prepared_choices"] = self.ctx.selection.snapshot(cfg)
         reply["_transcript_epoch"] = epoch
         reply["_toggle_ack_seq"] = toggle_ack
         now = time.monotonic()
@@ -136,7 +137,7 @@ class StatusController:
             reply['shortcut'] = self.ctx.state.t('shortcut.disabled')
         else:
             reply['shortcut_support'] = self._shortcut_support
-        return (reply, load_config(), self.ctx.integration._missing_required())
+        return (reply, cfg, self.ctx.integration._missing_required())
 
     RESTART_LIMIT = 3
     RESTART_DELAY = 5.0
@@ -168,7 +169,11 @@ class StatusController:
             self._restart_needed = True
         if not self._restart_needed or self._restart_requested:
             return False
-        if reply.get("recording") or reply.get("busy"):
+        preparation = (reply.get("model") or {}).get("download") or {}
+        # Restarting cancels explicit preparation, and startup never resumes a
+        # download. Wait for it just as we wait for an active dictation.
+        if (reply.get("recording") or reply.get("busy")
+                or preparation.get("state") in {"downloading", "warming"}):
             return False
         if self._restart_attempts >= self.RESTART_LIMIT:
             if not self._restart_exhausted:

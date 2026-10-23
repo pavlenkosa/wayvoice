@@ -6,4 +6,4 @@ and runs the test suite a second time. Every UI test then exercises its
 guard fails here, on the release gate, rather than in CI at release time.
 """
 
-raise ImportError("gi is not available: GTK bindings blocked for CI parity")
+raise ModuleNotFoundError("gi is not available: GTK bindings blocked for CI parity", name="gi")

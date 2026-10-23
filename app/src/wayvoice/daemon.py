@@ -10,7 +10,6 @@ import queue
 import signal
 import socket
 import sys
-import tempfile
 import threading
 import time
 import traceback
@@ -80,6 +79,9 @@ def _close(conn: socket.socket) -> None:
         pass
 
 
+MAX_RECORDING_SECONDS = 24 * 60 * 60
+
+
 def _recording_limit(cfg: dict[str, Any]) -> int:
     """How many seconds one recording may last, or ``ValueError``.
 
@@ -96,34 +98,17 @@ def _recording_limit(cfg: dict[str, Any]) -> int:
         raise ValueError(
             f"max_recording_sec must be a number of seconds, not {raw!r}"
         ) from None
+    if seconds > min(MAX_RECORDING_SECONDS, threading.TIMEOUT_MAX):
+        raise ValueError(f"max_recording_sec must not exceed {MAX_RECORDING_SECONDS} seconds")
     # The floor is here rather than at the two call sites, so the warning the user
     # is shown and the timer that is armed cannot disagree about the limit.
     return max(5, seconds)
 
 
 def _sweep_stale_recordings(max_age: float = 3600.0) -> int:
-    """Remove recordings left behind by a daemon that was killed outright.
-
-    ``cancel()`` and the shutdown hook cover every orderly exit, but a SIGKILL or a power
-    loss leaves the file behind, at 32 kB for every second of speech nobody will transcribe
-    again. Only files older than ``max_age`` are touched: a recording in progress cannot
-    be older than the longest limit the user can configure.
-    """
-    removed = 0
-    cutoff = time.time() - max_age
-    try:
-        candidates = list(Path(tempfile.gettempdir()).glob("wayvoice-*.wav"))
-    except OSError:
-        return 0
-    for candidate in candidates:
-        try:
-            if candidate.stat().st_mtime >= cutoff:
-                continue
-            candidate.unlink()
-            removed += 1
-        except OSError:
-            continue
-    return removed
+    """Sweep only private recording sessions whose process owner has exited."""
+    from .recordings import sweep_stale_recordings
+    return sweep_stale_recordings(max_age)
 
 
 class WayVoiceDaemon:

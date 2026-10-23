@@ -21,6 +21,7 @@ import json
 import os
 import subprocess
 import unittest
+from unittest import mock
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -115,13 +116,14 @@ class ModelStoreTests(unittest.TestCase):
         self.fake = FakeHub(self.base)
         # Point every hub-resolution variable at the fake cache; the tests must
         # never look at the user's real one.
-        for name in ("HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE", "HF_HOME", "XDG_CACHE_HOME"):
-            self.addCleanup(self._unset_env, name)
-            os.environ[name] = str(self.base / ("hf" if name == "HF_HOME" else "xdg"))
-        os.environ["HF_HUB_CACHE"] = str(self.fake.hub)
-
-    def _unset_env(self, name):
-        os.environ.pop(name, None)
+        environment = mock.patch.dict(os.environ, {
+            "HF_HUB_CACHE": str(self.fake.hub),
+            "HUGGINGFACE_HUB_CACHE": str(self.base / "xdg"),
+            "HF_HOME": str(self.base / "hf"),
+            "XDG_CACHE_HOME": str(self.base / "xdg"),
+        })
+        environment.start()
+        self.addCleanup(environment.stop)
 
     def size(self, model_id):
         return model_store.size_of(model_id)
@@ -163,8 +165,8 @@ class ModelStoreTests(unittest.TestCase):
         self.assertEqual(result["kept_bytes"], 77)
         # Everything small held, except the two blobs it shares with medium - those live
         # in the shared store and are none of this deletion's business - plus the
-        # one-byte ``.refs`` sidecar of the freed weight.
-        self.assertEqual(result["freed_bytes"], before - TOKENIZER - VOCABULARY + 1)
+        # one-byte ``.refs`` sidecar of the freed weight and repository ref metadata.
+        self.assertEqual(result["freed_bytes"], before - TOKENIZER - VOCABULARY + 1 + len(SMALL_REV))
 
     def test_the_model_is_gone_even_when_a_blob_had_to_stay(self):
         self._borrow_shared_private_blob()

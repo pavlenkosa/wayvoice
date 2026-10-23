@@ -2,6 +2,28 @@
 from types import SimpleNamespace
 from unittest import mock
 
+try:
+    import gi
+except ModuleNotFoundError as exc:
+    if exc.name != "gi":
+        raise
+    GTK_AVAILABLE = False
+else:
+    try:
+        gi.require_version("Gtk", "4.0")
+        gi.require_version("Gdk", "4.0")
+        gi.require_version("Adw", "1")
+    except ValueError:
+        GTK_AVAILABLE = False
+    else:
+        from gi.repository import Gdk, Gtk
+        GTK_AVAILABLE = True
+
+
+def gtk_display_available():
+    """Bindings and init_check alone do not prove widgets can be constructed."""
+    return bool(GTK_AVAILABLE and Gtk.init_check() and Gdk.Display.get_default())
+
 
 class ImmediateTasks:
     """Deterministic completion seam for existing handler tests.

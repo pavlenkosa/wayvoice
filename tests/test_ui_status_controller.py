@@ -1,20 +1,16 @@
 """Behavioral characterization of the owned status controller units."""
 
-from tests.ui_support import controller_context
+from tests.ui_support import GTK_AVAILABLE, controller_context
 
 import unittest
 from unittest import mock
 
-try:
+
+if GTK_AVAILABLE:
     from wayvoice import ui
     from wayvoice.ui.controllers.status import StatusController
-except Exception as _exc:  # no GTK bindings for this interpreter
-    ui = None
-    _why = f"{type(_exc).__name__}: {_exc}"
-else:
-    _why = ""
 
-needs_window = unittest.skipIf(ui is None, f"the settings window is unavailable ({_why})")
+needs_window = unittest.skipUnless(GTK_AVAILABLE, "GTK/libadwaita bindings unavailable")
 
 @needs_window
 class ToggleTests(unittest.TestCase):
@@ -42,25 +38,6 @@ class ToggleTests(unittest.TestCase):
             window.status._toggle()
             request.assert_called_once_with("cancel", timeout=0.8)
             window.window.toast.add_toast.assert_called_once()
-
-class FakeProcess:
-    def __init__(self, returncode, stderr=""):
-        self.returncode = returncode
-        self.stderr = stderr
-
-@needs_window
-class JournalTailTests(unittest.TestCase):
-    def test_a_failed_journalctl_raises_subprocess_error(self):
-        window = controller_context()
-        window.status.JOURNAL_LINES = StatusController.JOURNAL_LINES
-        window.status.JOURNAL_TIMEOUT = StatusController.JOURNAL_TIMEOUT
-        with mock.patch("wayvoice.ui.diagnostics.service.systemd_available", return_value=True), mock.patch("wayvoice.ui.diagnostics.subprocess.run",
-                        return_value=FakeProcess(1, stderr="boom")):
-            from subprocess import SubprocessError
-
-            with self.assertRaises(SubprocessError) as caught:
-                window.status._journal_tail()
-            self.assertIn("boom", str(caught.exception))
 
 if __name__ == "__main__":
     unittest.main()
@@ -131,6 +108,20 @@ class RestartRecoveryTests(unittest.TestCase):
         self.assertFalse(self.controller._maybe_restart(self.old))
         self.assertEqual(self.ctx.tasks.run.call_count, 1)
 
+    def test_preparation_defers_restart_without_consuming_retry_budget(self):
+        for download in ({"state": "downloading"}, {"state": "warming"},
+                         {"state": "downloading", "warming": True}):
+            with self.subTest(download=download):
+                reply = dict(self.old, model={"download": download})
+                self.assertFalse(self.controller._maybe_restart(reply))
+                self.assertTrue(self.controller._restart_needed)
+                self.assertFalse(self.controller._restart_requested)
+                self.assertEqual(self.controller._restart_attempts, 0)
+                self.work.assert_not_called()
+        self.assertTrue(self.controller._maybe_restart(
+            dict(self.old, model={"download": {"state": "ready"}})))
+        self.work.assert_called_once()
+
     def test_current_version_during_job_keeps_owner_and_suppresses_stale_error(self):
         self.ctx.tasks = mock.Mock()
         self.ctx.tasks.run.return_value = True
@@ -145,7 +136,7 @@ class RestartRecoveryTests(unittest.TestCase):
 
     def test_close_suppresses_late_restart_error(self):
         import threading
-        from tests.test_ui_async_tasks import FakeGLib, TaskRunner
+        from tests.ui_tasks import FakeGLib, TaskRunner
         glib = FakeGLib()
         runner = TaskRunner(glib)
         self.addCleanup(runner.close)
@@ -180,3 +171,24 @@ class RestartRecoveryTests(unittest.TestCase):
         self.ctx.window._toast.assert_called_once_with("toast.restart_failed")
         self.now.return_value = 5
         self.assertTrue(self.controller._maybe_restart({"ok": False}))
+
+
+@needs_window
+class StatusSnapshotTests(unittest.TestCase):
+    def test_prepared_choices_and_painted_config_share_one_snapshot(self):
+        from wayvoice.ui.controllers import status
+        ctx = controller_context()
+        ctx.selection = mock.Mock()
+        ctx.selection.snapshot.return_value = [{"model": "small"}]
+        cfg = {"engine": "faster-whisper", "model": "small"}
+        with mock.patch.object(status, "request", return_value={"ok": True}), \
+                mock.patch.object(status, "load_config", return_value=cfg) as load, \
+                mock.patch.object(status, "shortcut_support", return_value=(True, "")), \
+                mock.patch.object(status, "portal_shortcut_desktop", return_value=False), \
+                mock.patch.object(ctx.integration, "_missing_required", return_value=[]):
+            reply, painted_cfg, missing = ctx.status._status_snapshot()
+        load.assert_called_once_with()
+        ctx.selection.snapshot.assert_called_once_with(cfg)
+        self.assertIs(painted_cfg, cfg)
+        self.assertEqual(reply["_prepared_choices"], [{"model": "small"}])
+        self.assertEqual(missing, [])

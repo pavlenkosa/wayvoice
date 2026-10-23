@@ -4,11 +4,11 @@ import os
 import shutil
 import signal
 import subprocess
-import tempfile
 import wave
 from pathlib import Path
 
 from .deps import describe_missing
+from .recordings import create_recording
 
 
 class AudioRecorder:
@@ -84,9 +84,7 @@ class AudioRecorder:
             from .audio_devices import validate_target
             target = validate_target(target)
 
-        fd, name = tempfile.mkstemp(prefix="wayvoice-", suffix=".wav")
-        os.close(fd)
-        path = Path(name)
+        path = create_recording()
         # Keep the private inode: libsndfile truncates it without replacing its
         # 0600 permissions. Unlinking here recreated it using the caller umask.
 

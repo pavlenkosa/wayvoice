@@ -19,7 +19,7 @@ import wave
 from pathlib import Path
 from unittest import mock
 
-from wayvoice import audio
+from wayvoice import audio, recordings
 
 
 class FakeProc:
@@ -74,9 +74,20 @@ class FakeProc:
 class RecorderTests(unittest.TestCase):
     def setUp(self):
         self.recorder = audio.AudioRecorder()
-        self.addCleanup(self.recorder.cancel)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
+        root = Path(self.tmp.name) / "recordings"
+        patch = mock.patch.object(recordings, "recording_root", return_value=root)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+        def close_session():
+            session = recordings._sessions.pop((os.getpid(), root), None)
+            if session is not None:
+                session.close()
+
+        self.addCleanup(close_session)
+        self.addCleanup(self.recorder.cancel)
         self.paths: list[Path] = []
 
     def _patch_which(self, present=True):
@@ -300,15 +311,13 @@ class RecorderTests(unittest.TestCase):
         self.assertFalse(self.recorder.recording)
 
     def test_a_recorder_that_dies_immediately_leaves_no_file_behind(self):
-        tmpdir = Path(tempfile.gettempdir())
-        before = set(tmpdir.glob("wayvoice-*.wav"))
         proc = FakeProc(alive=False, stderr="nope")
         with self._patch_which(), self._patch_popen(proc):
             with self.assertRaises(RuntimeError):
                 self.recorder.start()
         # The recorder must not leave a file for a recording that never began;
-        # a stale one here is a file in /tmp that nobody will ever clean up.
-        self.assertEqual(set(tmpdir.glob("wayvoice-*.wav")) - before, set())
+        # inspect the actual take rather than a glob outside its private session.
+        self.assertFalse(Path(self.cmd[-1]).exists())
         self.assertIsNone(self.recorder._path)
 
     def test_a_healthy_recorder_reports_itself_as_recording(self):

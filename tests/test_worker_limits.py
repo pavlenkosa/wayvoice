@@ -41,22 +41,32 @@ class WorkerLimitsTests(unittest.TestCase):
             self.state.serial.release()
 
     def test_queued_cancel_releases_operation(self):
-        self.state.serial.acquire()
-        replies = []
-        thread = threading.Thread(target=lambda: replies.append(worker._dispatch({"cmd": "warm", "request_id": "queued"}, self.cache, self.config, self.state)))
-        thread.start()
-        try:
-            deadline = time.monotonic() + 1
-            while self.state.request_status("queued") != "queued" and time.monotonic() < deadline:
-                time.sleep(.001)
-            self.state.cancel("queued")
-            thread.join(1)
-            self.assertFalse(thread.is_alive())
-            self.assertTrue(replies[0]["cancelled"])
-            self.assertFalse(self.state.busy())
-        finally:
-            self.state.serial.release()
-            thread.join(1)
+        for command in ("warm", "transcribe"):
+            with self.subTest(command=command):
+                state = worker._WorkerState()
+                state.serial.acquire()
+                replies = []
+                thread = threading.Thread(target=lambda: replies.append(worker._dispatch(
+                    {"cmd": command, "request_id": "queued"}, self.cache, self.config, state)))
+                thread.start()
+                try:
+                    deadline = time.monotonic() + 2
+                    while state.request_status("queued") != "queued" and time.monotonic() < deadline:
+                        time.sleep(.001)
+                    self.assertEqual(state.request_status("queued"), "queued")
+                    state.cancel("queued")
+                    thread.join(2)
+                    self.assertFalse(thread.is_alive())
+                    self.assertTrue(replies[0]["cancelled"])
+                    self.assertFalse(state.busy())
+                    self.assertEqual(state.request_status("queued"), "finished")
+                    for _ in range(worker._MAX_OPERATIONS):
+                        self.assertTrue(state.operations.acquire(False))
+                    self.assertFalse(state.operations.acquire(False))
+                finally:
+                    state.cancel("queued")
+                    state.serial.release()
+                    thread.join(2)
 
     def test_histories_bounded_and_expire_without_evicting_active(self):
         now = [0.0]

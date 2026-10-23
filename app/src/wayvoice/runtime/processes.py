@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import codecs
+import io
+import locale
 import os
+import selectors
 import signal
 import subprocess
-import threading
 import time
 from threading import Event, Lock
 
@@ -69,42 +72,82 @@ def _terminate_process(proc: subprocess.Popen[str], timeout: float = 1.5) -> boo
     return True
 
 
-def _start_readers(
-    proc: subprocess.Popen[str], overflow: Event | None = None,
-) -> tuple[list[threading.Thread], list[str], list[str]]:
-    """Begin draining the child's pipes at once and return the buffers.
+class _PipeReaders:
+    """Drain owned descriptors without a blocking buffered read or helper thread."""
 
-    :func:`_run_cancelable` polls the child rather than talking to it, so nothing
-    else drains the pipes; an engine that writes more than one buffer blocks on the
-    write and never exits.
-    """
-    out: list[str] = []
-    err: list[str] = []
-
-    def read(stream, sink):
-        retained = 0
+    def __init__(self, proc, overflow):
+        self.selector = selectors.DefaultSelector()
+        self.out: list[str] = []
+        self.err: list[str] = []
+        self.overflow = overflow
+        self.retained = 0
         try:
-            while chunk := stream.read(8192):
-                if sink is err:
-                    sink[:] = [("".join(sink) + chunk)[-PROCESS_ERROR_TAIL:]]
-                else:
-                    available = TRANSCRIPT_OUTPUT_LIMIT - retained
-                    if available > 0:
-                        sink.append(chunk[:available])
-                        retained += min(len(chunk), available)
-                    if len(chunk) > available and overflow is not None:
-                        overflow.set()
-        except Exception:
+            for stream, sink in ((proc.stdout, self.out), (proc.stderr, self.err)):
+                if stream is None:
+                    continue
+                try:
+                    descriptor = stream.fileno()
+                    os.set_blocking(descriptor, False)
+                except (AttributeError, OSError, TypeError, ValueError):
+                    # In-memory streams have no OS descriptor to drain.
+                    continue
+                # Diagnostics may contain arbitrary tool output; preserve readable
+                # warnings without discarding a valid transcript. Transcript bytes
+                # remain strict so malformed recognition text is reported explicitly.
+                errors = "replace" if sink is self.err else "strict"
+                decoder = io.IncrementalNewlineDecoder(
+                    codecs.getincrementaldecoder(stream.encoding or locale.getencoding())(errors=errors),
+                    translate=True,
+                )
+                self.selector.register(descriptor, selectors.EVENT_READ, (sink, decoder))
+        except BaseException:
+            self.close()
+            raise
+
+    def _retain(self, sink, chunk):
+        if sink is self.err:
+            sink[:] = [("".join(sink) + chunk)[-PROCESS_ERROR_TAIL:]]
+        else:
+            available = TRANSCRIPT_OUTPUT_LIMIT - self.retained
+            if available > 0:
+                sink.append(chunk[:available])
+                self.retained += min(len(chunk), available)
+            if len(chunk) > available and self.overflow is not None:
+                self.overflow.set()
+
+    def drain(self, timeout=0.0):
+        if not self.selector.get_map():
+            if timeout:
+                time.sleep(timeout)
+            return False
+        ready = self.selector.select(timeout)
+        for key, _ in ready:
+            sink, decoder = key.data
+            try:
+                chunk = os.read(key.fd, 8192)
+            except BlockingIOError:
+                continue
+            if not chunk:
+                self.selector.unregister(key.fd)
+            self._retain(sink, decoder.decode(chunk, final=not chunk))
+        return bool(ready)
+
+    def finish(self):
+        # A detached descendant can retain or continuously write these pipes.
+        # The leader has exited; consume its buffered output without waiting for
+        # another process to close its copies or extending cleanup indefinitely.
+        deadline = time.monotonic() + 0.5
+        while time.monotonic() < deadline and self.drain():
             pass
 
-    threads: list[threading.Thread] = []
-    for stream, sink in ((proc.stdout, out), (proc.stderr, err)):
-        if stream is None:
-            continue
-        thread = threading.Thread(target=read, args=(stream, sink), daemon=True)
-        thread.start()
-        threads.append(thread)
-    return threads, out, err
+    def close(self):
+        self.selector.close()
+
+
+def _start_readers(proc: subprocess.Popen[str], overflow: Event | None = None):
+    """Create nonblocking pipe ownership and return the transcript buffers."""
+    readers = _PipeReaders(proc, overflow)
+    return readers, readers.out, readers.err
 
 
 def _close_pipes(proc: subprocess.Popen[str]) -> None:
@@ -120,22 +163,9 @@ def _close_pipes(proc: subprocess.Popen[str]) -> None:
             pass
 
 
-def _finish(
-    proc: subprocess.Popen[str],
-    readers: list[threading.Thread],
-    error: Exception,
-) -> Exception:
-    """Stop a child, let its readers finish, and return the error to raise."""
+def _finish(proc: subprocess.Popen[str], readers: _PipeReaders, error: Exception) -> Exception:
+    """Stop an owned group without waiting for inherited pipe descriptors."""
     _terminate_process(proc)
-    deadline = time.monotonic() + 5.0
-    for thread in readers:
-        thread.join(timeout=max(0.1, deadline - time.monotonic()))
-    for stream in (proc.stdout, proc.stderr):
-        try:
-            if stream is not None:
-                stream.close()
-        except Exception:
-            pass
     return error
 
 
@@ -154,6 +184,7 @@ def _run_cancelable(
         env=env,
         start_new_session=True,
     )
+    readers = None
     try:
         overflow = Event()
         readers, out, err = _start_readers(proc, overflow)
@@ -171,18 +202,20 @@ def _run_cancelable(
                     readers,
                     TranscriptionTimeout(f"Transcription exceeded {int(timeout)} seconds"),
                 )
-            time.sleep(0.12)
+            readers.drain(timeout=0.12)
         _terminate_process(proc)
-        for thread in readers:
-            thread.join(timeout=5.0)
-        _close_pipes(proc)
+        readers.finish()
         if overflow.is_set():
             raise RuntimeError("Recognition output exceeds text limit")
         return subprocess.CompletedProcess(
             args, proc.returncode, "".join(out), "".join(err)
         )
     finally:
-        _release_job(proc)
+        try:
+            if readers is not None:
+                readers.close()
+        finally:
+            _release_job(proc)
 
 
 def stop_jobs(*events, deadline=None):

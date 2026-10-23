@@ -202,6 +202,68 @@ class PartialDeletionTests(unittest.TestCase):
         self.assertTrue(foreign.exists())
 
 
+class DeletionAccountingTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.cache = FakeCache(Path(temporary.name))
+
+    def test_orphan_downloads_and_metadata_are_counted_with_rmtree(self):
+        root, foreign = self.cache.build(shared_inside_repo=False, foreign_link_in_subdir=False, via_symlink=False)
+        repository = root / self.cache.repo
+        (repository / "blobs").mkdir()
+        (repository / "blobs/partial.incomplete").write_bytes(b"p" * 1000)
+        (repository / "refs").mkdir()
+        (repository / "refs/main").write_bytes(b"aaaa")
+        before = ms.hub_size(root)
+        result = ms.delete("small", root)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["freed_bytes"], 4096 + 1000 + 4)
+        self.assertEqual(result["freed_bytes"], before - ms.hub_size(root))
+        self.assertTrue(foreign.exists())
+
+    def test_orphan_downloads_are_counted_when_shared_blobs_require_pruning(self):
+        root, foreign = self.cache.build(shared_inside_repo=True, foreign_link_in_subdir=False, via_symlink=False)
+        repository = root / self.cache.repo
+        (repository / "blobs/ab/partial.incomplete").write_bytes(b"p" * 1000)
+        before = ms.hub_size(root)
+        result = ms.delete("small", root)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["freed_bytes"], 4096 + 1000)
+        self.assertEqual(result["freed_bytes"], before - ms.hub_size(root))
+        self.assertEqual(result["kept_bytes"], 500_000)
+        self.assertTrue(foreign.exists())
+
+    def test_symlink_target_outside_repository_is_not_reported_as_freed(self):
+        root, foreign = self.cache.build(shared_inside_repo=False, foreign_link_in_subdir=False, via_symlink=False)
+        target = root.parent / "user-owned.bin"
+        target.write_bytes(b"u" * 1000)
+        (root / self.cache.repo / "extra.bin").symlink_to(target)
+        result = ms.delete("small", root)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["freed_bytes"], 4096)
+        self.assertTrue(target.exists())
+        self.assertTrue(foreign.exists())
+
+    def test_orphan_surviving_partial_failure_is_not_reported_as_freed(self):
+        root, foreign = self.cache.build(shared_inside_repo=True, foreign_link_in_subdir=False, via_symlink=False)
+        orphan = root / self.cache.repo / "blobs/ab/partial.incomplete"
+        orphan.write_bytes(b"p" * 1000)
+        original = Path.unlink
+
+        def unlink(path, *args, **kwargs):
+            if path == orphan:
+                raise PermissionError("partial download cleanup denied")
+            return original(path, *args, **kwargs)
+
+        with mock.patch.object(Path, "unlink", unlink):
+            result = ms.delete("small", root)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["freed_bytes"], 4096)
+        self.assertTrue(orphan.exists())
+        self.assertTrue(foreign.exists())
+
+
 class SnapshotWalkingTests(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()

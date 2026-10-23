@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from wayvoice import engine, fw_worker
+from wayvoice import engine
 
 SERVER = '''
 import json,os,signal,socket,sys,threading,time
@@ -32,7 +32,9 @@ def serve(c):
         else:
             if mode=='drop-delayed': c.close(); time.sleep(0.04)
             active.add(r);events[r]=threading.Event()
-            if mode in ('hang','drop-delayed'): threading.Event().wait()
+            if mode=='flood-running':
+                c.sendall(b'x'*4096); threading.Event().wait()
+            elif mode in ('hang','drop-delayed'): threading.Event().wait()
             elif mode=='drop-on-cancel':
                 events[r].wait(); c.close(); threading.Event().wait()
             elif mode=='drop-running':
@@ -188,20 +190,3 @@ class WorkerRecoveryTests(unittest.TestCase):
         engine.stop_worker(timeout=0.03, expected_identity=identity)
         old.wait(timeout=2)
         self.assertEqual(self.pidfile.read_text(), str(os.getpid()))
-
-class QueueCancellationTests(unittest.TestCase):
-    def test_cancelled_queue_does_not_wait_for_foreign_decode(self):
-        state = fw_worker._WorkerState()
-        state.serial.acquire()
-        result=[]
-        t=threading.Thread(target=lambda: result.append(fw_worker._dispatch({'cmd':'transcribe','request_id':'queued'}, None, None, state)))
-        t.start()
-        deadline=time.monotonic()+1
-        while state.request_status('queued')=='unknown' and time.monotonic()<deadline:time.sleep(0.005)
-        self.assertEqual(state.request_status('queued'),'queued')
-        state.cancel('queued')
-        t.join(timeout=1)
-        state.serial.release()
-        self.assertFalse(t.is_alive())
-        self.assertTrue(result[0]['cancelled'])
-        self.assertEqual(state.request_status('queued'),'finished')

@@ -28,6 +28,8 @@ WORKER_PING_TIMEOUT = 1.5
 WARM_TIMEOUT = 900.0
 WORKER_CANCEL_GRACE = 3.0
 WORKER_RETRY_BACKOFF = 60.0
+# A one-MiB transcript may expand sixfold when JSON escapes Unicode.
+MAX_WORKER_RESPONSE_BYTES = 8 * 1024 * 1024
 _job_lock = Lock()
 _worker_jobs: dict[Event, int] = {}
 _unresolved_worker_jobs: dict[Event | None, set[tuple[int, str]]] = {}
@@ -73,16 +75,29 @@ def _worker_call(payload: dict[str, Any], timeout: float, path: Path | None = No
     """
     target = path or locations.worker_socket_path()
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.settimeout(max(0.1, timeout))
+    deadline = time.monotonic() + max(0.001, timeout)
+
+    def remaining():
+        seconds = deadline - time.monotonic()
+        if seconds <= 0:
+            raise TimeoutError("worker response deadline exceeded")
+        sock.settimeout(seconds)
+
     try:
+        remaining()
         sock.connect(str(target))
+        remaining()
         sock.sendall((json.dumps(payload) + "\n").encode("utf-8"))
         data = bytearray()
         while not data.endswith(b"\n"):
-            chunk = sock.recv(65536)
+            remaining()
+            chunk = sock.recv(min(65536, MAX_WORKER_RESPONSE_BYTES + 1 - len(data)))
             if not chunk:
                 break
             data.extend(chunk)
+            if len(data) > MAX_WORKER_RESPONSE_BYTES:
+                raise ValueError("worker response exceeds size limit")
+        remaining()
         if not data:
             raise OSError("worker closed the connection")
         reply = json.loads(bytes(data).decode("utf-8"))
@@ -520,7 +535,7 @@ def _worker_request(payload: dict[str, Any], request_id: str, timeout: float, ca
                     _recover_worker_request(request_id, identity, cancel_event)
                     raise failure
                 try:
-                    chunk = sock.recv(65536)
+                    chunk = sock.recv(min(65536, MAX_WORKER_RESPONSE_BYTES + 1 - len(data)))
                 except TimeoutError:
                     continue
                 except OSError as exc:
@@ -532,7 +547,8 @@ def _worker_request(payload: dict[str, Any], request_id: str, timeout: float, ca
                     if not resolved:
                         raise RuntimeError("Worker request is still running; fallback was blocked.") from exc
                     raise WorkerUnavailable(f"worker connection failed: {exc}") from exc
-                if not chunk:
+                oversized = len(data) + len(chunk) > MAX_WORKER_RESPONSE_BYTES
+                if not chunk or oversized:
                     resolved = _recover_lost_worker_request(request_id, identity, cancel_deadline, cancel_event)
                     if failure is not None:
                         raise failure
@@ -540,7 +556,8 @@ def _worker_request(payload: dict[str, Any], request_id: str, timeout: float, ca
                         raise TranscriptionCancelled("Transcription cancelled")
                     if not resolved:
                         raise RuntimeError("Worker request is still running; fallback was blocked.")
-                    raise WorkerUnavailable("worker closed the connection")
+                    raise WorkerUnavailable("worker response exceeds size limit" if oversized
+                                            else "worker closed the connection")
                 data.extend(chunk)
                 if data.endswith(b"\n"):
                     break
