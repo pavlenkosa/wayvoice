@@ -183,7 +183,6 @@ class StatusSnapshotTests(unittest.TestCase):
         cfg = {"engine": "faster-whisper", "model": "small"}
         with mock.patch.object(status, "request", return_value={"ok": True}), \
                 mock.patch.object(status, "load_config", return_value=cfg) as load, \
-                mock.patch.object(status, "shortcut_support", return_value=(True, "")), \
                 mock.patch.object(status, "portal_shortcut_desktop", return_value=False), \
                 mock.patch.object(ctx.integration, "_missing_required", return_value=[]):
             reply, painted_cfg, missing = ctx.status._status_snapshot()
