@@ -56,7 +56,7 @@ class VocabularyEditor:
             self.editor.update_property([Gtk.AccessibleProperty.DESCRIPTION], [str(exc)])
             self.editor.grab_focus()
             return False
-        self.editor.update_property([Gtk.AccessibleProperty.DESCRIPTION], [None])
+        self.editor.reset_property(Gtk.AccessibleProperty.DESCRIPTION)
         return True
 
     def preview(self, *_args):
