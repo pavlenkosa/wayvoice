@@ -2,7 +2,7 @@
 
 [WayVoice](../README.md)
 
-Development and publication are separate decisions. A commit or version bump on `main` never publishes. Only pushing an existing `vMAJOR.MINOR.PATCH` tag starts the release workflow. Package versions currently remain numeric; alpha/beta status comes from release policy. Suffix versions are rejected until package-manager ordering and updater comparison have been implemented and tested. The current policy is alpha, including numeric versions: new releases are marked Pre-release and are not promoted as Latest. Do not change old published versions or tags.
+Development and publication are separate decisions. A commit or version bump on `main` never publishes. Only pushing an existing `vMAJOR.MINOR.PATCH` tag starts the release workflow. Package versions currently remain numeric; alpha/beta status comes from release policy. Suffix versions are rejected until package-manager ordering and updater comparison have been implemented and tested. The current policy is beta, including numeric versions: new releases are marked Pre-release and are not promoted as Latest. Do not change old published versions or tags.
 
 ## Branches and review
 
