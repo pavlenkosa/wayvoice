@@ -2,7 +2,7 @@
 import math
 import threading
 import time
-from gi.repository import Gtk
+from gi.repository import Adw, Gtk
 from .. import injector
 from ..config import load_config
 from .async_tasks import TaskRunner
@@ -126,10 +126,12 @@ def show_delivery_test(parent):
     notice = Gtk.Label(label=t('delivery_test.notice'), wrap=True, xalign=0)
     box.append(notice)
     box.append(Gtk.Label(label=TEST_TEXT, selectable=True, wrap=True, xalign=0))
-    mode = Gtk.DropDown(model=Gtk.StringList.new([t('delivery_test.'+m) for m in MODES]))
+    mode = Adw.ComboRow(title=t('delivery_test.mode'))
+    mode.set_model(Gtk.StringList.new([t('delivery_test.'+m) for m in MODES]))
     mode.set_selected(MODES.index(saved.get('paste_mode')) if saved.get('paste_mode') in MODES else 0)
-    mode.update_property([Gtk.AccessibleProperty.LABEL], [t('delivery_test.mode')])
-    box.append(mode)
+    modes = Adw.PreferencesGroup()
+    modes.add(mode)
+    box.append(modes)
     status = Gtk.Label(label=t('delivery_test.idle'), wrap=True, xalign=0, selectable=True)
     box.append(status)
     previous = getattr(app, 'delivery_test_result', None)
@@ -157,8 +159,8 @@ def show_delivery_test(parent):
         if check.warning:
             text += '\n'+check.warning
         status.set_text(text)
-        if state != announced_state and hasattr(status, 'announce'):
-            status.announce(text, Gtk.AccessibleAnnouncementPriority.MEDIUM)
+        if state != announced_state and hasattr(win, 'announce'):
+            win.announce(text, Gtk.AccessibleAnnouncementPriority.MEDIUM)
         announced_state = state
         start.set_sensitive(not check.running)
         mode.set_sensitive(not check.running)
