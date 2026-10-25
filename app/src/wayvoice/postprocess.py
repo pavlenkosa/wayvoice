@@ -136,7 +136,7 @@ def _spacing(text: str) -> str:
     # Newline trimming written without the [\t ]*\n[\t ]* shape: excluding the
     # newline from the runs keeps one way to match, so no super-linear retry.
     text = re.sub(r"[^\S\n]*\n[^\S\n]*", "\n", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"\n\n\n+", "\n\n", text)
     text = re.sub(r"[ \t]{2,}", " ", text)
     return text.strip()
 

@@ -25,7 +25,7 @@ def main():
     lock = (ROOT / 'packaging/appimage/runtime-requirements.txt').read_text()
     if pins(native) != pins(lock): raise ValueError('Portable recognition dependency versions differ from native')
     for line in lock.splitlines():
-        if line and not line.startswith('#') and not re.fullmatch(r'\S+==\S+ --hash=sha256:[a-f0-9]{64}', line):
+        if line and not line.startswith('#') and not re.fullmatch(r'[^=\s]+==\S+ --hash=sha256:[a-f0-9]{64}', line):
             raise ValueError('Recognition dependencies must be pinned with SHA256')
     if not (ROOT / 'packaging/appimage/AppRun').read_text().startswith('#!/bin/sh\n'):
         raise ValueError('Missing AppImage entry point')
