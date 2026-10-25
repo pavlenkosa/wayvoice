@@ -149,12 +149,17 @@ def show_delivery_test(parent):
     def publish(result):
         app.delivery_test_result = result
 
+    announced_state = None
     def changed():
+        nonlocal announced_state
         state = check.state
         text = t('delivery_test.'+state, seconds=check.seconds)
         if check.warning:
             text += '\n'+check.warning
         status.set_text(text)
+        if state != announced_state and hasattr(status, 'announce'):
+            status.announce(text, Gtk.AccessibleAnnouncementPriority.MEDIUM)
+        announced_state = state
         start.set_sensitive(not check.running)
         mode.set_sensitive(not check.running)
         cancel.set_visible(check.running)

@@ -37,4 +37,21 @@ The compositor must deliver both commands in order, including release when the
 focus changes. WayVoice's recording time limit remains a safety stop. These
 bindings do not register themselves; configure them in your desktop or compositor.
 The commands acknowledge the gesture immediately; recording failures appear in the app’s status.
-Use **Open indicator** on Home to show the compact recording status window.
+Use **Open indicator** in the main menu to show the compact recording status window.
+
+## Check text delivery
+
+**Text Delivery** in Settings distinguishes recognition readiness from input prerequisites.
+Finding a clipboard tool or helper socket does not prove that an application accepted text.
+The integration check reads prerequisites; it does not type or change permissions.
+
+Choose **Check Text Input** in Settings or at the end of first-run setup. The check replaces
+clipboard contents with `WayVoice: Привет, мир! Hello 123`; previous clipboard contents are
+not restored. Select Standard, Terminal or Clipboard Only, then start the five-second test
+and switch to the intended text field. No Enter is sent. Return to WayVoice yourself and
+confirm whether the text appeared. Test mode does not change saved paste settings.
+
+A successful paste command and a user-confirmed result are displayed separately. If only
+copying succeeds, paste manually. Closing or cancelling before keyboard input prevents
+unsent keys; the clipboard may already have changed. The last check's time, mode and
+outcome last only for the current application session.
