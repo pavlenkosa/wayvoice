@@ -15,7 +15,7 @@ def main():
     import ctranslate2
     import faster_whisper
     import onnxruntime
-    from . import __version__, service
+    from . import __version__, service, injector
     from .paths import app_dir
     if not Gtk.init_check():
         raise RuntimeError('GTK display unavailable for AppImage smoke test')
@@ -30,11 +30,15 @@ def main():
     root = app_dir().parent
     subprocess.run([str(root / 'parakeet/bin/nemo-speech'), '--version'], check=True)
     subprocess.run(['pw-record', '--help'], check=True, stdout=subprocess.DEVNULL)
+    client = injector.ydotool_command()
+    if not client:
+        raise RuntimeError('Portable paste client unavailable')
+    subprocess.run([client, '--help'], check=True, stdout=subprocess.DEVNULL)
     print(json.dumps({'version': __version__, 'python': os.environ.get('WAYVOICE_PYTHON'),
                       'gtk': Gtk.get_minor_version(), 'adw': Adw.get_minor_version(),
                       'runtime_imports': [cairo.version, av.__version__, ctranslate2.__version__,
                                           faster_whisper.__version__, onnxruntime.__version__],
-                      'probe': 'runtime imports and resources'}))
+                      'paste_client': client, 'probe': 'runtime imports and resources'}))
 
 
 if __name__ == '__main__':

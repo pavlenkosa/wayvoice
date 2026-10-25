@@ -102,6 +102,15 @@ def main():
     shutil.copytree(source / 'app', target, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
     for name in ('wayvoice', 'wayvoice-settings', 'wayvoice-daemon', 'wayvoice-engine-setup'):
         shutil.copy2(source / 'scripts' / name, prefix / 'bin' / name)
+    # The host helper owns uinput; the portable application still needs a client.
+    # Reuse the native package's vendored build, without shipping/starting a daemon.
+    client_build = work / 'ydotool'
+    run(str(source / 'scripts/build-ydotool.sh'), str(client_build))
+    client_bundle = prefix / 'lib/wayvoice/ydotool'
+    client_bundle.mkdir()
+    shutil.copy2(client_build / 'ydotool', client_bundle / 'ydotool')
+    for name in ('LICENSE', 'README.wayvoice.md'):
+        shutil.copy2(source / 'third_party/ydotool' / name, client_bundle / name)
     runtime = prefix / 'lib/wayvoice/runtime'
     site = runtime / 'lib/python3.12/site-packages'
     site.mkdir(parents=True)

@@ -69,7 +69,8 @@ def validate_tree(appdir, version, commit=None):
     if info.get('architecture') != 'x86_64':
         raise ValueError('AppImage architecture mismatch')
     for relative in ('AppRun', 'usr/bin/python3.12', 'usr/bin/wayvoice', 'usr/bin/wayvoice-settings',
-                     'usr/bin/wl-copy', 'usr/bin/pw-record', 'usr/lib/wayvoice/parakeet/bin/nemo-speech'):
+                     'usr/bin/wl-copy', 'usr/bin/pw-record', 'usr/lib/wayvoice/ydotool/ydotool',
+                     'usr/lib/wayvoice/parakeet/bin/nemo-speech'):
         if not os.access(appdir / relative, os.X_OK):
             raise ValueError(f'Missing executable: {relative}')
     if not (appdir / 'usr/lib/wayvoice/runtime/.engine-v1-ready').is_file():

@@ -20,7 +20,7 @@ class ArtifactTests(unittest.TestCase):
         self.runtime = self.output / 'usr/lib/wayvoice/runtime'
         self.runtime.mkdir(parents=True)
         (self.runtime / '.engine-v1-ready').touch()
-        for name in ('AppRun','usr/bin/python3.12','usr/bin/wayvoice','usr/bin/wayvoice-settings','usr/bin/wl-copy','usr/bin/pw-record','usr/lib/wayvoice/parakeet/bin/nemo-speech'):
+        for name in ('AppRun','usr/bin/python3.12','usr/bin/wayvoice','usr/bin/wayvoice-settings','usr/bin/wl-copy','usr/bin/pw-record','usr/lib/wayvoice/ydotool/ydotool','usr/lib/wayvoice/parakeet/bin/nemo-speech'):
             path=self.output/name; path.parent.mkdir(parents=True,exist_ok=True); path.touch(); path.chmod(0o755)
 
         for name in ('usr/share/common-licenses/LGPL-2.1', 'usr/share/doc/wayvoice/third-party/type2-runtime/LICENSE'):
@@ -31,6 +31,11 @@ class ArtifactTests(unittest.TestCase):
     def test_missing_license_rejected(self):
         (self.output / 'usr/share/common-licenses/LGPL-2.1').unlink()
         with self.assertRaisesRegex(ValueError, 'Missing license'):
+            build.validate_tree(self.output, '1.2.3')
+
+    def test_missing_paste_client_rejected(self):
+        (self.output / 'usr/lib/wayvoice/ydotool/ydotool').unlink()
+        with self.assertRaisesRegex(ValueError, 'Missing executable.*ydotool'):
             build.validate_tree(self.output, '1.2.3')
 
     def test_valid_tree(self):
