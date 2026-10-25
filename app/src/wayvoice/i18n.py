@@ -1189,3 +1189,6 @@ _DELIVERY_TEST = {
 'previous':'Последняя проверка в этой сессии: {when}, {mode}: {outcome}'}}
 for _language, _labels in _DELIVERY_TEST.items():
     _TRANSLATIONS[_language].update({'delivery_test.' + key: value for key, value in _labels.items()})
+
+_EN['delivery.shortcut_backend_unavailable'] = 'The GNOME shortcut service is not running.'
+_RU['delivery.shortcut_backend_unavailable'] = 'Служба горячих клавиш GNOME не запущена.'

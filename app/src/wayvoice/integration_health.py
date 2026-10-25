@@ -44,6 +44,11 @@ def _binding(cfg, remaining):
                             text=True, check=True, timeout=remaining())
         return ast.literal_eval(cp.stdout.removeprefix('@as ').strip())
 
+    owner = subprocess.run(['gdbus', 'call', '--session', '--dest', 'org.freedesktop.DBus',
+        '--object-path', '/org/freedesktop/DBus', '--method', 'org.freedesktop.DBus.NameHasOwner',
+        'org.gnome.SettingsDaemon.MediaKeys'], capture_output=True, text=True, timeout=remaining(), check=True)
+    if owner.stdout.strip() != '(true,)':
+        return 'backend_unavailable'
     paths = read(shortcut.SCHEMA, 'custom-keybindings')
     if not isinstance(paths, list) or shortcut.KEY not in paths:
         return 'missing'

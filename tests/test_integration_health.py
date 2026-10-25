@@ -49,13 +49,13 @@ class HealthTests(unittest.TestCase):
         self.assertEqual(result['reason'],'timeout')
 
     def test_readback_quotes_command_and_never_writes(self):
-        outputs=[repr([health.shortcut.KEY]),repr('<Control>F8'),repr("'/opt/Voice App/wayvoice' toggle")]
+        outputs=['(true,)',repr([health.shortcut.KEY]),repr('<Control>F8'),repr("'/opt/Voice App/wayvoice' toggle")]
         with mock.patch.object(health.shortcut,'manual_shortcut_required',return_value=False), \
              mock.patch.object(health.shortcut,'manual_command',return_value="'/opt/Voice App/wayvoice' toggle"), \
              mock.patch.object(health.subprocess,'run',side_effect=[subprocess.CompletedProcess([],0,s) for s in outputs]) as run:
             result=health.collect_health({'shortcut':'<Primary>F8'})
         self.assertEqual(result['shortcut'],'matched')
-        self.assertTrue(all(c.args[0][:2]==['gsettings','get'] for c in run.call_args_list))
+        self.assertTrue(all(c.args[0][:2]==['gsettings','get'] for c in run.call_args_list[1:]))
         self.assertTrue(all(0<c.kwargs['timeout']<=3 for c in run.call_args_list))
 
     def test_passive_check_cannot_start_or_send(self):
@@ -65,3 +65,10 @@ class HealthTests(unittest.TestCase):
             result=health.collect_health({'paste_mode':'copy'})
         self.assertEqual(result['reason'],'copy_only')
         inject.assert_not_called(); copy.assert_not_called(); start.assert_not_called()
+
+    def test_saved_binding_does_not_hide_missing_gnome_backend(self):
+        with mock.patch.object(health.shortcut,'manual_shortcut_required',return_value=False), \
+             mock.patch.object(health.subprocess,'run',return_value=subprocess.CompletedProcess([],0,'(false,)')) as run:
+            result=health.collect_health({'shortcut':'F8'})
+        self.assertEqual(result['shortcut'],'backend_unavailable')
+        self.assertEqual(run.call_count,1)

@@ -81,7 +81,6 @@ class PortalControllerTests(unittest.TestCase):
         for portal, expected in [({'state': 'active', 'trigger': 'Meta+F9'}, 'Meta+F9'),
                                  ({'state': 'needs_configuration', 'trigger': ''}, 'shortcut.disabled')]:
             with mock.patch('wayvoice.ui.controllers.status.request', return_value={'ok': True, 'shortcut_portal': portal}), \
-                    mock.patch('wayvoice.ui.controllers.status.shortcut_support', return_value=(False, 'manual')), \
                     mock.patch('wayvoice.ui.controllers.status.load_config', return_value={'shortcut': 'F8'}):
                 ctx.state.t = lambda key, **kw: key
                 reply, _, _ = ctx.status._status_snapshot()

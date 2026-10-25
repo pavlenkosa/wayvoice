@@ -21,10 +21,8 @@ from ... import pkgsys
 from ... import service
 from ...cli import request
 from ...config import load_config, number
-from ...engine import engine_from_config, engine_label
 from ...i18n import tr
-from ...models import display_name
-from ...shortcut import label_for, shortcut_support, manual_command, portal_shortcut_desktop
+from ...shortcut import label_for, manual_command, portal_shortcut_desktop
 
 
 class StatusController:
