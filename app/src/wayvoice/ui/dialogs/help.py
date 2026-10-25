@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 from gi.repository import Gtk
-from ..widgets.labels import make_label
+from ..widgets.labels import make_label, close_on_escape
 
 REPOSITORY = 'https://github.com/pavlenkosa/wayvoice'
 
@@ -27,4 +27,5 @@ def show_help(parent):
     scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
     scroll.set_child(box)
     window.set_child(scroll)
+    close_on_escape(window)
     window.present()

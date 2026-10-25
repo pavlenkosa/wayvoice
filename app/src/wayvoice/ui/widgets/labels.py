@@ -27,3 +27,16 @@ def index_or_zero(values, value):
         return values.index(value)
     except ValueError:
         return 0
+
+
+def close_on_escape(window):
+    """Close utility windows through their normal close-request policy."""
+    from gi.repository import Gdk
+    controller = Gtk.EventControllerKey()
+    def pressed(_controller, key, _code, _modifiers):
+        if key == Gdk.KEY_Escape:
+            window.close()
+            return True
+        return False
+    controller.connect('key-pressed', pressed)
+    window.add_controller(controller)

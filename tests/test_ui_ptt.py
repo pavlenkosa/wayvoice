@@ -35,11 +35,8 @@ class HoldUITests(unittest.TestCase):
                     self.assertEqual(bool(mode.get_subtitle()), not portal)
                     self.assertTrue(window.context.preferences.has_unsaved_changes())
                     self.assertEqual(window.context.preferences._draft_values()['shortcut_mode'], 'toggle')
-                    button = window.context.home.indicator_button
-                    self.assertTrue(button.get_visible())
-                    self.assertTrue(button.get_label())
                     with mock.patch.object(window, 'get_application') as application:
-                        button.emit('clicked')
+                        window.lookup_action('indicator').activate(None)
                         application.return_value.open_indicator.assert_called_once()
                 finally:
                     window.destroy()

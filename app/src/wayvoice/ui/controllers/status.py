@@ -80,15 +80,6 @@ class StatusController:
         else:
             self._action_error = ""
 
-    def _update_cards(self, cfg=None):
-        cfg = self.ctx.state.cfg if cfg is None else cfg
-        engine = engine_from_config(cfg)
-        self.ctx.home.engine_card.set_text(engine_label(cfg.get("engine")) or "—")
-        # Only an engine with its own model list has a model to show; the others keep
-        # theirs (or none) among their own settings.
-        self.ctx.home.model_card.set_text(display_name(str(cfg.get("model", "small"))) if engine and engine.uses_models else "—")
-        self.ctx.home.paste_card.set_text({"standard": "Ctrl+V", "terminal": "Ctrl+Shift+V", "copy": self.ctx.state.t("paste.clipboard_short")}.get(str(cfg.get("paste_mode")), "—"))
-
     def _set_state_style(self, state):
         if self._toggle_pending:
             self.ctx.home.mic_button.set_sensitive(False)
@@ -215,7 +206,6 @@ class StatusController:
         reply, cfg, missing_deps = snapshot
         if self._toggle_pending and self._toggle_ack_seq == self._toggle_seq and reply.get("_toggle_ack_seq") == self._toggle_seq:
             self._toggle_pending = False
-        self._update_cards(cfg)
         if self.ctx.selection is not None:
             self.ctx.preferences.sync_effective_selection(cfg)
             self.ctx.selection.paint(reply, cfg)

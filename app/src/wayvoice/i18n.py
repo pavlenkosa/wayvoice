@@ -1118,3 +1118,9 @@ def tr(key: str, language: str | None = None, **kwargs: Any) -> str:
 
 _RU["update.external"] = "Обновите эту установку вручную. Для AppImage завершите WayVoice и замените файл. Обновление в приложении доступно только для установленного DEB или RPM."
 _EN["update.external"] = "Update this installation manually. For AppImage, quit WayVoice and replace the file. In-app installation requires an installed DEB or RPM."
+
+# Native navigation and microphone-level labels.
+_TRANSLATIONS_09 = {'en': {'menu.main': 'Main Menu', 'audio.level': 'Microphone Level'},
+                    'ru': {'menu.main': 'Главное меню', 'audio.level': 'Уровень микрофона'}}
+for _language, _labels in _TRANSLATIONS_09.items():
+    _TRANSLATIONS[_language].update(_labels)

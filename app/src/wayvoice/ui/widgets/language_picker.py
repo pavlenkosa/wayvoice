@@ -75,6 +75,7 @@ class LanguagePicker:
             self._dropdown = dropdown
             self.row = Adw.ActionRow(title=title)
             self.row.add_suffix(dropdown)
+            self.row.set_activatable_widget(dropdown)
         else:
             self._dropdown = None
             combo = Adw.ComboRow(title=title)

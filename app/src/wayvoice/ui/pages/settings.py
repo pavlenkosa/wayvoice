@@ -54,14 +54,18 @@ class SettingsPage:
         audio.add(self.microphone)
         self.audio_level = Adw.ActionRow(title=self.ctx.state.t("audio.check"),
                                         subtitle=self.ctx.state.t("audio.check_hint"))
-        self.audio_check = Gtk.Button(label=self.ctx.state.t("audio.check"), valign=Gtk.Align.CENTER)
+        self.audio_check = Gtk.Button(icon_name="media-record-symbolic", tooltip_text=self.ctx.state.t("audio.check"), valign=Gtk.Align.CENTER)
         self.audio_check.connect("clicked", self.ctx.audio.check)
         self.audio_level.add_suffix(self.audio_check)
         audio.add(self.audio_level)
         self.audio_meter = Gtk.LevelBar(min_value=0, max_value=1, margin_start=12, margin_end=12)
         self.audio_meter.set_size_request(80, -1)
         self.audio_meter.set_valign(Gtk.Align.CENTER)
-        self.audio_level.add_suffix(self.audio_meter)
+        meter_row = Adw.ActionRow(title=self.ctx.state.t('audio.level'))
+        self.audio_meter.set_hexpand(True)
+        meter_row.add_suffix(self.audio_meter)
+        self.audio_meter.update_property([Gtk.AccessibleProperty.LABEL], [self.ctx.state.t('audio.level')])
+        audio.add(meter_row)
         self.microphone.connect("notify::selected", self.ctx.audio.selection_changed)
         self.audio_feedback = Adw.SwitchRow(title=self.ctx.state.t("audio.cues"),
                                           subtitle=self.ctx.state.t("audio.cues_hint"))
@@ -98,6 +102,9 @@ class SettingsPage:
         self.engine_spinner.set_visible(False)
         self.engine_status_row.add_suffix(self.engine_spinner)
         engine_group.add(self.engine_status_row)
+        self.engine_error = Gtk.Label(xalign=0, wrap=True, selectable=True, visible=False)
+        self.engine_error.add_css_class('error')
+        engine_group.add(self.engine_error)
 
         self.model = Adw.ComboRow(title=self.ctx.state.t("settings.model"))
         self.model.set_model(Gtk.StringList.new(PRESET_LABELS))
@@ -116,6 +123,10 @@ class SettingsPage:
         # same coalescing as everything else instead of scanning per character.
         self.custom_model.connect("changed", lambda *_: self.ctx.models._refresh_model_state())
         engine_group.add(self.custom_model)
+        self.custom_model_error = Gtk.Label(xalign=0, wrap=True, visible=False)
+        self.custom_model_error.add_css_class('error')
+        engine_group.add(self.custom_model_error)
+        self.custom_model.connect('changed', lambda *_: self.custom_model_error.set_visible(False))
 
         self.model_state_row = Adw.ActionRow(title=self.ctx.state.t("store.state"), subtitle=self.ctx.state.t("health.checking"))
         # The download has to be reachable without changing the model: a model that is

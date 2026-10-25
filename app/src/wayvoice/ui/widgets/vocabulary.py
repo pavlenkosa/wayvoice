@@ -14,7 +14,7 @@ class VocabularyEditor:
         self.buffer = Gtk.TextBuffer()
         self.buffer.set_text(str(ctx.state.cfg.get('vocabulary_rules', '')))
         self.buffer.connect('insert-text', self._limit)
-        editor = Gtk.TextView(buffer=self.buffer, monospace=True, wrap_mode=Gtk.WrapMode.WORD_CHAR,
+        editor = self.editor = Gtk.TextView(buffer=self.buffer, monospace=True, wrap_mode=Gtk.WrapMode.WORD_CHAR,
                               top_margin=8, bottom_margin=8, left_margin=10, right_margin=10)
         editor.set_tooltip_text(t('vocab.example'))
         scroll = Gtk.ScrolledWindow(min_content_height=120, max_content_height=180, propagate_natural_height=True)
@@ -53,7 +53,10 @@ class VocabularyEditor:
             parse_rules(self.rules_text())
         except ValueError as exc:
             self.result.set_text(str(exc))
+            self.editor.update_property([Gtk.AccessibleProperty.DESCRIPTION], [str(exc)])
+            self.editor.grab_focus()
             return False
+        self.editor.update_property([Gtk.AccessibleProperty.DESCRIPTION], [None])
         return True
 
     def preview(self, *_args):

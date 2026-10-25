@@ -38,8 +38,8 @@ class TestDialogs(unittest.TestCase):
         dialog = self.find(self.window.t('store.download_title'))
         self.assertTrue(dialog.get_modal())
         self.assertIs(dialog.get_transient_for(), self.window)
-        buttons = dialog.get_child().get_last_child()
-        buttons.get_last_child().emit('clicked')
+        self.assertEqual(dialog.get_close_response(), 'cancel')
+        dialog.response('download')
         confirmed.assert_called_once()
         self.assertIs(confirmed.call_args.args[1], dialog)
 
@@ -51,8 +51,25 @@ class TestDialogs(unittest.TestCase):
         confirmed = mock.Mock()
         delete_confirmation(self.window,'MyOrg/MyModel','Model',self.window.t,confirmed)
         dialog = self.find(self.window.t('store.delete_title'))
-        dialog.get_child().get_last_child().get_last_child().emit('clicked')
+        self.assertEqual(dialog.get_default_response(), 'cancel')
+        dialog.response('delete')
         self.assertEqual(confirmed.call_args.args[2], 'MyOrg/MyModel')
+
+    def test_cancelled_download_never_confirms(self):
+        confirmed = mock.Mock()
+        download_confirmation(self.window, 'small', 1500, self.window.t, 'en', confirmed)
+        self.find(self.window.t('store.download_title')).response('cancel')
+        confirmed.assert_not_called()
+
+    def test_unsaved_close_means_stay_and_responds_once(self):
+        from wayvoice.ui.dialogs.confirmations import unsaved_confirmation
+        respond = mock.Mock()
+        unsaved_confirmation(self.window, self.window.t, respond)
+        dialog = self.find(self.window.t('settings.unsaved_title'))
+        self.assertEqual(dialog.get_close_response(), 'stay')
+        dialog.response('stay')
+        dialog.response('save')
+        respond.assert_called_once_with('stay')
 
     def test_show_about(self):
         show_about(self.window)

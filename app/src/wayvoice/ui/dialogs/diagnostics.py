@@ -1,7 +1,7 @@
 """Review a report before replacing the clipboard or saving a private copy."""
 from gi.repository import Gio, GLib, Gtk
 
-from ..widgets.labels import make_label
+from ..widgets.labels import make_label, close_on_escape
 
 
 def diagnostics_preview(parent, text, t, on_copy):
@@ -81,5 +81,6 @@ def diagnostics_preview(parent, text, t, on_copy):
     win.connect("close-request", dispose)
     win.connect("unrealize", dispose)
     win.set_child(box)
+    close_on_escape(win)
     win.present()
     return win

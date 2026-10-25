@@ -6,8 +6,6 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw
 
-from ...engine import engine_label
-from ...models import display_name
 from ...shortcut import label_for
 from ..widgets.labels import make_label
 from ..health_presentation import microphone_accessibility
@@ -36,11 +34,6 @@ class HomePage:
         text.append(make_label(self.ctx.state.t("home.title"), "hero-title", wrap=True))
         text.append(make_label(self.ctx.state.t("home.subtitle"), "hero-subtitle", wrap=True))
         intro.append(text)
-        indicator = Gtk.Button(label=self.ctx.state.t("indicator.open"))
-        indicator.set_valign(Gtk.Align.CENTER)
-        indicator.set_action_name("win.indicator")
-        self.indicator_button = indicator
-        intro.append(indicator)
         self.status_pill = make_label(self.ctx.state.t("status.starting"), "status-pill")
         self.status_pill.set_valign(Gtk.Align.CENTER)
         intro.append(self.status_pill)
@@ -114,13 +107,6 @@ class HomePage:
             self.setup_rows[target] = row
         outer.append(setup_group)
 
-        grid = Gtk.Grid(column_spacing=12, row_spacing=12)
-        grid.set_column_homogeneous(True)
-        self.engine_card = self._metric_card(grid, 0, self.ctx.state.t("card.engine"), engine_label(self.ctx.state.cfg.get("engine")) or "—", "applications-engineering-symbolic")
-        self.model_card = self._metric_card(grid, 1, self.ctx.state.t("card.model"), display_name(str(self.ctx.state.cfg.get("model", "small"))), "applications-system-symbolic")
-        self.paste_card = self._metric_card(grid, 2, self.ctx.state.t("card.paste"), "Ctrl+V", "edit-paste-symbolic")
-        outer.append(grid)
-
         health = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         health.add_css_class("health-card")
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -179,17 +165,3 @@ class HomePage:
         transcript.append(transcript_actions)
         outer.append(transcript)
         return scroller
-
-    def _metric_card(self, grid, column, title, value, icon_name):
-        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7)
-        card.add_css_class("surface-card")
-        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        icon = Gtk.Image.new_from_icon_name(icon_name)
-        icon.set_pixel_size(18)
-        top.append(icon)
-        top.append(make_label(title, "muted", wrap=True))
-        card.append(top)
-        label = make_label(value, "metric-value", wrap=True)
-        card.append(label)
-        grid.attach(card, column, 0, 1, 1)
-        return label

@@ -47,6 +47,9 @@ class FakeCombo:
 
 
 class FakeEntry:
+    def grab_focus(self):
+        self.focused = True
+
     def __init__(self, text):
         self._text = text
 
@@ -154,6 +157,7 @@ class SaveGuardTests(unittest.TestCase):
             mock.patch("wayvoice.ui.controllers.settings.update_config") as save_config,
         ):
             window.preferences._save()
+        self.assertTrue(window.settings.custom_model.focused)
         self.assertEqual(save_config.call_count, 0)
         window.window.toast.add_toast.assert_called_once_with(adw.Toast.return_value)
 

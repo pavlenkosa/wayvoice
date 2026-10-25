@@ -52,12 +52,14 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         self.home = HomePage(ctx)
         self.settings = SettingsPage(ctx)
         self._install_css()
-        for name, callback in (('update', lambda *_: show_update(self)), ('copy-last-text', ctx.status.transcript.copy), ('settings', lambda *_: self.open_settings('engine_status_row')), ('indicator', self._show_indicator), ('help', self._show_help), ('about', self._show_about), ('diagnostics', ctx.status._copy_diagnostics), ('quit', self._quit)):
+        for name, callback in (('close', lambda *_: self.close()), ('save', self._save_settings), ('update', lambda *_: show_update(self)), ('copy-last-text', ctx.status.transcript.copy), ('settings', lambda *_: self.open_settings('engine_status_row')), ('indicator', self._show_indicator), ('help', self._show_help), ('about', self._show_about), ('diagnostics', ctx.status._copy_diagnostics), ('quit', self._quit)):
             action = Gio.SimpleAction.new(name, None)
             action.connect('activate', callback)
             self.add_action(action)
         app.set_accels_for_action('win.copy-last-text', ['<Primary><Shift>c'])
         app.set_accels_for_action('win.settings', ['<Primary>comma'])
+        app.set_accels_for_action('win.close', ['<Primary>w'])
+        app.set_accels_for_action('win.save', ['<Primary>s'])
         self.stack = Adw.ViewStack()
         self.stack.set_vexpand(True)
         self.stack.add_titled_with_icon(self.home.root, 'home', self.t('nav.home'), 'audio-input-microphone-symbolic')
@@ -67,7 +69,7 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         switcher.set_policy(Adw.ViewSwitcherPolicy.WIDE)
         header = Adw.HeaderBar()
         header.set_title_widget(switcher)
-        menu_button = Gtk.MenuButton(icon_name='open-menu-symbolic', tooltip_text=self.t('nav.settings'))
+        menu_button = Gtk.MenuButton(icon_name='open-menu-symbolic', tooltip_text=self.t('menu.main'))
         menu = Gio.Menu()
         for label, action in (('menu.update', 'update'), ('indicator.open', 'indicator'), ('menu.help', 'help'), ('menu.diagnostics', 'diagnostics'), ('menu.about', 'about'), ('menu.close_settings', 'quit')):
             menu.append(self.t(label), f'win.{action}')
@@ -80,6 +82,12 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         toolbar = Adw.ToolbarView()
         toolbar.add_top_bar(header)
         toolbar.set_content(self.stack)
+        bottom = Adw.ViewSwitcherBar(stack=self.stack)
+        toolbar.add_bottom_bar(bottom)
+        narrow = Adw.Breakpoint.new(Adw.BreakpointCondition.parse('max-width: 600sp'))
+        narrow.add_setter(switcher, 'visible', False)
+        narrow.add_setter(bottom, 'reveal', True)
+        self.add_breakpoint(narrow)
         self.toast.set_child(toolbar)
         self.toast.add_css_class('window-root')
         self.set_content(self.toast)
@@ -98,6 +106,10 @@ class WayVoiceWindow(Adw.ApplicationWindow):
         self.tasks.every(650, ctx.status._poll_status)
         self.tasks.every(900, ctx.preferences._poll_engine_settings)
         self.tasks.idle(ctx.audio.refresh)
+
+    def _save_settings(self, *_args):
+        if self.stack.get_visible_child_name() == 'settings' and not self._update_busy:
+            self.context.preferences._save()
 
     def t(self, key, **kwargs):
         return self.state.t(key, **kwargs)

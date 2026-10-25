@@ -501,9 +501,9 @@ class SettingsWindowRegistryTests(unittest.TestCase):
         # has to be documented where the template is typed.
         self.assertIn("{audio}", hint)
 
-    def test_engine_card_shows_the_registry_label(self):
-        self.window.context.status._update_cards()
-        self.assertEqual(self.window.home.engine_card.get_text(), engine_label(DEFAULTS["engine"]))
+    def test_engine_selection_shows_the_registry_label(self):
+        selected = self.window.settings.engine.get_selected_item()
+        self.assertEqual(selected.get_string(), engine_label(DEFAULTS["engine"]))
 
 
 class DaemonSetupTests(unittest.TestCase):
