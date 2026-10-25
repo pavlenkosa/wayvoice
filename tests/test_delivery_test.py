@@ -11,7 +11,9 @@ class PendingTasks:
     def __init__(self):
         self.jobs=[]
         self.closed=False
+        self.timers=0
     def every(self, _interval, callback):
+        self.timers+=1
         self.tick=callback
         return 1
     def run(self, work, done, failed):
@@ -110,3 +112,13 @@ class DeliveryCheckTests(unittest.TestCase):
         self.check.tick()
         self.assertEqual(self.check.state,'failed')
         self.assertFalse(self.check.running)
+
+    def test_immediate_cancel_restart_reuses_one_countdown_source(self):
+        self.start()
+        for _ in range(10):
+            self.check.cancel()
+            self.check.start(self.cfg,'copy')
+        self.assertEqual(self.tasks.timers,1)
+        self.clock.return_value=5
+        self.check.tick()
+        self.assertEqual(len(self.tasks.jobs),1)

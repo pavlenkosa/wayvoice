@@ -22,6 +22,7 @@ class DeliveryCheck:
         self.result = None
         self.cancel_event = threading.Event()
         self.closed = False
+        self._timer_active = False
 
     @property
     def running(self):
@@ -38,15 +39,19 @@ class DeliveryCheck:
         self.state = 'countdown'
         self.deadline = time.monotonic() + 5
         self.tick()
-        self.tasks.every(250, self.tick)
+        if not self._timer_active:
+            self._timer_active = True
+            self.tasks.every(250, self.tick)
 
     def tick(self):
         if self.closed or self.state != 'countdown':
+            self._timer_active = False
             return False
         self.seconds = max(0, math.ceil(self.deadline - time.monotonic()))
         if self.seconds:
             self.changed()
             return True
+        self._timer_active = False
         self.state = 'sending'
         self.changed()
         if not self.tasks.run(lambda: injector.inject(TEST_TEXT, self.cfg, cancel_event=self.cancel_event),
