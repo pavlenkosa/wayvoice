@@ -9,6 +9,7 @@
 [![CI](https://github.com/pavlenkosa/wayvoice/actions/workflows/ci.yml/badge.svg)](https://github.com/pavlenkosa/wayvoice/actions/workflows/ci.yml)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
 ![Status: Beta](https://img.shields.io/badge/status-beta-yellow)
+[![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/pavlenkosa/badge.svg)](https://hub.xerj.org/contributors/pavlenkosa)
 
 [Download](https://github.com/pavlenkosa/wayvoice/releases) · [Getting started](docs/getting-started.md) · [Changelog](CHANGELOG.md) · [Get help](SUPPORT.md)
 
