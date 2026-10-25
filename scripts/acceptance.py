@@ -296,17 +296,40 @@ def read_metrics(root: Path) -> list:
     return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
 
+def _summary(rows):
+    values = sorted(float(row['elapsed_ms']) for row in rows
+                    if row.get('ok') is True and isinstance(row.get('elapsed_ms'), (int, float))
+                    and not isinstance(row['elapsed_ms'], bool)
+                    and math.isfinite(row['elapsed_ms']) and row['elapsed_ms'] >= 0)
+    outcomes = {}
+    for row in rows:
+        outcome = row.get('outcome') or ('completed' if row.get('ok') is True else 'error')
+        outcomes[outcome] = outcomes.get(outcome, 0) + 1
+    return {'attempted': len(rows), 'ok': sum(row.get('ok') is True for row in rows),
+            'outcomes': outcomes, 'n': len(values),
+            'median_ms': statistics.median(values) if values else None,
+            'p95_ms': values[math.ceil(.95 * len(values)) - 1] if values else None,
+            'max_ms': max(values) if values else None}
+
+
 def summarize(rows: list) -> dict:
+    """Never pool latencies across different model/settings conditions."""
     result = {}
+    fields = ('settings_sha256', 'engine', 'model', 'device', 'language')
     for phase in ('cold', 'warm', 'functional'):
-        values = sorted(float(row['elapsed_ms']) for row in rows
-                        if row.get('phase') == phase and row.get('ok') is True
-                        and isinstance(row.get('elapsed_ms'), (int, float))
-                        and not isinstance(row['elapsed_ms'], bool)
-                        and math.isfinite(row['elapsed_ms']) and row['elapsed_ms'] >= 0)
-        result[phase] = {'n': len(values), 'median_ms': statistics.median(values) if values else None,
-                         'p95_ms': values[math.ceil(.95 * len(values)) - 1] if values else None,
-                         'max_ms': max(values) if values else None}
+        selected = [row for row in rows if row.get('phase') == phase]
+        grouped = {}
+        for row in selected:
+            key = tuple(row.get(field) for field in fields)
+            grouped.setdefault(key, []).append(row)
+        summary = _summary(selected)
+        summary['groups'] = [dict(zip(fields, key), **_summary(group)) for key, group in grouped.items()]
+        summary['mixed_configs'] = len(grouped) > 1
+        if summary['mixed_configs']:
+            # Counts remain useful; only each group's timing distribution is valid.
+            for field in ('median_ms', 'p95_ms', 'max_ms'):
+                summary[field] = None
+        result[phase] = summary
     return result
 
 

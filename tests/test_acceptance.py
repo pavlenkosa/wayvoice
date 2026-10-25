@@ -100,10 +100,28 @@ class AcceptanceTests(unittest.TestCase):
             {'phase': 'cold', 'ok': True, 'elapsed_ms': None},
         ]
         summary = acceptance.summarize(rows)
-        self.assertEqual(summary['cold'], {'n': 3, 'median_ms': 20,
-                                          'p95_ms': 40, 'max_ms': 40})
-        self.assertEqual(summary['warm'], {'n': 1, 'median_ms': 5,
-                                          'p95_ms': 5, 'max_ms': 5})
+        self.assertEqual(summary['cold']['n'], 3)
+        self.assertEqual(summary['cold']['median_ms'], 20)
+        self.assertEqual(summary['cold']['p95_ms'], 40)
+        self.assertEqual(summary['cold']['max_ms'], 40)
+        self.assertEqual(summary['cold']['attempted'], 8)
+        self.assertEqual(summary['cold']['ok'], 7)
+        self.assertEqual(summary['cold']['outcomes']['error'], 1)
+        self.assertEqual(summary['warm']['n'], 1)
+        self.assertEqual(summary['warm']['median_ms'], 5)
+
+    def test_summary_does_not_pool_distinct_models_and_counts_cancel(self):
+        rows = [{'phase':'warm', 'settings_sha256':key, 'model':model,
+                 'ok':True, 'elapsed_ms':ms}
+                for key, model, ms in [('a','tiny',10), ('b','small',100)]]
+        rows.append({'phase':'warm','settings_sha256':'a','model':'tiny',
+                     'ok':False,'outcome':'cancelled','elapsed_ms':None})
+        summary = acceptance.summarize(rows)['warm']
+        self.assertTrue(summary['mixed_configs'])
+        self.assertIsNone(summary['median_ms'])
+        self.assertEqual(summary['attempted'],3)
+        self.assertEqual(summary['outcomes']['cancelled'],1)
+        self.assertEqual([group['median_ms'] for group in summary['groups']],[10,100])
 
     def test_configuration_guards_are_process_local_and_preserve_desktop_runtime(self):
         acceptance.create_session(self.session)
