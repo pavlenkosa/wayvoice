@@ -30,9 +30,10 @@ def read_pyproject_version() -> str:
 def read_metainfo_version() -> str:
     root = ET.parse(ROOT / "data/io.github.stepan.WayVoice.metainfo.xml").getroot()
     releases = root.find("releases")
-    if releases is None or not list(releases):
+    entries = list(releases) if releases is not None else []
+    if not entries:
         raise SystemExit("No <release> entries in AppStream metainfo")
-    return list(releases)[0].attrib["version"]
+    return entries[0].attrib["version"]
 
 
 def main() -> int:

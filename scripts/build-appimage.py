@@ -15,6 +15,34 @@ def run(*args, **kwargs):
     return subprocess.run(args, check=True, text=True, **kwargs)
 
 
+def public_certificate_bundle(data: bytes) -> bool:
+    """Whether bytes are certificate blocks and nothing else.
+
+    Matched line by line on purpose: a single backtracking regex over the whole
+    file - arbitrary bytes of an arbitrary ".pem" in the tree - could spend
+    super-linear time on a crafted file before refusing it.
+    """
+    inside = False
+    seen = False
+    for line in (stripped.strip() for stripped in data.splitlines()):
+        if line == b'-----BEGIN CERTIFICATE-----':
+            if inside:
+                return False
+            inside = True
+        elif line == b'-----END CERTIFICATE-----':
+            if not inside:
+                return False
+            inside = False
+            seen = True
+        elif not line:
+            continue
+        elif inside and re.fullmatch(rb'[A-Za-z0-9+/=]+', line):
+            continue
+        else:
+            return False
+    return seen and not inside
+
+
 def build_container_image(source, image, dockerfile):
     run('docker', 'build', '--build-arg', f'BUILD_UID={os.getuid()}',
         '--build-arg', f'BUILD_GID={os.getgid()}', '-t', image,
@@ -60,8 +88,7 @@ def validate_tree(appdir, version, commit=None):
     forbidden = {'.git', '.env', 'AGENTS.md', 'PRODUCT_TASKS.md', 'ACCEPTANCE.md', 'ACCEPTANCE_CURRENT.md'}
     for path in appdir.rglob('*'):
         public_pem = (path.suffix == '.pem' and path.is_file() and
-                      re.fullmatch(rb'(?:\s*-----BEGIN CERTIFICATE-----\s+[A-Za-z0-9+/=\s]+-----END CERTIFICATE-----\s*)+',
-                                   path.read_bytes()) is not None)
+                      public_certificate_bundle(path.read_bytes()))
         if path.name in forbidden or path.suffix == '.key' or (path.suffix == '.pem' and not public_pem):
             # PEM is also the standard CA bundle format; permit certificates only.
 

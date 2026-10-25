@@ -66,6 +66,19 @@ class ArtifactTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'Private'):
                 build.validate_tree(self.output, '1.2.3')
 
+    def test_chained_certificate_bundle_allowed_but_broken_chain_rejected(self):
+        # A real CA bundle chains several blocks; the line-by-line checker keeps
+        # accepting that shape while a nested or unterminated block stays private.
+        pem = self.output / 'cert.pem'
+        block = b'-----BEGIN CERTIFICATE-----\nYWJj\n-----END CERTIFICATE-----\n'
+        pem.write_bytes(block + b'\n' + block)
+        build.validate_tree(self.output, '1.2.3')
+        for content in (block + block.replace(b'END CERTIFICATE', b'BEGIN CERTIFICATE') + block,
+                        block[:-len(b'-----END CERTIFICATE-----\n')]):
+            pem.write_bytes(content)
+            with self.assertRaisesRegex(ValueError, 'Private'):
+                build.validate_tree(self.output, '1.2.3')
+
     def test_private_files_and_external_links_rejected(self):
         private=self.output/'AGENTS.md'; private.touch()
         with self.assertRaisesRegex(ValueError,'Private'): build.validate_tree(self.output,'1.2.3')
