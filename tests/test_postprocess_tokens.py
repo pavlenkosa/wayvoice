@@ -31,6 +31,10 @@ class IntactTokens(unittest.TestCase):
         for token in ("3.5", "12:30", "1.2.3", "10-20", "1,5",
                       "https://example.com/page", "http://a.b/c?d=1",
                       "someone@example.com", "/home/u/report.pdf", "src/a.txt",
+                      # A doubled separator and a Windows path stay intact through
+                      # the known-extension rule after the path regex was narrowed
+                      # to keep its split points unique (no super-linear retries).
+                      "src//a.txt", "C:\\Users\\stepan\\report.pdf",
                       "report.pdf", "notes.MD", "отчёт.pdf", "заявка.docx"):
             with self.subTest(token=token):
                 self.assertTrue(_is_intact(token), f"{token} would be split")

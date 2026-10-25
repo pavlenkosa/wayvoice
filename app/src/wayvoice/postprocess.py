@@ -80,8 +80,11 @@ def _spoken_punctuation(text: str, language: str | None = "auto") -> str:
 #: out broken, and dictating those is most of what the application is for.
 _INTACT = (
     re.compile(r"\S+://\S+"),                 # https://example.com/page
-    re.compile(r"\S+@\S+\.\S+"),              # someone@example.com
-    re.compile(r"\S*[/\\]\S*\.\S+"),          # /home/u/report.pdf, src/a.txt
+    # Inside the parts of an address the separator itself is excluded: that keeps
+    # every split point unique, so a pathological token cannot send the matcher
+    # into super-linear backtracking.
+    re.compile(r"[^\s@]+@[^\s@]+\.[^\s@]+"),  # someone@example.com
+    re.compile(r"[^\s/\\]*[/\\][^\s/\\]*\.[^\s]+"),  # /home/u/report.pdf, src/a.txt
     re.compile(r"[0-9][0-9.,:/-]*[0-9]"),     # 3.5, 12:30, 1.2.3, 10-20
     # A name with an extension, but only in Latin script: "report.pdf" is one word,
     # while "конец.начало" is two Russian words that the recognizer ran together -
@@ -115,8 +118,9 @@ def _is_intact(token: str) -> bool:
 
 
 def _spacing(text: str) -> str:
-    # Spaces before punctuation.
-    text = re.sub(r"[ \t]+([,.;:!?])", r"\1", text)
+    # Spaces before punctuation. The lookahead form gives the engine one way to
+    # match each run, so a long line cannot pay for backtracking here.
+    text = re.sub(r"[ \t]+(?=[,.;:!?])", "", text)
     # One space after punctuation, except before a newline or the end. Splitting
     # runs per token rather than over the whole text, because a token is the unit
     # that is either one word or several.
@@ -129,7 +133,9 @@ def _spacing(text: str) -> str:
         token = re.sub(r"([.!?])(?=\S)", r"\1 ", token)
         parts[index] = token
     text = "".join(parts)
-    text = re.sub(r"[ \t]*\n[ \t]*", "\n", text)
+    # Newline trimming written without the [\t ]*\n[\t ]* shape: excluding the
+    # newline from the runs keeps one way to match, so no super-linear retry.
+    text = re.sub(r"[^\S\n]*\n[^\S\n]*", "\n", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = re.sub(r"[ \t]{2,}", " ", text)
     return text.strip()
