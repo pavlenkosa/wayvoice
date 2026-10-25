@@ -1,5 +1,6 @@
 """Malformed hand-edited settings remain recoverable without rewriting the file."""
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -60,7 +61,14 @@ class ConfigValidationTests(unittest.TestCase):
 
     def test_language_normalizers_defend_direct_callers_too(self):
         for value in (42, [], {}, True):
-            with self.subTest(value=value), mock.patch.object(i18n.locale, "getlocale", return_value=("en_US", "UTF-8")):
+            # resolve_language consults LC_ALL / LC_MESSAGES / LANG / LANGUAGE
+            # before the locale fallback the mock stands in for, so the message
+            # environment must be cleared too: a developer shell in ru_RU would
+            # otherwise answer before the mocked locale is ever asked.
+            with self.subTest(value=value), \
+                 mock.patch.dict(os.environ, {"LC_ALL": "", "LC_MESSAGES": "",
+                                              "LANG": "", "LANGUAGE": ""}), \
+                 mock.patch.object(i18n.locale, "getlocale", return_value=("en_US", "UTF-8")):
                 self.assertEqual(languages.normalize(value), "auto")
                 self.assertFalse(languages.is_valid(value))
                 self.assertEqual(i18n.resolve_language(value), "en")
