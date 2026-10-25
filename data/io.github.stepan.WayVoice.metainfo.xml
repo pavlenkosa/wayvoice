@@ -35,6 +35,9 @@
   <supports><control>pointing</control><control>keyboard</control></supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.9.0" date="2026-10-26">
+      <description><p>Beta release with separate recognition and delivery readiness, an explicit cancellable external paste check, adaptive GNOME controls and improved keyboard accessibility. Include the portable paste client and preserve clipboard fallback.</p></description>
+    </release>
     <release version="0.8.4" date="2026-10-23">
       <description><p>Harden recording limits, cancellation and local worker responses. Keep temporary recordings in private, process-owned sessions, preserve model preparation during interface version recovery, and report reclaimed model-cache space accurately.</p></description>
     </release>

@@ -8,7 +8,7 @@
 
 [![CI](https://github.com/pavlenkosa/wayvoice/actions/workflows/ci.yml/badge.svg)](https://github.com/pavlenkosa/wayvoice/actions/workflows/ci.yml)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
-![Status: Alpha](https://img.shields.io/badge/status-alpha-orange)
+![Status: Beta](https://img.shields.io/badge/status-beta-yellow)
 
 [Download](https://github.com/pavlenkosa/wayvoice/releases) · [Getting started](docs/getting-started.md) · [Changelog](CHANGELOG.md) · [Get help](SUPPORT.md)
 
@@ -18,7 +18,7 @@ Real English interface shown with an isolated demo state, without personal dicta
 
 ## Install
 
-Open [GitHub Releases](https://github.com/pavlenkosa/wayvoice/releases), choose a release and download a package listed in its assets. Verify it against that release's `SHA256SUMS`. Alpha releases are marked **Pre-release** and are installed manually; the native updater follows stable releases only.
+Open [GitHub Releases](https://github.com/pavlenkosa/wayvoice/releases), choose a release and download a package listed in its assets. Verify it against that release's `SHA256SUMS`. Beta releases are marked **Pre-release** and are installed manually; the native updater follows stable releases only.
 
 ```bash
 # Debian / Ubuntu
@@ -44,7 +44,7 @@ Version 0.8.0 replaces the experimental Flatpak build with an x86_64 AppImage co
 
 ## Desktop support
 
-**Alpha:** automated tests do not establish complete desktop support.
+**Beta:** automated tests do not establish complete desktop support.
 
 | Environment | Current scope |
 | --- | --- |

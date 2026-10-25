@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.0 — 2026-10-26
+
+- Enter beta as a prerelease; desktop integration and experimental Parakeet limitations remain explicit.
+- Separate recognition readiness from passive delivery prerequisites without blocking status polling.
+- Add an optional external paste check with mode selection, a cancellable five-second countdown and explicit confirmation; results remain session-only.
+- Simplify Home, adapt navigation for narrow windows, improve keyboard actions and expose persistent validation errors and accessible control names.
+- Include the paste client in AppImage while retaining the host helper requirement and clipboard fallback.
+- Group acceptance timings by configuration, count failed attempts, and retain request cleanup, owned sockets and linear text-processing safeguards.
+- Keep standard system authorization prompts; obsolete WayVoice actions for shared package-manager binaries are absent from packages.
+
 ## 0.8.4 — 2026-10-23
 
 - Keep temporary recordings in private directories with process-lifetime ownership locks; only abandoned, verified sessions are eligible for stale-file cleanup.

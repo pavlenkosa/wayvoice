@@ -38,8 +38,11 @@ class ReleasePolicyTests(unittest.TestCase):
     def validate(self, tag='v1.2.3', sha=None):
         return release.validate(self.root, tag, sha or self.sha, 'main')
 
-    def test_alpha_policy_marks_numeric_version_prerelease(self):
-        self.assertEqual(self.validate()['prerelease'], 'true')
+    def test_prerelease_channels_keep_numeric_versions_out_of_stable(self):
+        for channel in ('alpha', 'beta'):
+            with self.subTest(channel=channel):
+                (self.root / '.github/release-policy.json').write_text(json.dumps({'channel':channel}))
+                self.assertEqual(self.validate()['prerelease'], 'true')
 
     def test_stable_policy_is_explicit(self):
         (self.root / '.github/release-policy.json').write_text('{"channel":"stable"}')
