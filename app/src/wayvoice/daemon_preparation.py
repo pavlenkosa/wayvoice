@@ -156,33 +156,38 @@ class ModelPreparationController:
             result = {"state": "error", "error": str(exc)}
         finally:
             with self._lock:
-                if self.report.get("operation_id") != reported.get("operation_id"):
-                    return
-                if not isinstance(result, dict):
-                    result = {"state": "error", "error": str(result)}
-                try:
-                    done = int(result.get("done") or 0)
-                    total = int(result.get("total") or 0)
-                except (TypeError, ValueError, OverflowError) as exc:
-                    result = {"state": "error", "error": str(exc)}
-                    done = total = 0
-                self.report = {
-                    "state": str(result.get("state") or "ready"),
-                    "model": reported.get("model", ""),
-                    "operation_id": reported.get("operation_id", ""),
-                    "engine": reported.get("engine", ""),
-                    "done_bytes": done,
-                    "total_bytes": total,
-                    "error": str(result.get("error") or ""),
-                    # Whether the warm-up succeeded, not whether one is running: the
-                    # reply ends the work, and a window still saying "preparing"
-                    # would never stop.
-                    "warming": False,
-                }
-                # In the finally, so that no path out of this thread can leave the
-                # daemon permanently unable to start another preparation.
-                self.running = False
-                self.thread = None
+                # A superseded operation reports nothing and owns nothing: its result
+                # must not overwrite the newer operation's report, and `running` /
+                # `thread` now belong to that newer operation. The staleness check
+                # therefore guards the whole cleanup instead of returning from the
+                # `finally` - a `return` here would silently discard any exception
+                # still in flight, while the cleanup itself must run on every path.
+                if self.report.get("operation_id") == reported.get("operation_id"):
+                    if not isinstance(result, dict):
+                        result = {"state": "error", "error": str(result)}
+                    try:
+                        done = int(result.get("done") or 0)
+                        total = int(result.get("total") or 0)
+                    except (TypeError, ValueError, OverflowError) as exc:
+                        result = {"state": "error", "error": str(exc)}
+                        done = total = 0
+                    self.report = {
+                        "state": str(result.get("state") or "ready"),
+                        "model": reported.get("model", ""),
+                        "operation_id": reported.get("operation_id", ""),
+                        "engine": reported.get("engine", ""),
+                        "done_bytes": done,
+                        "total_bytes": total,
+                        "error": str(result.get("error") or ""),
+                        # Whether the warm-up succeeded, not whether one is running: the
+                        # reply ends the work, and a window still saying "preparing"
+                        # would never stop.
+                        "warming": False,
+                    }
+                    # In the finally, so that no path out of this thread can leave the
+                    # daemon permanently unable to start another preparation.
+                    self.running = False
+                    self.thread = None
 
     def cancel(self, operation_id=None) -> str:
         with self._lock:

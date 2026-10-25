@@ -61,3 +61,31 @@ class PreparationControllerTests(unittest.TestCase):
         self.assertFalse(self.controller.running)
         self.assertIsNone(self.controller.thread)
         self.assertEqual(self.controller.report['state'], 'error')
+
+    def test_base_exception_propagates_but_still_releases_preparation(self):
+        # A `return` inside the `finally` used to swallow everything, hiding even
+        # the interruption itself; the cleanup must run and the exception must
+        # still surface instead of vanishing into the thread.
+        self.controller.running = True
+        self.controller.report['operation_id'] = 'current'
+        with mock.patch('wayvoice.daemon_preparation.engine_from_config'), \
+             mock.patch('wayvoice.daemon_preparation.prepare_model',
+                        side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                self.controller.run({}, {'operation_id': 'current'}, True)
+        self.assertFalse(self.controller.running)
+        self.assertIsNone(self.controller.thread)
+        self.assertEqual(self.controller.report['state'], 'cancelled')
+
+    def test_base_exception_of_superseded_operation_leaves_new_report_alone(self):
+        self.controller.running = True
+        self.controller.report = {'state': 'downloading', 'operation_id': 'old'}
+        def prepare(engine, cfg, progress, cancel, warming, download):
+            self.controller.report = {'state': 'downloading', 'operation_id': 'new'}
+            raise KeyboardInterrupt
+        with mock.patch('wayvoice.daemon_preparation.engine_from_config'), \
+             mock.patch('wayvoice.daemon_preparation.prepare_model', side_effect=prepare):
+            with self.assertRaises(KeyboardInterrupt):
+                self.controller.run({}, {'operation_id': 'old'}, True)
+        self.assertEqual(self.controller.report, {'state': 'downloading', 'operation_id': 'new'})
+        self.assertTrue(self.controller.running)
