@@ -63,6 +63,22 @@ class SocketRouteTests(unittest.TestCase):
         self.assertIsNone(injector.ydotool_socket())
         self.assertFalse(injector.helper_answering())
 
+    def test_foreign_owned_socket_is_never_used_for_delivery(self):
+        # The legacy name lives in a world-writable directory. A listener planted
+        # there by another account must not be handed to the ydotool client: it
+        # could answer "pasted" while typing nothing. Delivery falls back to the
+        # clipboard instead.
+        listener = self.bind(self.legacy)
+        with mock.patch.object(injector.os, 'geteuid', return_value=os.geteuid() + 1):
+            self.assertIsNone(injector.ydotool_socket())
+            self.assertFalse(injector.helper_answering())
+            self.assertNotIn('YDOTOOL_SOCKET', injector._ydotool_env())
+        self.assertEqual(injector.ydotool_socket(), self.legacy)
+        self.assertTrue(injector.helper_answering())
+        listener.settimeout(0.01)
+        with self.assertRaises(TimeoutError):
+            listener.recv(1)  # Selection still sends nothing to the socket.
+
     def test_regular_file_does_not_hide_live_alternate(self):
         self.packaged.touch()
         self.bind(self.distro)

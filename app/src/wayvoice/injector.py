@@ -174,16 +174,29 @@ def ydotool_socket() -> Path | None:
 
     A missing socket and a socket nobody answers on need different things - a start
     and a restart - and look the same until you connect.
+
+    Only sockets owned by this user are considered. The legacy name lives in a
+    world-writable directory, where another account can plant its own listener;
+    handing the ydotool client such an impostor would report a paste that typed
+    nothing, so a foreign socket is skipped entirely - not even kept as the
+    diagnostic fallback. Dictation then delivers through the clipboard as usual.
     """
     fallback = None
     for candidate in ydotool_socket_candidates():
-        if candidate.exists():
-            if fallback is None:
-                fallback = candidate
-            # Explicit paths avoid recursively invoking discovery from the probe.
-            # Connecting sends no key events or datagrams.
-            if helper_answering(candidate):
-                return candidate
+        if not candidate.exists():
+            continue
+        try:
+            owned_by_user = candidate.stat().st_uid == os.geteuid()
+        except OSError:
+            owned_by_user = False
+        if not owned_by_user:
+            continue
+        if fallback is None:
+            fallback = candidate
+        # Explicit paths avoid recursively invoking discovery from the probe.
+        # Connecting sends no key events or datagrams.
+        if helper_answering(candidate):
+            return candidate
     return fallback
 
 
