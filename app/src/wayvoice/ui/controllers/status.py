@@ -39,8 +39,6 @@ class StatusController:
         self._offline_since = None
         self._last_cause = ""
         self._accessible_state = None
-        self._shortcut_probe_at = None
-        self._shortcut_support = None
         self._ui_busy = False
         self._restart_requested = False
         self._restart_attempts = 0
@@ -96,6 +94,8 @@ class StatusController:
             self.ctx.home.mic_button.add_css_class(style)
 
     def _poll_status(self):
+        if hasattr(self.ctx.integration, 'health_row'):
+            self.ctx.integration.refresh_health()
         if not self._poll_running:
             self._poll_running = True
             self.ctx.tasks.run(self._status_snapshot, self._apply_status_snapshot,
@@ -112,10 +112,6 @@ class StatusController:
             reply["_prepared_choices"] = self.ctx.selection.snapshot(cfg)
         reply["_transcript_epoch"] = epoch
         reply["_toggle_ack_seq"] = toggle_ack
-        now = time.monotonic()
-        if self._shortcut_probe_at is None or now - self._shortcut_probe_at >= 5:
-            self._shortcut_support = shortcut_support(self.ctx.state.ui_lang)
-            self._shortcut_probe_at = now
         portal = reply.get('shortcut_portal')
         if portal is not None:
             active = portal.get('state') == 'active' and bool(portal.get('trigger'))
@@ -127,7 +123,9 @@ class StatusController:
             reply['shortcut_support'] = (False, self.ctx.state.t('shortcut.portal.hint'))
             reply['shortcut'] = self.ctx.state.t('shortcut.disabled')
         else:
-            reply['shortcut_support'] = self._shortcut_support
+            snapshot = self.ctx.integration.health or {}
+            matched = snapshot.get('shortcut') == 'matched'
+            reply['shortcut_support'] = (matched, '' if matched else self.ctx.state.t('delivery.shortcut_' + snapshot.get('shortcut', 'unknown')))
         return (reply, cfg, self.ctx.integration._missing_required())
 
     RESTART_LIMIT = 3
@@ -311,7 +309,7 @@ class StatusController:
             elif est == "ready":
                 state = "ready"
                 self.ctx.home.mic_button.set_sensitive(True)
-                self.ctx.home.status_pill.set_text(self.ctx.state.t("status.ready"))
+                self.ctx.home.status_pill.set_text(self.ctx.state.t("delivery.recognition_ready"))
                 self.ctx.home.hero_state.set_text(self.ctx.state.t("hero.record"))
                 self.ctx.home.hero_caption.set_text(self.ctx.state.t("home.button_clipboard"))
                 self.ctx.home.mic_icon.set_from_icon_name("audio-input-microphone-symbolic")
@@ -407,6 +405,7 @@ class StatusController:
             label = f"{row.get('label')}{' (required)' if row.get('required') else ''}"
             status = "missing" if missing else "found"
             lines.append(f"  {label}: {status} ({detail or '-'})")
+        lines.append("Integration prerequisites: " + str(self.ctx.integration.health or "not checked"))
         return "\n".join(lines)
 
     def _copy_diagnostics(self, *_args):

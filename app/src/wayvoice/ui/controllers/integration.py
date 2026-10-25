@@ -5,6 +5,7 @@ from ..health_presentation import show_operation_error
 from ... import deps as deps_mod
 from ... import pkgsys
 from ... import service
+from ...integration_health import collect_health
 from ...cli import _run_setup_user
 from ..widgets.labels import clip_subtitle
 
@@ -27,7 +28,63 @@ class IntegrationController:
         self._refresh_pending = False
         self._integration_running = False
         self._integration_pending = False
+        self.health = None
+        self._health_running = False
+        self._health_pending = False
+        self._health_checked = None
+        self._health_key = None
 
+
+    def attach_health(self, group):
+        self.health_row = Adw.ActionRow(title=self.ctx.state.t('delivery.title'),
+                                       subtitle=self.ctx.state.t('delivery.unknown'))
+        retry = Gtk.Button(icon_name='view-refresh-symbolic', valign=Gtk.Align.CENTER,
+                           tooltip_text=self.ctx.state.t('health.retry'))
+        retry.connect('clicked', lambda *_: self.refresh_health(force=True))
+        self.health_row.add_suffix(retry)
+        group.add(self.health_row)
+
+    @staticmethod
+    def _config_key(cfg):
+        return tuple(cfg.get(key) for key in ('paste_mode', 'shortcut'))
+
+    def refresh_health(self, *, force=False):
+        cfg = dict(self.ctx.state.cfg)
+        key = self._config_key(cfg)
+        if key != self._health_key and self.health is not None:
+            self.health = None
+            self._paint_delivery()
+        if self._health_running:
+            self._health_pending = self._health_pending or force or key != self._health_started_key
+            return
+        if not force and key == self._health_key and self._health_checked is not None and time.monotonic()-self._health_checked < 10:
+            return
+        self._health_running = True
+        self._health_started_key = key
+        def finished(result):
+            self._health_running = False
+            if key == self._config_key(self.ctx.state.cfg):
+                self.health = result
+                self._health_checked = time.monotonic()
+                self._health_key = key
+                self._paint_delivery()
+            else:
+                self._health_pending = True
+            pending, self._health_pending = self._health_pending, False
+            if pending:
+                self.refresh_health(force=True)
+        if not self.ctx.tasks.run(lambda: collect_health(cfg), finished,
+                                  lambda _exc: finished({'delivery': 'unknown', 'reason': 'unknown'})):
+            self._health_running = False
+
+    def _paint_delivery(self):
+        snapshot = self.health or {}
+        reason = snapshot.get('reason', 'unknown')
+        text = self.ctx.state.t('delivery.' + reason)
+        if hasattr(self, 'health_row'):
+            self.health_row.set_subtitle(text)
+        if self.ctx.home is not None and hasattr(self.ctx.home, 'delivery_label'):
+            self.ctx.home.delivery_label.set_text(text)
 
     def _apply_desktop_integration(self) -> None:
         """Run the per-user setup: raise the daemon, apply the shortcut and enable the

@@ -176,3 +176,43 @@ class DesktopIntegrationResultTests(unittest.TestCase):
         controller._apply_desktop_integration()
         self.assertFalse(controller._integration_running)
         self.assertFalse(controller._integration_pending)
+
+@needs_window
+class HealthRefreshTests(unittest.TestCase):
+    def setUp(self):
+        self.ctx = controller_context()
+        self.ctx.tasks = mock.Mock()
+        self.ctx.tasks.run.return_value = True
+        self.controller = self.ctx.integration
+        self.ctx.state.cfg = {'shortcut': 'F8', 'paste_mode': 'copy'}
+
+    def test_singleflight_throttle_and_explicit_retry(self):
+        c = self.controller
+        c.refresh_health()
+        work, done, _failed = self.ctx.tasks.run.call_args.args
+        c.refresh_health()
+        self.assertEqual(self.ctx.tasks.run.call_count, 1)
+        done({'delivery':'copy_only','reason':'copy_only'})
+        c.refresh_health()
+        self.assertEqual(self.ctx.tasks.run.call_count, 1)
+        c.refresh_health(force=True)
+        self.assertEqual(self.ctx.tasks.run.call_count, 2)
+
+    def test_changed_configuration_discards_late_snapshot(self):
+        c = self.controller
+        c.refresh_health()
+        done = self.ctx.tasks.run.call_args.args[1]
+        self.ctx.state.cfg['shortcut'] = 'F9'
+        done({'reason':'prerequisites'})
+        self.assertIsNone(c.health)
+        self.assertEqual(self.ctx.tasks.run.call_count, 2)
+        self.ctx.tasks.run.call_args.args[1]({'reason':'copy_only'})
+        self.assertEqual(c.health['reason'],'copy_only')
+
+    def test_refused_job_can_be_retried(self):
+        self.ctx.tasks.run.return_value = False
+        self.controller.refresh_health()
+        self.assertFalse(self.controller._health_running)
+        self.ctx.tasks.run.return_value = True
+        self.controller.refresh_health()
+        self.assertTrue(self.controller._health_running)

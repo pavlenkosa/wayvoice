@@ -175,10 +175,8 @@ def ydotool_socket() -> Path | None:
     A missing socket and a socket nobody answers on need different things - a start
     and a restart - and look the same until you connect.
     """
-    runtime = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}")
     fallback = None
-    for candidate in (runtime / "wayvoice-ydotool.sock", runtime / DEFAULT_SOCKET_NAME,
-                      Path(LEGACY_SOCKET)):
+    for candidate in ydotool_socket_candidates():
         if candidate.exists():
             if fallback is None:
                 fallback = candidate
@@ -187,6 +185,12 @@ def ydotool_socket() -> Path | None:
             if helper_answering(candidate):
                 return candidate
     return fallback
+
+
+def ydotool_socket_candidates() -> tuple[Path, ...]:
+    """Shared discovery order for delivery and passive diagnostics."""
+    runtime = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}")
+    return (runtime / 'wayvoice-ydotool.sock', runtime / DEFAULT_SOCKET_NAME, Path(LEGACY_SOCKET))
 
 
 def helper_answering(path: Path | None = None, timeout: float = 0.2) -> bool:

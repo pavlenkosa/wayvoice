@@ -1124,3 +1124,42 @@ _TRANSLATIONS_09 = {'en': {'menu.main': 'Main Menu', 'audio.level': 'Microphone 
                     'ru': {'menu.main': 'Главное меню', 'audio.level': 'Уровень микрофона'}}
 for _language, _labels in _TRANSLATIONS_09.items():
     _TRANSLATIONS[_language].update(_labels)
+
+_DELIVERY_LABELS = {
+'en': {'title': 'Text Delivery', 'unknown': 'Delivery has not been checked.',
+'prerequisites': 'Auto-paste tools found; test input in your application.',
+'copy_only': 'Clipboard only; paste the text into your application.',
+'client_missing': 'Clipboard tool found; install the auto-paste helper to enable automatic input.',
+'helper_missing': 'Clipboard fallback: the auto-paste helper is not running.',
+'helper_stale': 'Clipboard fallback: the helper socket is stale.',
+'helper_permission_denied': 'Clipboard fallback: access to the helper socket is denied.',
+'helper_timeout': 'Clipboard fallback: the helper check timed out.',
+'helper_unknown': 'Clipboard fallback: helper availability is unknown.',
+'clipboard_missing': 'Clipboard tool missing. Open dependency settings.',
+'clipboard_no_session': 'No Wayland session detected; clipboard access is unverified.',
+'clipboard_unknown': 'Clipboard access is unverified.', 'timeout': 'Integration check timed out; input remains unverified.',
+'shortcut_unknown': 'Shortcut has not been checked.', 'shortcut_matched': 'Shortcut assignment matches; test the actual key.',
+'shortcut_manual': 'Configure and test the shortcut in desktop settings.', 'shortcut_disabled': 'Global shortcut disabled.',
+'shortcut_missing': 'The configured GNOME shortcut is missing.', 'shortcut_mismatch': 'The GNOME shortcut differs from saved settings.',
+'shortcut_timeout': 'Shortcut check timed out.', 'shortcut_permission_denied': 'Shortcut settings access denied.'},
+'ru': {'title': 'Доставка текста', 'unknown': 'Доставка текста ещё не проверена.',
+'prerequisites': 'Средства автовставки найдены; проверьте ввод в нужном приложении.',
+'copy_only': 'Только буфер обмена; вставьте текст в нужное приложение.',
+'client_missing': 'Средства копирования найдены; для автовставки нужен помощник ввода.',
+'helper_missing': 'Только буфер: помощник автовставки не запущен.',
+'helper_stale': 'Только буфер: socket помощника устарел.',
+'helper_permission_denied': 'Только буфер: нет доступа к socket помощника.',
+'helper_timeout': 'Только буфер: истекло время проверки помощника.',
+'helper_unknown': 'Только буфер: доступность помощника неизвестна.',
+'clipboard_missing': 'Нет программы для буфера обмена. Откройте зависимости.',
+'clipboard_no_session': 'Сессия Wayland не обнаружена; доступ к буферу не проверен.',
+'clipboard_unknown': 'Доступ к буферу не проверен.', 'timeout': 'Истекло время проверки интеграции; ввод не проверен.',
+'shortcut_unknown': 'Горячая клавиша ещё не проверена.', 'shortcut_matched': 'Назначение совпадает; проверьте срабатывание клавиши.',
+'shortcut_manual': 'Назначьте и проверьте клавишу в настройках рабочего стола.', 'shortcut_disabled': 'Глобальная клавиша отключена.',
+'shortcut_missing': 'Назначение клавиши GNOME отсутствует.', 'shortcut_mismatch': 'Назначение GNOME отличается от сохранённого.',
+'shortcut_timeout': 'Истекло время проверки клавиши.', 'shortcut_permission_denied': 'Нет доступа к настройкам клавиши.'}}
+for _language, _labels in _DELIVERY_LABELS.items():
+    _TRANSLATIONS[_language].update({'delivery.' + key: value for key, value in _labels.items()})
+
+_EN['delivery.recognition_ready'] = 'Recognition Ready'
+_RU['delivery.recognition_ready'] = 'Распознавание готово'

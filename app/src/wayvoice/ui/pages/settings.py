@@ -72,6 +72,9 @@ class SettingsPage:
         self.audio_feedback.set_active(bool(self.ctx.state.cfg.get("audio_feedback", False)))
         audio.add(self.audio_feedback)
         page.add(audio)
+        delivery = Adw.PreferencesGroup(title=self.ctx.state.t('delivery.title'))
+        self.ctx.integration.attach_health(delivery)
+        page.add(delivery)
 
         profiles = Adw.PreferencesGroup(title=self.ctx.state.t("profiles.title"),
                                         description=self.ctx.state.t("profiles.description"))
