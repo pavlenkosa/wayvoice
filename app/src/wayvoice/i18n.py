@@ -1163,3 +1163,29 @@ for _language, _labels in _DELIVERY_LABELS.items():
 
 _EN['delivery.recognition_ready'] = 'Recognition Ready'
 _RU['delivery.recognition_ready'] = 'Распознавание готово'
+
+_DELIVERY_TEST = {
+'en': {'title':'Check Text Input', 'notice':'This test replaces the clipboard. Choose a paste mode, start the five-second countdown, then switch to a text field. No Enter is sent. The previous clipboard is not restored. Return here yourself to confirm the result.',
+'mode':'Test Paste Mode', 'standard':'Standard (Ctrl+V)', 'terminal':'Terminal (Ctrl+Shift+V)', 'copy':'Clipboard Only',
+'idle':'Input has not been tested.', 'countdown':'Switch to the target text field: {seconds} seconds.',
+'sending':'Sending the test. Cancellation may leave the clipboard changed.',
+'command_sent':'Paste command sent. Did the text appear in the target field?',
+'copied':'Copied to the clipboard. Paste manually, then confirm the result.',
+'failed':'Delivery check failed.', 'cancelled':'Cancelled before sending keys. The clipboard may have changed.',
+'interrupted':'Check interrupted; text may already have been copied or sent.',
+'confirmed':'Text received, confirmed by the user.', 'not_received':'Text not received, reported by the user.',
+'start':'Start Five-Second Test', 'yes':'Text Appeared', 'no':'Text Did Not Appear',
+'previous':'Last session check at {when}, {mode}: {outcome}'},
+'ru': {'title':'Проверить ввод текста', 'notice':'Проверка заменит буфер обмена. Выберите режим, начните отсчёт и за пять секунд перейдите в нужное текстовое поле. Enter не отправляется. Прежний буфер не восстанавливается. Вернитесь сюда самостоятельно и подтвердите результат.',
+'mode':'Режим тестовой вставки', 'standard':'Обычный (Ctrl+V)', 'terminal':'Терминал (Ctrl+Shift+V)', 'copy':'Только буфер обмена',
+'idle':'Ввод ещё не проверен.', 'countdown':'Перейдите в нужное поле: осталось {seconds} с.',
+'sending':'Отправка теста. При отмене буфер уже может измениться.',
+'command_sent':'Команда вставки отправлена. Текст появился в нужном поле?',
+'copied':'Текст скопирован. Вставьте его вручную и подтвердите результат.',
+'failed':'Проверка доставки не удалась.', 'cancelled':'Отменено до отправки клавиш. Буфер мог измениться.',
+'interrupted':'Проверка прервана; текст уже мог быть скопирован или отправлен.',
+'confirmed':'Получение текста подтверждено пользователем.', 'not_received':'Пользователь сообщил, что текст не появился.',
+'start':'Начать тест через пять секунд', 'yes':'Текст появился', 'no':'Текст не появился',
+'previous':'Последняя проверка в этой сессии: {when}, {mode}: {outcome}'}}
+for _language, _labels in _DELIVERY_TEST.items():
+    _TRANSLATIONS[_language].update({'delivery_test.' + key: value for key, value in _labels.items()})

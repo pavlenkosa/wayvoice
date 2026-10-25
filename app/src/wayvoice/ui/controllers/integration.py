@@ -43,6 +43,10 @@ class IntegrationController:
         retry.connect('clicked', lambda *_: self.refresh_health(force=True))
         self.health_row.add_suffix(retry)
         group.add(self.health_row)
+        from ..delivery_test import show_delivery_test
+        test = Gtk.Button(label=self.ctx.state.t('delivery_test.title'), halign=Gtk.Align.START)
+        test.connect('clicked', lambda *_: show_delivery_test(self.ctx.window))
+        group.add(test)
 
     @staticmethod
     def _config_key(cfg):

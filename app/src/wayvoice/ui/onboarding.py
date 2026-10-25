@@ -38,7 +38,7 @@ class OnboardingWindow(Adw.ApplicationWindow):
         self._render()
 
     def t(self, key, **values):
-        return tr('onboard.' + key, self.language, **values)
+        return tr(key if key.startswith(('delivery_test.', 'common.')) else 'onboard.' + key, self.language, **values)
 
     def _label(self, text, style=None):
         label = Gtk.Label(label=text, wrap=True, xalign=0.5, justify=Gtk.Justification.CENTER)
@@ -169,6 +169,8 @@ class OnboardingWindow(Adw.ApplicationWindow):
         self.error = self._label('')
         self.error.set_selectable(True)
         self.body.append(self.error)
+        from .delivery_test import show_delivery_test
+        self._button(tr('delivery_test.title', self.language), lambda *_: show_delivery_test(self))
         self.primary = self._button(self.t('open'), self._finish, True)
 
     def _go(self, step):
